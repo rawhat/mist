@@ -1,4 +1,4 @@
-# dew
+# mist
 
 A (hopefully) nice, basic gleam web server
 
@@ -7,10 +7,10 @@ A (hopefully) nice, basic gleam web server
 This package can be added to your Gleam project:
 
 ```sh
-gleam add dew
+gleam add mist
 ```
 
-and its documentation can be found at <https://hexdocs.pm/dew>.
+and its documentation can be found at <https://hexdocs.pm/mist>.
 
 ## Examples
 
@@ -40,8 +40,8 @@ pub fn handler(req: Request(BitString)) -> Response(BitString) {
   |> response.set_body(req.body)
 }
 pub fn main() {
-  assert Ok(socket) = dew.listen(8000, [])
-  try _ = dew.start_acceptor_pool(socket, make_handler(handler), 10)
+  assert Ok(socket) = mist.listen(8000, [])
+  try _ = mist.start_acceptor_pool(socket, make_handler(handler), 10)
 
   Ok(erlang.sleep_forever())
 }

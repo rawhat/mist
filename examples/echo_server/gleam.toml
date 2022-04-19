@@ -11,7 +11,7 @@ version = "0.1.0"
 
 [dependencies]
 gleam_stdlib = "~> 0.20"
-dew = "~> 0.1"
+mist = "~> 0.1"
 gleam_erlang = "~> 0.9"
 gleam_http = "~> 3.0"
 

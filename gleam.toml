@@ -1,9 +1,9 @@
-name = "dew"
+name = "mist"
 version = "0.1.3"
 
 licences = ["Apache-2.0"]
-description = "a glistening gleam web server"
-repository = { type = "github", user = "rawhat", repo = "dew" }
+description = "a misty gleam web server"
+repository = { type = "github", user = "rawhat", repo = "mist" }
 
 [dependencies]
 gleam_stdlib = "~> 0.20"

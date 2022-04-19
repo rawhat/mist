@@ -3,7 +3,7 @@ import gleam/http as ghttp
 import gleam/http/request
 import gleeunit
 import gleeunit/should
-import dew.{parse_request}
+import mist.{parse_request}
 
 pub fn main() {
   gleeunit.main()
