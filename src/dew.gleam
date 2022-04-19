@@ -224,15 +224,3 @@ pub fn start_acceptor_pool(
 ) -> Result(Nil, Nil) {
   tcp.start_acceptor_pool(listener_socket, handler, pool_count)
 }
-
-import gleam/erlang
-pub fn handler(req: Request(BitString)) -> Response(BitString) {
-  response.new(200)
-  |> response.set_body(req.body)
-}
-pub fn main() {
-  assert Ok(socket) = listen(8000, [])
-  try _ = start_acceptor_pool(socket, make_handler(handler), 10)
-
-  Ok(erlang.sleep_forever())
-}
