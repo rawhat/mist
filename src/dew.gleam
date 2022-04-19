@@ -207,3 +207,20 @@ pub fn make_handler(handler: HttpHandler) -> LoopFn {
     }
   }
 }
+
+/// Re-exported from `glisten`
+pub fn listen(
+  port: Int,
+  options: List(tcp.TcpOption),
+) -> Result(tcp.ListenSocket, tcp.SocketReason) {
+  tcp.listen(port, options)
+}
+
+/// Re-exported from `glisten`
+pub fn start_acceptor_pool(
+  listener_socket: tcp.ListenSocket,
+  handler: LoopFn,
+  pool_count: Int,
+) -> Result(Nil, Nil) {
+  tcp.start_acceptor_pool(listener_socket, handler, pool_count)
+}

@@ -41,8 +41,8 @@ pub fn handler(req: Request(BitString)) -> Response(BitString) {
   |> response.set_body(req.body)
 }
 pub fn main() {
-  assert Ok(socket) = tcp.do_listen_tcp(8000, [])
-  try _ = tcp.start_acceptor_pool(socket, make_handler(handler), 10)
+  assert Ok(socket) = dew.listen(8000, [])
+  try _ = dew.start_acceptor_pool(socket, make_handler(handler), 10)
 
   Ok(erlang.sleep_forever())
 }
