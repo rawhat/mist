@@ -14,8 +14,7 @@ and its documentation can be found at <https://hexdocs.pm/dew>.
 
 ## Examples
 
-Just some basic handler examples that do also exist in this repo, but probably
-won't once it's actually in better shape.
+See the `examples/` folder for the full sample(s).
 
 #### HTTP Hello World
 ```gleam
