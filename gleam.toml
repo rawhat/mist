@@ -1,0 +1,16 @@
+name = "dew"
+version = "0.1.0"
+
+licences = ["Apache-2.0"]
+description = "a glistening gleam web server"
+repository = { type = "github", user = "rawhat", repo = "dew" }
+
+[dependencies]
+gleam_stdlib = "~> 0.20"
+gleam_erlang = "~> 0.9"
+gleam_http = "~> 3.0"
+gleam_otp = "~> 0.4"
+glisten = "~> 0.1"
+
+[dev-dependencies]
+gleeunit = "~> 0.6"
