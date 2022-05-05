@@ -14,9 +14,7 @@ import gleam/otp/actor
 import gleam/otp/process
 import gleam/result
 import gleam/string
-import mist/glisten/glisten/tcp.{
-  LoopFn, ReceiveMessage, Tcp, TcpClosed, send,
-}
+import mist/tcp.{LoopFn, ReceiveMessage, Tcp, TcpClosed, send}
 
 pub type PacketType {
   Http
@@ -27,13 +25,13 @@ pub type HttpUri {
   AbsPath(Charlist)
 }
 
-pub type HttpPacket {
-  HttpRequest(Atom, HttpUri, #(Int, Int))
-  HttpHeader(Int, Atom, BitString, BitString)
+pub type Packet {
+  Request(Atom, HttpUri, #(Int, Int))
+  Header(Int, Atom, BitString, BitString)
 }
 
 pub type DecodedPacket {
-  BinaryData(HttpPacket, BitString)
+  BinaryData(Packet, BitString)
   EndOfHeaders(BitString)
   MoreData(Option(Int))
 }
@@ -48,7 +46,7 @@ external fn decode_packet(
   packet: BitString,
   options: List(a),
 ) -> Result(DecodedPacket, DecodeError) =
-  "glisten_ffi" "decode_packet"
+  "tcp_ffi" "decode_packet"
 
 pub fn from_header(value: BitString) -> String {
   assert Ok(value) = bit_string.to_string(value)
@@ -61,7 +59,7 @@ pub fn parse_headers(
   headers: List(http.Header),
 ) -> Result(#(List(http.Header), BitString), DecodeError) {
   case decode_packet(HttphBin, bs, []) {
-    Ok(BinaryData(HttpHeader(_, _field, field, value), rest)) -> {
+    Ok(BinaryData(Header(_, _field, field, value), rest)) -> {
       let field = from_header(field)
       assert Ok(value) = bit_string.to_string(value)
       parse_headers(rest, [#(field, value), ..headers])
@@ -74,7 +72,7 @@ pub fn parse_headers(
 /// Turns the TCP message into an HTTP request
 pub fn parse_request(bs: BitString) -> Result(Request(BitString), DecodeError) {
   try BinaryData(req, rest) = decode_packet(Http, bs, [])
-  assert HttpRequest(method, AbsPath(path), _version) = req
+  assert Request(method, AbsPath(path), _version) = req
 
   try method =
     method
@@ -90,7 +88,7 @@ pub fn parse_request(bs: BitString) -> Result(Request(BitString), DecodeError) {
     |> request.set_method(method)
     |> request.set_path(charlist.to_string(path))
 
-  Ok(Request(..req, headers: headers))
+  Ok(request.Request(..req, headers: headers))
 }
 
 pub fn code_to_string(code: Int) -> String {
@@ -180,46 +178,53 @@ pub fn http_response(status: Int, body: BitString) -> BitString {
   |> to_string
 }
 
-pub type HttpHandler =
+pub type Handler =
   fn(Request(BitString)) -> Response(BitString)
+
+pub type HttpHandler(data) {
+  HttpHandler(func: LoopFn(data), state: data)
+}
 
 /// Convert your classic `HTTP handler` into a TCP message handler.
 /// You probably want to use this
-pub fn make_handler(handler: HttpHandler) -> LoopFn(Nil) {
-  fn(msg, state) {
-    let #(socket, _state) = state
-    case msg {
-      Tcp(_, _) -> {
-        io.print("this should not happen")
-        actor.Continue(state)
-      }
-      TcpClosed(_msg) -> actor.Stop(process.Normal)
-      ReceiveMessage(data) -> {
-        case parse_request(
-          data
-          |> charlist.to_string
-          |> bit_string.from_string,
-        ) {
-          Ok(req) -> {
-            assert Ok(resp) =
-              req
-              |> handler
-              |> to_string
-              |> bit_string.to_string
-            assert Ok(Nil) = send(socket, charlist.from_string(resp))
-          }
-          Error(_) -> {
-            assert Ok(error) =
-              400
-              |> response.new
-              |> response.set_body(bit_string.from_string(""))
-              |> to_string
-              |> bit_string.to_string
-            assert Ok(Nil) = send(socket, charlist.from_string(error))
-          }
+pub fn make_handler(handler: Handler) -> HttpHandler(Nil) {
+  HttpHandler(
+    func: fn(msg, state) {
+      let #(socket, _state) = state
+      case msg {
+        Tcp(_, _) -> {
+          io.print("this should not happen")
+          actor.Continue(state)
         }
-        actor.Stop(process.Normal)
+        TcpClosed(_msg) -> actor.Stop(process.Normal)
+        ReceiveMessage(data) -> {
+          case parse_request(
+            data
+            |> charlist.to_string
+            |> bit_string.from_string,
+          ) {
+            Ok(req) -> {
+              assert Ok(resp) =
+                req
+                |> handler
+                |> to_string
+                |> bit_string.to_string
+              assert Ok(Nil) = send(socket, charlist.from_string(resp))
+            }
+            Error(_) -> {
+              assert Ok(error) =
+                400
+                |> response.new
+                |> response.set_body(bit_string.from_string(""))
+                |> to_string
+                |> bit_string.to_string
+              assert Ok(Nil) = send(socket, charlist.from_string(error))
+            }
+          }
+          actor.Stop(process.Normal)
+        }
       }
-    }
-  }
+    },
+    state: Nil,
+  )
 }

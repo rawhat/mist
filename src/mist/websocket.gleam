@@ -9,26 +9,24 @@ import gleam/otp/actor
 import gleam/otp/process
 import gleam/result
 import gleam/string
-import mist/http.{parse_request, to_string}
-import mist/glisten/glisten/tcp.{
-  LoopFn, ReceiveMessage, Socket, TcpClosed, send,
+import mist/http.{HttpHandler, parse_request, to_string}
+import mist/tcp.{ReceiveMessage, Socket, TcpClosed, send}
+
+pub type State {
+  State(upgraded: Bool)
 }
 
-pub type WebsocketState {
-  WebsocketState(upgraded: Bool)
-}
-
-pub fn new_state() -> WebsocketState {
-  WebsocketState(upgraded: False)
+pub fn new_state() -> State {
+  State(upgraded: False)
 }
 
 // TODO:  need binary here as well
-pub type WebsocketMessage {
+pub type Message {
   TextMessage(data: String)
 }
 
-pub type WebsocketHandler =
-  fn(WebsocketMessage, Socket, WebsocketState) -> #(Socket, WebsocketState)
+pub type Handler =
+  fn(Message, Socket, State) -> #(Socket, State)
 
 external fn charlist_to_binary(char: Charlist) -> BitString =
   "erlang" "list_to_binary"
@@ -38,7 +36,7 @@ external fn bin_to_charlist(bs: BitString) -> Charlist =
 
 // TODO:  there are other message types, AND ALSO will need to buffer across
 // multiple frames, potentially
-pub type WebsocketFrame {
+pub type Frame {
   TextFrame(payload_length: Int, payload: String)
   // We don't care about basicaly everything else
   PingFrame(payload_length: Int, payload: String)
@@ -82,7 +80,7 @@ fn unmask_data(
   }
 }
 
-pub fn frame_from_message(message: Charlist) -> Result(WebsocketFrame, Nil) {
+pub fn frame_from_message(message: Charlist) -> Result(Frame, Nil) {
   assert <<
     _fin:1,
     _reserved:3,
@@ -108,7 +106,7 @@ pub fn frame_from_message(message: Charlist) -> Result(WebsocketFrame, Nil) {
 }
 
 // TODO:  support other message types here too
-pub fn message_to_frame(data: String) -> WebsocketFrame {
+pub fn message_to_frame(data: String) -> Frame {
   TextFrame(
     payload_length: data
     |> bit_string.from_string
@@ -117,7 +115,7 @@ pub fn message_to_frame(data: String) -> WebsocketFrame {
   )
 }
 
-pub fn frame_to_charlist(frame: WebsocketFrame) -> Charlist {
+pub fn frame_to_charlist(frame: Frame) -> Charlist {
   case frame {
     TextFrame(payload_length, payload) -> {
       let fin = 1
@@ -145,40 +143,39 @@ pub fn ws_send(socket: Socket, data: String) -> Result(Nil, tcp.SocketReason) {
   resp
 }
 
-pub fn websocket_handler(handler: WebsocketHandler) -> LoopFn(WebsocketState) {
-  fn(msg, state) {
-    let #(socket, WebsocketState(upgraded) as ws_state) = state
-    case msg, upgraded {
-      ReceiveMessage(data), False ->
-        case data
-        |> charlist.to_string
-        |> bit_string.from_string
-        |> parse_request {
-          Ok(req) -> {
-            assert Ok(resp) = upgrade_socket(req)
-            assert Ok(_) =
-              resp
-              |> to_string
-              |> bit_string.to_string
-              |> result.map(charlist.from_string)
-              |> result.map(send(socket, _))
-            actor.Continue(#(socket, WebsocketState(True)))
+pub fn handler(handler: Handler) -> HttpHandler(State) {
+  HttpHandler(
+    func: fn(msg, state) {
+      let #(socket, State(upgraded) as ws_state) = state
+      case msg, upgraded {
+        ReceiveMessage(data), False ->
+          case data
+          |> charlist.to_string
+          |> bit_string.from_string
+          |> parse_request {
+            Ok(req) -> {
+              assert Ok(resp) = upgrade_socket(req)
+              assert Ok(_) =
+                resp
+                |> to_string
+                |> bit_string.to_string
+                |> result.map(charlist.from_string)
+                |> result.map(send(socket, _))
+              actor.Continue(#(socket, State(True)))
+            }
+            _ -> actor.Stop(process.Normal)
           }
-          _ -> {
-            actor.Stop(process.Normal)
-          }
+        ReceiveMessage(data), True -> {
+          assert Ok(TextFrame(payload: data, ..)) = frame_from_message(data)
+          let next = handler(TextMessage(data), socket, ws_state)
+          actor.Continue(next)
         }
-      ReceiveMessage(data), True -> {
-        assert Ok(TextFrame(payload: data, ..)) = frame_from_message(data)
-        let next = handler(TextMessage(data), socket, ws_state)
-        actor.Continue(next)
+        TcpClosed(_), _ -> actor.Continue(state)
+        _msg, _ -> actor.Continue(state)
       }
-      TcpClosed(_), _ -> actor.Continue(state)
-      _msg, _ -> {
-        actor.Continue(state)
-      }
-    }
-  }
+    },
+    state: State(False),
+  )
 }
 
 const websocket_key = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -194,10 +191,10 @@ pub external fn base64_encode(data: String) -> String =
   "base64" "encode"
 
 pub fn parse_key(key: String) -> String {
-    key
-    |> string.append(websocket_key)
-    |> crypto_hash(Sha, _)
-    |> base64_encode
+  key
+  |> string.append(websocket_key)
+  |> crypto_hash(Sha, _)
+  |> base64_encode
 }
 
 pub fn upgrade_socket(
@@ -227,10 +224,10 @@ pub fn upgrade_socket(
 }
 
 pub fn echo_handler(
-  msg: WebsocketMessage,
+  msg: Message,
   socket: Socket,
-  state: WebsocketState,
-) -> #(Socket, WebsocketState) {
+  state: State,
+) -> #(Socket, State) {
   assert Ok(_resp) = ws_send(socket, msg.data)
 
   #(socket, state)
