@@ -7,7 +7,6 @@ packages = [
   { name = "gleam_otp", version = "0.4.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_stdlib"], otp_app = "gleam_otp", source = "hex", outer_checksum = "3F05090CEDFBA5B6DE2AEE20868F92E815D287E71807DAD5663DAA1B566953C2" },
   { name = "gleam_stdlib", version = "0.20.0", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "E5715F0CDCB3AB1BB73C6C35E46DA223997F680550E17CE46BC88B710E061CCE" },
   { name = "gleeunit", version = "0.6.1", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleeunit", source = "hex", outer_checksum = "5BF486C3E135B7F5ED8C054925FC48E5B2C79016A39F416FD8CF2E860520EE55" },
-  { name = "glisten", version = "0.1.3", build_tools = ["gleam"], requirements = ["gleam_otp", "gleam_http", "gleam_stdlib"], otp_app = "glisten", source = "hex", outer_checksum = "0657CD1B36DB95D733CD9253B3E2EEF09ECCC13907D7EC61BEFCFE19070EE90C" },
 ]
 
 [requirements]
@@ -16,4 +15,3 @@ gleam_http = "~> 3.0"
 gleam_otp = "~> 0.4"
 gleam_stdlib = "~> 0.20"
 gleeunit = "~> 0.6"
-glisten = "~> 0.1"
