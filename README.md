@@ -1,6 +1,6 @@
 # mist
 
-A (hopefully) nice, basic gleam web server
+A (hopefully) nice, basic Gleam web server
 
 ## Installation
 
@@ -35,14 +35,14 @@ pub fn ok(_msg: HandlerMessage, sock: Socket) -> actor.Next(Socket) {
 
 #### Full HTTP echo handler
 ```gleam
-pub fn handler(req: Request(BitString)) -> Response(BitString) {
+pub fn service(req: Request(BitString)) -> Response(BitString) {
   response.new(200)
   |> response.set_body(req.body)
 }
+
 pub fn main() {
   assert Ok(socket) = mist.listen(8000, [])
-  try _ = mist.start_acceptor_pool(socket, make_handler(handler), 10)
-
+  assert Ok(_) = mist.start_acceptor_pool(socket, make_handler(service), 10)
   Ok(erlang.sleep_forever())
 }
 ```
