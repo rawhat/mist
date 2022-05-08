@@ -29,6 +29,7 @@ pub fn hello_world(_msg: HandlerMessage, sock: Socket) -> actor.Next(Socket) {
   actor.Stop(process.Normal)
 }
 
+/// Reasons that `serve` might fail
 pub type StartError {
   ListenerClosed
   ListenerTimeout
@@ -37,6 +38,9 @@ pub type StartError {
   AcceptorCrashed(Dynamic)
 }
 
+/// Sets up a TCP server listener at the provided port. Also takes the
+/// HttpHandler, which holds the handler function.  There are currently two
+/// options for ease of use: `http.handler` and `ws.handler`.
 pub fn serve(port: Int, handler: HttpHandler(data)) -> Result(Nil, StartError) {
   try _ =
     port
@@ -59,13 +63,12 @@ pub fn serve(port: Int, handler: HttpHandler(data)) -> Result(Nil, StartError) {
       })
     })
 
-  erlang.sleep_forever()
-
   Ok(Nil)
 }
 
 pub fn echo_ws_server() {
-  serve(8080, websocket.handler(echo_handler))
+  assert Ok(_) = serve(8080, websocket.handler(echo_handler))
+  erlang.sleep_forever()
 }
 
 pub fn echo_server() {
@@ -74,9 +77,6 @@ pub fn echo_server() {
     |> response.set_body(req.body)
   }
 
-  serve(8080, http.make_handler(handler))
-}
-
-pub fn main() {
-  echo_ws_server()
+  assert Ok(_) = serve(8080, http.handler(handler))
+  erlang.sleep_forever()
 }

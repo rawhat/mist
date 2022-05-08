@@ -12,10 +12,6 @@ gleam add mist
 
 and its documentation can be found at <https://hexdocs.pm/mist>.
 
-## Examples
-
-See the `examples/` folder for the full sample(s).
-
 #### HTTP Hello World
 ```gleam
 pub fn ok(_msg: HandlerMessage, sock: Socket) -> actor.Next(Socket) {
@@ -35,15 +31,33 @@ pub fn ok(_msg: HandlerMessage, sock: Socket) -> actor.Next(Socket) {
 
 #### Full HTTP echo handler
 ```gleam
-pub fn service(req: Request(BitString)) -> Response(BitString) {
-  response.new(200)
-  |> response.set_body(req.body)
+pub fn main() {
+  let service = fn(req: Request(BitString)) -> Response(BitString) {
+    response.new(200)
+    |> response.set_body(req.body)
+  }
+
+  assert Ok(_resp) = serve(8080, http.handler(service))
+  erlang.sleep_forever()
+
+}
+```
+
+#### Websocket echo handler
+```gleam
+pub fn echo_handler(
+  msg: Message,
+  socket: Socket,
+  state: State,
+) -> #(Socket, State) {
+  assert Ok(_resp) = ws_send(socket, msg.data)
+
+  #(socket, state)
 }
 
 pub fn main() {
-  assert Ok(socket) = mist.listen(8000, [])
-  assert Ok(_) = mist.start_acceptor_pool(socket, make_handler(service), 10)
-  Ok(erlang.sleep_forever())
+  assert Ok(_) = serve(8080, websocket.handler(echo_handler))
+  erlang.sleep_forever()
 }
 ```
 

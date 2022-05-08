@@ -38,22 +38,9 @@ external fn bin_to_charlist(bs: BitString) -> Charlist =
 // multiple frames, potentially
 pub type Frame {
   TextFrame(payload_length: Int, payload: String)
-  // We don't care about basicaly everything else
+  // We don't care about basicaly everything else for now
   PingFrame(payload_length: Int, payload: String)
   PongFrame(payload_length: Int, payload: String)
-}
-
-pub fn xor(a: BitString, b: BitString, resp: BitString) -> BitString {
-  case a, b {
-    <<>>, <<>> -> resp
-    <<0:1, a_rest:bit_string>>, <<1:1, b_rest:bit_string>> | <<
-      1:1,
-      a_rest:bit_string,
-    >>, <<0:1, b_rest:bit_string>> ->
-      xor(a_rest, b_rest, <<resp:bit_string, 1:1>>)
-    <<_, a_rest:bit_string>>, <<_, b_rest:bit_string>> ->
-      xor(a_rest, b_rest, <<resp:bit_string, 0:1>>)
-  }
 }
 
 external fn crypto_exor(a: BitString, b: BitString) -> BitString =
@@ -82,6 +69,7 @@ fn unmask_data(
 
 pub fn frame_from_message(message: Charlist) -> Result(Frame, Nil) {
   assert <<
+    // TODO: handle this not being finished
     _fin:1,
     _reserved:3,
     opcode:int-size(4),
@@ -143,7 +131,7 @@ pub fn ws_send(socket: Socket, data: String) -> Result(Nil, tcp.SocketReason) {
   resp
 }
 
-pub fn handler(handler: Handler) -> HttpHandler(State) {
+pub fn handler(handler func: Handler) -> HttpHandler(State) {
   HttpHandler(
     func: fn(msg, state) {
       let #(socket, State(upgraded) as ws_state) = state
@@ -167,7 +155,7 @@ pub fn handler(handler: Handler) -> HttpHandler(State) {
           }
         ReceiveMessage(data), True -> {
           assert Ok(TextFrame(payload: data, ..)) = frame_from_message(data)
-          let next = handler(TextMessage(data), socket, ws_state)
+          let next = func(TextMessage(data), socket, ws_state)
           actor.Continue(next)
         }
         TcpClosed(_), _ -> actor.Continue(state)
@@ -209,9 +197,6 @@ pub fn upgrade_socket(
   try _version =
     request.get_header(req, "sec-websocket-version")
     |> result.replace_error(req)
-
-  io.debug(key)
-  io.debug(websocket_key)
 
   let accept_key = parse_key(key)
 

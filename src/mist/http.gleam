@@ -4,10 +4,9 @@ import gleam/bit_string
 import gleam/erlang/atom.{Atom}
 import gleam/erlang/charlist.{Charlist}
 import gleam/http
-import gleam/http/request.{Request}
+import gleam/http/request
 import gleam/http/response.{Response}
 import gleam/int
-import gleam/io
 import gleam/list
 import gleam/option.{Option}
 import gleam/otp/actor
@@ -25,13 +24,13 @@ pub type HttpUri {
   AbsPath(Charlist)
 }
 
-pub type Packet {
-  Request(Atom, HttpUri, #(Int, Int))
-  Header(Int, Atom, BitString, BitString)
+pub type HttpPacket {
+  HttpRequest(Atom, HttpUri, #(Int, Int))
+  HttpHeader(Int, Atom, BitString, BitString)
 }
 
 pub type DecodedPacket {
-  BinaryData(Packet, BitString)
+  BinaryData(HttpPacket, BitString)
   EndOfHeaders(BitString)
   MoreData(Option(Int))
 }
@@ -59,7 +58,7 @@ pub fn parse_headers(
   headers: List(http.Header),
 ) -> Result(#(List(http.Header), BitString), DecodeError) {
   case decode_packet(HttphBin, bs, []) {
-    Ok(BinaryData(Header(_, _field, field, value), rest)) -> {
+    Ok(BinaryData(HttpHeader(_, _field, field, value), rest)) -> {
       let field = from_header(field)
       assert Ok(value) = bit_string.to_string(value)
       parse_headers(rest, [#(field, value), ..headers])
@@ -70,9 +69,11 @@ pub fn parse_headers(
 }
 
 /// Turns the TCP message into an HTTP request
-pub fn parse_request(bs: BitString) -> Result(Request(BitString), DecodeError) {
+pub fn parse_request(
+  bs: BitString,
+) -> Result(request.Request(BitString), DecodeError) {
   try BinaryData(req, rest) = decode_packet(Http, bs, [])
-  assert Request(method, AbsPath(path), _version) = req
+  assert HttpRequest(method, AbsPath(path), _version) = req
 
   try method =
     method
@@ -137,8 +138,6 @@ pub fn to_string(resp: Response(BitString)) -> BitString {
   let body_builder = case bit_string.byte_size(resp.body) {
     0 -> string_builder.from_string("")
     _size -> {
-      io.println("he got dat body")
-      io.debug(resp.body)
       resp.body
       |> bit_string.to_string
       |> result.unwrap("")
@@ -179,7 +178,7 @@ pub fn http_response(status: Int, body: BitString) -> BitString {
 }
 
 pub type Handler =
-  fn(Request(BitString)) -> Response(BitString)
+  fn(request.Request(BitString)) -> Response(BitString)
 
 pub type HttpHandler(data) {
   HttpHandler(func: LoopFn(data), state: data)
@@ -187,13 +186,12 @@ pub type HttpHandler(data) {
 
 /// Convert your classic `HTTP handler` into a TCP message handler.
 /// You probably want to use this
-pub fn make_handler(handler: Handler) -> HttpHandler(Nil) {
+pub fn handler(handler func: Handler) -> HttpHandler(Nil) {
   HttpHandler(
     func: fn(msg, state) {
       let #(socket, _state) = state
       case msg {
         Tcp(_, _) -> {
-          io.print("this should not happen")
           actor.Continue(state)
         }
         TcpClosed(_msg) -> actor.Stop(process.Normal)
@@ -206,12 +204,13 @@ pub fn make_handler(handler: Handler) -> HttpHandler(Nil) {
             Ok(req) -> {
               assert Ok(resp) =
                 req
-                |> handler
+                |> func
                 |> to_string
                 |> bit_string.to_string
               assert Ok(Nil) = send(socket, charlist.from_string(resp))
             }
             Error(_) -> {
+              /// TODO:  should this be like malformed request or something?
               assert Ok(error) =
                 400
                 |> response.new
