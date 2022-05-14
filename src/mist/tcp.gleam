@@ -328,3 +328,21 @@ pub fn start_acceptor_pool(
   ))
   |> result.replace(Nil)
 }
+
+pub type HandlerFunc(state) =
+  fn(Charlist, #(Socket, state)) -> actor.Next(#(Socket, state))
+
+pub fn handler(handler func: HandlerFunc(state)) -> LoopFn(state) {
+  fn(msg, state) {
+    case msg {
+      Tcp(_, _) -> {
+        io.debug(#("Received an unexpected TCP message", msg))
+        actor.Continue(state)
+      }
+      TcpClosed(_msg) -> actor.Stop(process.Normal)
+      ReceiveMessage(data) -> {
+        func(data, state)
+      }
+    }
+  }
+}

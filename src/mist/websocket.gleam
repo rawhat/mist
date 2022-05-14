@@ -3,14 +3,13 @@ import gleam/bit_string
 import gleam/erlang/charlist.{Charlist}
 import gleam/http/request.{Request}
 import gleam/http/response.{Response}
-import gleam/io
 import gleam/list
 import gleam/otp/actor
 import gleam/otp/process
 import gleam/result
 import gleam/string
-import mist/http.{HttpHandler, parse_request, to_string}
-import mist/tcp.{ReceiveMessage, Socket, TcpClosed, send}
+import mist/http.{HttpHandler, to_string}
+import mist/tcp.{Socket, send}
 
 pub type State {
   State(upgraded: Bool)
@@ -121,6 +120,19 @@ pub fn frame_to_charlist(frame: Frame) -> Charlist {
   |> bin_to_charlist
 }
 
+pub fn upgrade(socket: Socket, req: Request(BitString)) -> Result(Nil, Nil) {
+  try resp = upgrade_socket(req) |> result.replace_error(Nil)
+
+  try _sent =
+    resp
+    |> to_string
+    |> bit_string.to_string
+    |> result.map(charlist.from_string)
+    |> result.map(send(socket, _))
+
+  Ok(Nil)
+}
+
 pub fn ws_send(socket: Socket, data: String) -> Result(Nil, tcp.SocketReason) {
   let size =
     data
@@ -131,37 +143,35 @@ pub fn ws_send(socket: Socket, data: String) -> Result(Nil, tcp.SocketReason) {
   resp
 }
 
+// TODO:  maybe the http handler should (again) have some state... but pull that
+// out in the router function.  then, this can maybe just do something similar,
+// but actually updating the state?  need to verify the path first. maybe that
+// should then go like... in the router?  see:  router
 pub fn handler(handler func: Handler) -> HttpHandler(State) {
   HttpHandler(
-    func: fn(msg, state) {
+    func: tcp.handler(fn(msg, state) {
       let #(socket, State(upgraded) as ws_state) = state
       case msg, upgraded {
-        ReceiveMessage(data), False ->
-          case data
-          |> charlist.to_string
-          |> bit_string.from_string
-          |> parse_request {
-            Ok(req) -> {
-              assert Ok(resp) = upgrade_socket(req)
-              assert Ok(_) =
-                resp
-                |> to_string
-                |> bit_string.to_string
-                |> result.map(charlist.from_string)
-                |> result.map(send(socket, _))
-              actor.Continue(#(socket, State(True)))
-            }
-            _ -> actor.Stop(process.Normal)
+        data, False ->
+          data
+          |> http.from_charlist
+          |> result.map(upgrade(socket, _))
+          |> result.replace(actor.Continue(#(socket, State(True))))
+          |> result.unwrap(actor.Stop(process.Normal))
+        data, True -> {
+          case frame_from_message(data) {
+            Ok(TextFrame(payload: payload, ..)) ->
+              payload
+              |> TextMessage
+              |> func(_, socket, ws_state)
+              |> actor.Continue
+            Error(_) ->
+              // TODO:  not normal
+              actor.Stop(process.Normal)
           }
-        ReceiveMessage(data), True -> {
-          assert Ok(TextFrame(payload: data, ..)) = frame_from_message(data)
-          let next = func(TextMessage(data), socket, ws_state)
-          actor.Continue(next)
         }
-        TcpClosed(_), _ -> actor.Continue(state)
-        _msg, _ -> actor.Continue(state)
       }
-    },
+    }),
     state: State(False),
   )
 }
