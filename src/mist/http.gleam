@@ -7,14 +7,10 @@ import gleam/http
 import gleam/http/request
 import gleam/http/response.{Response}
 import gleam/int
-import gleam/io
 import gleam/list
 import gleam/option.{Option}
-import gleam/otp/actor
-import gleam/otp/process
 import gleam/result
 import gleam/string
-import mist/tcp
 
 pub type PacketType {
   Http
@@ -189,56 +185,7 @@ pub fn from_charlist(
 pub type Handler =
   fn(request.Request(BitString)) -> Response(BitString)
 
-pub type State {
-  State(upgraded: Bool)
-}
-
-pub fn new_state() -> State {
-  State(upgraded: False)
-}
-
 pub type HandlerError {
   InvalidRequest(DecodeError)
   NotFound
 }
-
-// pub type HttpHandler {
-//   HttpHandler(
-//     func: fn(Charlist, #(tcp.Socket, State)) ->
-//       Result(actor.Next(#(tcp.Socket, State)), HandlerError),
-//     state: State,
-//   )
-// }
-
-/// Convert your classic `HTTP handler` into a TCP message handler.
-/// You probably want to use this
-// pub fn handler(handler func: Handler) -> HttpHandler {
-//   HttpHandler(
-//     func: fn(msg, state) {
-//       io.debug(#("in the handler func"))
-//       let #(socket, _state) = state
-//       case from_charlist(msg) {
-//         Ok(req) -> {
-//           assert Ok(resp) =
-//             req
-//             |> func
-//             |> to_string
-//             |> bit_string.to_string
-//           assert Ok(Nil) = tcp.send(socket, charlist.from_string(resp))
-//         }
-//         Error(_) -> {
-//           // TODO:  should this be like malformed request or something?
-//           assert Ok(error) =
-//             400
-//             |> response.new
-//             |> response.set_body(bit_string.from_string(""))
-//             |> to_string
-//             |> bit_string.to_string
-//           assert Ok(Nil) = tcp.send(socket, charlist.from_string(error))
-//         }
-//       }
-//       Ok(actor.Stop(process.Normal))
-//     },
-//     state: new_state(),
-//   )
-// }

@@ -6,7 +6,7 @@ import gleam/http/response.{Response}
 import gleam/list
 import gleam/result
 import gleam/string
-import mist/http.{State, to_string}
+import mist/http.{to_string}
 import mist/tcp.{Socket}
 
 // TODO:  need binary here as well
@@ -15,7 +15,7 @@ pub type Message {
 }
 
 pub type Handler =
-  fn(Message, Socket, State) -> #(Socket, State)
+  fn(Message, Socket) -> Result(Nil, Nil)
 
 external fn charlist_to_binary(char: Charlist) -> BitString =
   "erlang" "list_to_binary"
@@ -177,12 +177,8 @@ pub fn upgrade_socket(
   |> Ok
 }
 
-pub fn echo_handler(
-  msg: Message,
-  socket: Socket,
-  state: State,
-) -> #(Socket, State) {
+pub fn echo_handler(msg: Message, socket: Socket) -> Result(Nil, Nil) {
   assert Ok(_resp) = send(socket, msg.data)
 
-  #(socket, state)
+  Ok(Nil)
 }

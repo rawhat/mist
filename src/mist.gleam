@@ -42,7 +42,7 @@ pub type StartError {
 /// options for ease of use: `http.handler` and `ws.handler`.
 pub fn serve(
   port: Int,
-  handler: tcp.LoopFn(http.State),
+  handler: tcp.LoopFn(router.State),
 ) -> Result(Nil, StartError) {
   try _ =
     port
@@ -55,7 +55,7 @@ pub fn serve(
     })
     |> result.then(fn(socket) {
       socket
-      |> start_acceptor_pool(handler, http.new_state(), 10)
+      |> start_acceptor_pool(handler, router.new_state(), 10)
       |> result.map_error(fn(err) {
         case err {
           actor.InitTimeout -> AcceptorTimeout
@@ -73,9 +73,10 @@ pub fn echo_ws_server() {
     router.new([
       router.ws_handler(
         ["/"],
-        fn(msg, socket, state) {
-          assert Ok(_) = websocket.send(socket, msg.data)
-          #(socket, state)
+        fn(msg, socket) {
+          socket
+          |> websocket.send(msg.data)
+          |> result.replace_error(Nil)
         },
       ),
     ])

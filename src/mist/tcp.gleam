@@ -210,11 +210,9 @@ pub fn start_handler(
     init_timeout: 1000,
     loop: fn(msg, state) {
       let #(socket, _state) = state
-      io.println("in top-level handler, got")
-      io.debug(msg)
       case msg {
         TcpClosed(_) -> {
-          io.println("CLOSIN")
+          io.println("CLOSING")
           // assert Ok(Nil) =
           //   set_opts(
           //     socket,
