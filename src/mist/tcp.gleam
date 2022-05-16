@@ -340,9 +340,7 @@ pub fn handler(handler func: HandlerFunc(state)) -> LoopFn(state) {
         actor.Continue(state)
       }
       TcpClosed(_msg) -> actor.Stop(process.Normal)
-      ReceiveMessage(data) -> {
-        func(data, state)
-      }
+      ReceiveMessage(data) -> func(data, state)
     }
   }
 }

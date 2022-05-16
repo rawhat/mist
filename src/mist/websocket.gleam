@@ -4,20 +4,10 @@ import gleam/erlang/charlist.{Charlist}
 import gleam/http/request.{Request}
 import gleam/http/response.{Response}
 import gleam/list
-import gleam/otp/actor
-import gleam/otp/process
 import gleam/result
 import gleam/string
-import mist/http.{HttpHandler, to_string}
-import mist/tcp.{Socket, send}
-
-pub type State {
-  State(upgraded: Bool)
-}
-
-pub fn new_state() -> State {
-  State(upgraded: False)
-}
+import mist/http.{State, to_string}
+import mist/tcp.{Socket}
 
 // TODO:  need binary here as well
 pub type Message {
@@ -121,59 +111,28 @@ pub fn frame_to_charlist(frame: Frame) -> Charlist {
 }
 
 pub fn upgrade(socket: Socket, req: Request(BitString)) -> Result(Nil, Nil) {
-  try resp = upgrade_socket(req) |> result.replace_error(Nil)
+  try resp =
+    upgrade_socket(req)
+    |> result.replace_error(Nil)
 
   try _sent =
     resp
     |> to_string
     |> bit_string.to_string
     |> result.map(charlist.from_string)
-    |> result.map(send(socket, _))
+    |> result.map(tcp.send(socket, _))
 
   Ok(Nil)
 }
 
-pub fn ws_send(socket: Socket, data: String) -> Result(Nil, tcp.SocketReason) {
+pub fn send(socket: Socket, data: String) -> Result(Nil, tcp.SocketReason) {
   let size =
     data
     |> bit_string.from_string
     |> bit_string.byte_size
   let msg = frame_to_charlist(TextFrame(size, data))
-  let resp = send(socket, msg)
+  let resp = tcp.send(socket, msg)
   resp
-}
-
-// TODO:  maybe the http handler should (again) have some state... but pull that
-// out in the router function.  then, this can maybe just do something similar,
-// but actually updating the state?  need to verify the path first. maybe that
-// should then go like... in the router?  see:  router
-pub fn handler(handler func: Handler) -> HttpHandler(State) {
-  HttpHandler(
-    func: tcp.handler(fn(msg, state) {
-      let #(socket, State(upgraded) as ws_state) = state
-      case msg, upgraded {
-        data, False ->
-          data
-          |> http.from_charlist
-          |> result.map(upgrade(socket, _))
-          |> result.replace(actor.Continue(#(socket, State(True))))
-          |> result.unwrap(actor.Stop(process.Normal))
-        data, True -> {
-          case frame_from_message(data) {
-            Ok(TextFrame(payload: payload, ..)) ->
-              payload
-              |> TextMessage
-              |> func(_, socket, ws_state)
-              |> actor.Continue
-            Error(_) ->
-              // TODO:  not normal
-              actor.Stop(process.Normal)
-          }
-        }
-      }
-    }),
-    state: State(False),
-  )
 }
 
 const websocket_key = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -223,7 +182,7 @@ pub fn echo_handler(
   socket: Socket,
   state: State,
 ) -> #(Socket, State) {
-  assert Ok(_resp) = ws_send(socket, msg.data)
+  assert Ok(_resp) = send(socket, msg.data)
 
   #(socket, state)
 }

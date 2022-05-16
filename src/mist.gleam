@@ -1,18 +1,17 @@
 import gleam/bit_string
-import gleam/bit_string
 import gleam/dynamic.{Dynamic}
 import gleam/erlang
 import gleam/erlang/charlist
-import gleam/http/request.{Request}
-import gleam/http/response.{Response}
+import gleam/http/response
 import gleam/otp/actor
 import gleam/otp/process
 import gleam/result
-import mist/http.{HttpHandler, http_response}
+import mist/http.{http_response}
+import mist/router
 import mist/tcp.{
   Closed, HandlerMessage, Socket, Timeout, send, start_acceptor_pool,
 }
-import mist/websocket.{echo_handler}
+import mist/websocket
 
 /// Just your standard `hello_world` handler
 pub fn hello_world(_msg: HandlerMessage, sock: Socket) -> actor.Next(Socket) {
@@ -41,7 +40,10 @@ pub type StartError {
 /// Sets up a TCP server listener at the provided port. Also takes the
 /// HttpHandler, which holds the handler function.  There are currently two
 /// options for ease of use: `http.handler` and `ws.handler`.
-pub fn serve(port: Int, handler: HttpHandler(data)) -> Result(Nil, StartError) {
+pub fn serve(
+  port: Int,
+  handler: tcp.LoopFn(http.State),
+) -> Result(Nil, StartError) {
   try _ =
     port
     |> tcp.listen([])
@@ -53,7 +55,7 @@ pub fn serve(port: Int, handler: HttpHandler(data)) -> Result(Nil, StartError) {
     })
     |> result.then(fn(socket) {
       socket
-      |> start_acceptor_pool(handler.func, handler.state, 10)
+      |> start_acceptor_pool(handler, http.new_state(), 10)
       |> result.map_error(fn(err) {
         case err {
           actor.InitTimeout -> AcceptorTimeout
@@ -67,16 +69,43 @@ pub fn serve(port: Int, handler: HttpHandler(data)) -> Result(Nil, StartError) {
 }
 
 pub fn echo_ws_server() {
-  assert Ok(_) = serve(8080, websocket.handler(echo_handler))
+  let _ =
+    router.new([
+      router.ws_handler(
+        ["/"],
+        fn(msg, socket, state) {
+          assert Ok(_) = websocket.send(socket, msg.data)
+          #(socket, state)
+        },
+      ),
+    ])
+    |> serve(8080, _)
+
   erlang.sleep_forever()
 }
 
 pub fn echo_server() {
-  let handler = fn(req: Request(BitString)) -> Response(BitString) {
-    response.new(200)
-    |> response.set_body(req.body)
-  }
+  assert Ok(_) =
+    serve(
+      8080,
+      router.new([
+        router.http_handler(
+          ["*"],
+          fn(req) {
+            response.new(200)
+            |> response.set_body(req.body)
+          },
+        ),
+      ]),
+    )
 
-  assert Ok(_) = serve(8080, http.handler(handler))
+  erlang.sleep_forever()
+}
+
+pub fn main() {
+  assert Ok(_) =
+    router.example_router()
+    |> serve(8080, _)
+
   erlang.sleep_forever()
 }
