@@ -1,12 +1,11 @@
+import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
-import gleam/bit_string
-import gleam/erlang/charlist.{Charlist}
 import gleam/http/request.{Request}
 import gleam/http/response.{Response}
 import gleam/list
 import gleam/result
 import gleam/string
-import mist/http.{to_string}
+import mist/http
 import mist/tcp.{Socket}
 
 // TODO:  need binary here as well
@@ -16,12 +15,6 @@ pub type Message {
 
 pub type Handler =
   fn(Message, Socket) -> Result(Nil, Nil)
-
-external fn charlist_to_binary(char: Charlist) -> BitString =
-  "erlang" "list_to_binary"
-
-external fn bin_to_charlist(bs: BitString) -> Charlist =
-  "erlang" "bitstring_to_list"
 
 // TODO:  there are other message types, AND ALSO will need to buffer across
 // multiple frames, potentially
@@ -56,7 +49,7 @@ fn unmask_data(
   }
 }
 
-pub fn frame_from_message(message: Charlist) -> Result(Frame, Nil) {
+pub fn frame_from_message(message: BitString) -> Result(Frame, Nil) {
   assert <<
     // TODO: handle this not being finished
     _fin:1,
@@ -69,9 +62,9 @@ pub fn frame_from_message(message: Charlist) -> Result(Frame, Nil) {
     mask3:bit_string-size(8),
     mask4:bit_string-size(8),
     rest:bit_string,
-  >> = charlist_to_binary(message)
+  >> = message
 
-  assert Ok(data) =
+  try data =
     rest
     |> unmask_data([mask1, mask2, mask3, mask4], 0, <<>>)
     |> bit_string.to_string
@@ -92,7 +85,7 @@ pub fn message_to_frame(data: String) -> Frame {
   )
 }
 
-pub fn frame_to_charlist(frame: Frame) -> Charlist {
+pub fn frame_to_bit_builder(frame: Frame) -> BitBuilder {
   case frame {
     TextFrame(payload_length, payload) -> {
       let fin = 1
@@ -100,14 +93,15 @@ pub fn frame_to_charlist(frame: Frame) -> Charlist {
       let payload_bs = bit_string.from_string(payload)
       // TODO:  support extended payload length
       <<fin:1, 0:3, 1:4, mask_flag:1, payload_length:7, payload_bs:bit_string>>
+      |> bit_builder.from_bit_string
     }
-    PingFrame(..) -> <<>>
+    PingFrame(..) -> bit_builder.from_bit_string(<<>>)
     PongFrame(payload_length, payload) -> {
       let payload_bs = bit_string.from_string(payload)
       <<1:1, 0:3, 10:4, 0:1, payload_length:7, payload_bs:bit_string>>
+      |> bit_builder.from_bit_string
     }
   }
-  |> bin_to_charlist
 }
 
 pub fn upgrade(socket: Socket, req: Request(BitString)) -> Result(Nil, Nil) {
@@ -117,10 +111,9 @@ pub fn upgrade(socket: Socket, req: Request(BitString)) -> Result(Nil, Nil) {
 
   try _sent =
     resp
-    |> to_string
-    |> bit_string.to_string
-    |> result.map(charlist.from_string)
-    |> result.map(tcp.send(socket, _))
+    |> http.to_bit_builder
+    |> tcp.send(socket, _)
+    |> result.replace_error(Nil)
 
   Ok(Nil)
 }
@@ -130,7 +123,7 @@ pub fn send(socket: Socket, data: String) -> Result(Nil, tcp.SocketReason) {
     data
     |> bit_string.from_string
     |> bit_string.byte_size
-  let msg = frame_to_charlist(TextFrame(size, data))
+  let msg = frame_to_bit_builder(TextFrame(size, data))
   let resp = tcp.send(socket, msg)
   resp
 }

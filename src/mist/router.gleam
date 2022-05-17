@@ -1,5 +1,4 @@
 import gleam/bit_string
-import gleam/erlang/charlist
 import gleam/http/request
 import gleam/http/response
 import gleam/list
@@ -71,7 +70,7 @@ pub fn new(routes: List(HttpHandler)) -> tcp.LoopFn(State) {
             actor.Stop(process.Normal)
         }
       None -> {
-        assert Ok(req) = http.from_charlist(msg)
+        assert Ok(req) = http.parse_request(msg)
         let matching_handler =
           routes
           |> list.find_map(fn(route) {
@@ -94,27 +93,17 @@ pub fn new(routes: List(HttpHandler)) -> tcp.LoopFn(State) {
           Ok(Http1(_path, handler)) ->
             req
             |> handler
-            |> http.to_string
-            |> bit_string.to_string
-            |> result.then(fn(data) {
-              data
-              |> charlist.from_string
-              |> tcp.send(socket, _)
-              |> result.replace_error(Nil)
-            })
+            |> http.to_bit_builder
+            |> tcp.send(socket, _)
+            |> result.replace_error(Nil)
             |> result.replace(actor.Stop(process.Normal))
             |> result.unwrap(actor.Stop(process.Normal))
           Error(_) ->
             response.new(404)
             |> response.set_body(bit_string.from_string(""))
-            |> http.to_string
-            |> bit_string.to_string
-            |> result.then(fn(data) {
-              data
-              |> charlist.from_string
-              |> tcp.send(socket, _)
-              |> result.replace_error(Nil)
-            })
+            |> http.to_bit_builder
+            |> tcp.send(socket, _)
+            |> result.replace_error(Nil)
             |> result.replace(actor.Stop(process.Normal))
             |> result.unwrap(actor.Stop(process.Normal))
         }

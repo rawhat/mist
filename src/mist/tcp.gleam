@@ -1,6 +1,6 @@
+import gleam/bit_builder.{BitBuilder}
 import gleam/dynamic.{Dynamic}
 import gleam/erlang/atom.{Atom}
-import gleam/erlang/charlist.{Charlist}
 import gleam/io
 import gleam/iterator.{Iterator, Next}
 import gleam/list
@@ -74,7 +74,7 @@ pub external fn do_receive(
 
 pub external fn send(
   socket: Socket,
-  packet: Charlist,
+  packet: BitBuilder,
 ) -> Result(Nil, SocketReason) =
   "tcp_ffi" "send"
 
@@ -154,8 +154,8 @@ pub type AcceptorError {
 }
 
 pub type HandlerMessage {
-  ReceiveMessage(Charlist)
-  Tcp(socket: Port, data: Charlist)
+  ReceiveMessage(BitString)
+  Tcp(socket: Port, data: BitBuilder)
   TcpClosed(Nil)
 }
 
@@ -175,7 +175,7 @@ pub fn echo_loop(
 ) -> actor.Next(AcceptorState) {
   case msg, state {
     ReceiveMessage(data), AcceptorState(socket: Some(sock), ..) -> {
-      let _ = send(sock, data)
+      let _ = send(sock, bit_builder.from_bit_string(data))
       Nil
     }
     _, _ -> Nil
@@ -196,7 +196,10 @@ pub fn start_handler(
         process.bare_message_receiver()
         |> process.map_receiver(fn(msg) {
           case dynamic.unsafe_coerce(msg) {
-            Tcp(_sock, data) -> ReceiveMessage(data)
+            Tcp(_sock, data) ->
+              data
+              |> bit_builder.to_bit_string
+              |> ReceiveMessage
             message -> message
           }
         })
@@ -328,7 +331,7 @@ pub fn start_acceptor_pool(
 }
 
 pub type HandlerFunc(state) =
-  fn(Charlist, #(Socket, state)) -> actor.Next(#(Socket, state))
+  fn(BitString, #(Socket, state)) -> actor.Next(#(Socket, state))
 
 pub fn handler(handler func: HandlerFunc(state)) -> LoopFn(state) {
   fn(msg, state) {

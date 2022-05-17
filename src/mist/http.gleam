@@ -1,8 +1,8 @@
+import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
 import gleam/string_builder.{StringBuilder}
 import gleam/bit_string
 import gleam/erlang/atom.{Atom}
-import gleam/erlang/charlist.{Charlist}
 import gleam/http
 import gleam/http/request
 import gleam/http/response.{Response}
@@ -15,10 +15,11 @@ import gleam/string
 pub type PacketType {
   Http
   HttphBin
+  HttpBin
 }
 
 pub type HttpUri {
-  AbsPath(Charlist)
+  AbsPath(BitString)
 }
 
 pub type HttpPacket {
@@ -34,6 +35,7 @@ pub type DecodedPacket {
 
 pub type DecodeError {
   InvalidMethod
+  InvalidPath
   UnknownHeader
 }
 
@@ -69,7 +71,7 @@ pub fn parse_headers(
 pub fn parse_request(
   bs: BitString,
 ) -> Result(request.Request(BitString), DecodeError) {
-  try BinaryData(req, rest) = decode_packet(Http, bs, [])
+  try BinaryData(req, rest) = decode_packet(HttpBin, bs, [])
   assert HttpRequest(method, AbsPath(path), _version) = req
 
   try method =
@@ -80,11 +82,16 @@ pub fn parse_request(
 
   try #(headers, rest) = parse_headers(rest, [])
 
+  try path =
+    path
+    |> bit_string.to_string
+    |> result.replace_error(InvalidPath)
+
   let req =
     request.new()
     |> request.set_body(rest)
     |> request.set_method(method)
-    |> request.set_path(charlist.to_string(path))
+    |> request.set_path(path)
 
   Ok(request.Request(..req, headers: headers))
 }
@@ -109,57 +116,54 @@ pub fn headers(resp: Response(BitString)) -> StringBuilder {
   )
 }
 
-pub fn status_to_string(status: Int) -> String {
+pub fn status_to_bit_string(status: Int) -> BitString {
   // Obviously nowhere near exhaustive...
   case status {
-    101 -> "Switching Protocols"
-    200 -> "Ok"
-    201 -> "Created"
-    202 -> "Accepted"
-    204 -> "No Content"
-    301 -> "Moved Permanently"
-    400 -> "Bad Request"
-    401 -> "Unauthorized"
-    403 -> "Forbidden"
-    404 -> "Not Found"
-    405 -> "Method Not Allowed"
-    500 -> "Internal Server Error"
-    502 -> "Bad Gateway"
-    503 -> "Service Unavailable"
-    504 -> "Gateway Timeout"
+    101 -> <<"Switching Protocols":utf8>>
+    200 -> <<"Ok":utf8>>
+    201 -> <<"Created":utf8>>
+    202 -> <<"Accepted":utf8>>
+    204 -> <<"No Content":utf8>>
+    301 -> <<"Moved Permanently":utf8>>
+    400 -> <<"Bad Request":utf8>>
+    401 -> <<"Unauthorized":utf8>>
+    403 -> <<"Forbidden":utf8>>
+    404 -> <<"Not Found":utf8>>
+    405 -> <<"Method Not Allowed":utf8>>
+    500 -> <<"Internal Server Error":utf8>>
+    502 -> <<"Bad Gateway":utf8>>
+    503 -> <<"Service Unavailable":utf8>>
+    504 -> <<"Gateway Timeout":utf8>>
   }
 }
 
 /// Turns an HTTP response into a TCP message
-pub fn to_string(resp: Response(BitString)) -> BitString {
+pub fn to_bit_builder(resp: Response(BitString)) -> BitBuilder {
   let body_builder = case bit_string.byte_size(resp.body) {
-    0 -> string_builder.from_string("")
+    0 -> bit_builder.new()
     _size ->
-      resp.body
-      |> bit_string.to_string
-      |> result.unwrap("")
-      |> string_builder.from_string
-      |> string_builder.append("\r\n")
+      bit_builder.new()
+      |> bit_builder.append(resp.body)
+      |> bit_builder.append(<<"\r\n":utf8>>)
   }
 
   let status_string =
     resp.status
     |> int.to_string
-    |> string.append(" ")
-    |> string.append(status_to_string(resp.status))
+    |> bit_builder.from_string
+    |> bit_builder.append(<<" ":utf8>>)
+    |> bit_builder.append(status_to_bit_string(resp.status))
 
-  "HTTP/1.1 "
-  |> string_builder.from_string
-  |> string_builder.append(status_string)
-  |> string_builder.append("\r\n")
-  |> string_builder.append_builder(headers(resp))
-  |> string_builder.append("\r\n")
-  |> string_builder.append_builder(body_builder)
-  |> string_builder.to_string
-  |> bit_string.from_string
+  bit_builder.new()
+  |> bit_builder.append(<<"HTTP/1.1 ":utf8>>)
+  |> bit_builder.append_builder(status_string)
+  |> bit_builder.append(<<"\r\n":utf8>>)
+  |> bit_builder.append_string(string_builder.to_string(headers(resp)))
+  |> bit_builder.append(<<"\r\n":utf8>>)
+  |> bit_builder.append_builder(body_builder)
 }
 
-pub fn http_response(status: Int, body: BitString) -> BitString {
+pub fn http_response(status: Int, body: BitString) -> BitBuilder {
   response.new(status)
   |> response.set_body(body)
   |> response.prepend_header("Content-Type", "text/plain")
@@ -170,16 +174,7 @@ pub fn http_response(status: Int, body: BitString) -> BitString {
     |> fn(size) { size + 1 }
     |> int.to_string,
   )
-  |> to_string
-}
-
-pub fn from_charlist(
-  data: Charlist,
-) -> Result(request.Request(BitString), DecodeError) {
-  data
-  |> charlist.to_string
-  |> bit_string.from_string
-  |> parse_request
+  |> to_bit_builder
 }
 
 pub type Handler =

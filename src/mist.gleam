@@ -1,7 +1,5 @@
-import gleam/bit_string
 import gleam/dynamic.{Dynamic}
 import gleam/erlang
-import gleam/erlang/charlist
 import gleam/http/response
 import gleam/otp/actor
 import gleam/otp/process
@@ -15,15 +13,10 @@ import mist/websocket
 
 /// Just your standard `hello_world` handler
 pub fn hello_world(_msg: HandlerMessage, sock: Socket) -> actor.Next(Socket) {
-  assert Ok(resp) =
-    "hello, world!"
-    |> bit_string.from_string
-    |> http_response(200, _)
-    |> bit_string.to_string
-
-  resp
-  |> charlist.from_string
-  |> send(sock, _)
+  assert Ok(_resp) =
+    200
+    |> http_response(<<"hello, world!":utf8>>)
+    |> send(sock, _)
 
   actor.Stop(process.Normal)
 }

@@ -19,11 +19,9 @@ pub fn ok(_msg: HandlerMessage, sock: Socket) -> actor.Next(Socket) {
     "hello, world!"
     |> bit_string.from_string
     |> http_response(200, _)
-    |> bit_string.to_string
+    |> bit_builder.from_bit_string
 
-  resp
-  |> charlist.from_string
-  |> send(sock, _)
+  assert Ok(_) = send(sock, resp)
 
   actor.Stop(process.Normal)
 }
