@@ -64,7 +64,7 @@ pub fn serve(
 pub fn echo_ws_server() {
   let _ =
     router.new([
-      router.ws_handler(
+      router.Websocket(
         ["/"],
         fn(msg, socket) {
           socket
@@ -83,7 +83,7 @@ pub fn echo_server() {
     serve(
       8080,
       router.new([
-        router.http_handler(
+        router.Http1(
           ["*"],
           fn(req) {
             response.new(200)
