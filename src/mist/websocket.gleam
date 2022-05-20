@@ -6,7 +6,7 @@ import gleam/list
 import gleam/result
 import gleam/string
 import mist/http
-import mist/tcp.{Socket}
+import glisten/tcp.{Socket}
 
 // TODO:  need binary here as well
 pub type Message {
@@ -163,7 +163,7 @@ pub fn upgrade_socket(
   let accept_key = parse_key(key)
 
   response.new(101)
-  |> response.set_body(bit_string.from_string(""))
+  |> response.set_body(<<"":utf8>>)
   |> response.prepend_header("Upgrade", "websocket")
   |> response.prepend_header("Connection", "Upgrade")
   |> response.prepend_header("Sec-WebSocket-Accept", accept_key)

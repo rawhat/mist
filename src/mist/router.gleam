@@ -5,8 +5,8 @@ import gleam/option.{None, Option, Some}
 import gleam/otp/actor
 import gleam/otp/process
 import gleam/result
+import glisten/tcp
 import mist/http
-import mist/tcp
 import mist/websocket.{TextFrame, TextMessage}
 
 pub type Route(state) {
@@ -20,11 +20,11 @@ pub type Router {
 pub type HttpHandler {
   Http1(
     path: List(String),
-    handler: fn(request.Request(BitString)) -> response.Response(BitString),
+    handler: http.Handler,
   )
   Websocket(
     path: List(String),
-    handler: fn(websocket.Message, tcp.Socket) -> Result(Nil, Nil),
+    handler: websocket.Handler,
   )
 }
 

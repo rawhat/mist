@@ -9,8 +9,11 @@ import gleam/http/response.{Response}
 import gleam/int
 import gleam/list
 import gleam/option.{Option}
+import gleam/otp/actor
+import gleam/otp/process
 import gleam/result
 import gleam/string
+import glisten/tcp
 
 pub type PacketType {
   Http
@@ -44,7 +47,7 @@ external fn decode_packet(
   packet: BitString,
   options: List(a),
 ) -> Result(DecodedPacket, DecodeError) =
-  "tcp_ffi" "decode_packet"
+  "http_ffi" "decode_packet"
 
 pub fn from_header(value: BitString) -> String {
   assert Ok(value) = bit_string.to_string(value)
@@ -94,13 +97,6 @@ pub fn parse_request(
     |> request.set_path(path)
 
   Ok(request.Request(..req, headers: headers))
-}
-
-pub fn code_to_string(code: Int) -> String {
-  case code {
-    200 -> "Ok"
-    _ -> "Unknown"
-  }
 }
 
 pub fn headers(resp: Response(BitString)) -> StringBuilder {
@@ -163,24 +159,30 @@ pub fn to_bit_builder(resp: Response(BitString)) -> BitBuilder {
   |> bit_builder.append_builder(body_builder)
 }
 
-pub fn http_response(status: Int, body: BitString) -> BitBuilder {
-  response.new(status)
-  |> response.set_body(body)
-  |> response.prepend_header("Content-Type", "text/plain")
-  |> response.prepend_header(
-    "Content-Length",
-    body
-    |> bit_string.byte_size
-    |> fn(size) { size + 1 }
-    |> int.to_string,
-  )
-  |> to_bit_builder
-}
-
 pub type Handler =
   fn(request.Request(BitString)) -> Response(BitString)
 
 pub type HandlerError {
   InvalidRequest(DecodeError)
   NotFound
+}
+
+/// This method helps turn an HTTP handler into a TCP handler that you can
+/// pass to `mist.serve` or `glisten.serve`
+pub fn handler(func: Handler) -> tcp.LoopFn(Nil) {
+  tcp.handler(fn(msg, state) {
+    let #(socket, _state) = state
+
+    msg
+    |> parse_request
+    |> result.map(fn(req) {
+      req
+      |> func
+      |> to_bit_builder
+      |> tcp.send(socket, _)
+      |> result.replace_error(Nil)
+    })
+    |> result.replace(actor.Stop(process.Normal))
+    |> result.unwrap(actor.Stop(process.Normal))
+  })
 }
