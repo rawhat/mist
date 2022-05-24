@@ -109,11 +109,6 @@ pub fn main() {
 }
 ```
 
-## Notes
+## Benchmarks
 
-This is still very rough.  There are no tests, and as noted above you can't just
-send where you implement it.
-
-In some [not-very-scientific benchmarking](https://gist.github.com/rawhat/11ab57ef8dde4170304adc01c8c05a99), it seemed to do roughly as well as
-ThousandIsland.  I am just using that as a reference point, certainly not trying
-to draw any comparisons any time soon!
+These are currently located [here](https://github.com/rawhat/http-benchmarks)
