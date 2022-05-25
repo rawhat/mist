@@ -1,6 +1,5 @@
 import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
-import gleam/string_builder.{StringBuilder}
 import gleam/bit_string
 import gleam/erlang/atom.{Atom}
 import gleam/http
@@ -8,6 +7,7 @@ import gleam/http/request
 import gleam/http/response.{Response}
 import gleam/int
 import gleam/list
+import gleam/map
 import gleam/option.{Option}
 import gleam/otp/actor
 import gleam/otp/process
@@ -99,15 +99,16 @@ pub fn parse_request(
   Ok(request.Request(..req, headers: headers))
 }
 
-pub fn headers(resp: Response(BitString)) -> StringBuilder {
-  list.fold(
-    resp.headers,
-    string_builder.from_string(""),
-    fn(builder, tup) {
-      let #(header, value) = tup
-
-      string_builder.from_strings([header, ": ", value, "\r\n"])
-      |> string_builder.append_builder(builder, _)
+pub fn encode_headers(headers: map.Map(String, String)) -> BitBuilder {
+  map.fold(
+    headers,
+    bit_builder.new(),
+    fn(builder, header, value) {
+      builder
+      |> bit_builder.append_string(header)
+      |> bit_builder.append(<<": ":utf8>>)
+      |> bit_builder.append_string(value)
+      |> bit_builder.append(<<"\r\n":utf8>>)
     },
   )
 }
@@ -135,7 +136,24 @@ pub fn status_to_bit_string(status: Int) -> BitString {
 
 /// Turns an HTTP response into a TCP message
 pub fn to_bit_builder(resp: Response(BitString)) -> BitBuilder {
-  let body_builder = case bit_string.byte_size(resp.body) {
+  let body_size = bit_string.byte_size(resp.body)
+
+  let headers =
+    map.from_list([
+      #("content-type", "text/plain; charset=utf-8"),
+      #("content-length", int.to_string(body_size)),
+      #("connection", "close"),
+    ])
+    |> list.fold(
+      resp.headers,
+      _,
+      fn(defaults, tup) {
+        let #(key, value) = tup
+        map.insert(defaults, key, value)
+      },
+    )
+
+  let body_builder = case body_size {
     0 -> bit_builder.new()
     _size ->
       bit_builder.new()
@@ -154,7 +172,7 @@ pub fn to_bit_builder(resp: Response(BitString)) -> BitBuilder {
   |> bit_builder.append(<<"HTTP/1.1 ":utf8>>)
   |> bit_builder.append_builder(status_string)
   |> bit_builder.append(<<"\r\n":utf8>>)
-  |> bit_builder.append_string(string_builder.to_string(headers(resp)))
+  |> bit_builder.append_builder(encode_headers(headers))
   |> bit_builder.append(<<"\r\n":utf8>>)
   |> bit_builder.append_builder(body_builder)
 }

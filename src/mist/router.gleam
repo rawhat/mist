@@ -18,14 +18,8 @@ pub type Router {
 }
 
 pub type HttpHandler {
-  Http1(
-    path: List(String),
-    handler: http.Handler,
-  )
-  Websocket(
-    path: List(String),
-    handler: websocket.Handler,
-  )
+  Http1(path: List(String), handler: http.Handler)
+  Websocket(path: List(String), handler: websocket.Handler)
 }
 
 pub type State {
