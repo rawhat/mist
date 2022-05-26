@@ -7,7 +7,7 @@ packages = [
   { name = "gleam_otp", version = "0.4.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_stdlib"], otp_app = "gleam_otp", source = "hex", outer_checksum = "3F05090CEDFBA5B6DE2AEE20868F92E815D287E71807DAD5663DAA1B566953C2" },
   { name = "gleam_stdlib", version = "0.21.0", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "FB03CD50B477867DA65B1318252ABA02F76175754762D15BF6C792CF5B85BCC4" },
   { name = "gleeunit", version = "0.6.1", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleeunit", source = "hex", outer_checksum = "5BF486C3E135B7F5ED8C054925FC48E5B2C79016A39F416FD8CF2E860520EE55" },
-  { name = "glisten", version = "0.2.1", build_tools = ["gleam"], requirements = ["gleam_http", "gleam_stdlib", "gleam_otp"], otp_app = "glisten", source = "hex", outer_checksum = "2C6184C1E15F50A39E586599757D44ACF73D7A215F57B8DD3E6091A8701DF26F" },
+  { name = "glisten", version = "0.3.0", build_tools = ["gleam"], requirements = ["gleam_otp", "gleam_http", "gleam_stdlib"], otp_app = "glisten", source = "hex", outer_checksum = "6458B9A96E399AE2487D035C50A55FE5AA82C2D4BE744BF8B6FE825C35E25AD6" },
 ]
 
 [requirements]
@@ -16,4 +16,4 @@ gleam_http = "~> 3.0"
 gleam_otp = "~> 0.4"
 gleam_stdlib = "~> 0.21"
 gleeunit = "~> 0.6"
-glisten = "~> 0.2"
+glisten = "~> 0.3"

@@ -1,4 +1,5 @@
 import gleam/bit_string
+import gleam/dynamic
 import gleam/http as ghttp
 import gleam/http/request
 import gleeunit
@@ -15,6 +16,7 @@ pub fn parse_request_test() {
 Host: localhost:8001
 User-Agent: curl/7.82.0
 Accept: */*
+Content-Length: 13
 
 hello, world!"
     |> bit_string.from_string
@@ -24,12 +26,13 @@ hello, world!"
     |> request.set_body(bit_string.from_string(""))
     |> request.set_method(ghttp.Get)
     |> request.set_path("/")
-    |> request.prepend_header("Host", "localhost:8001")
     |> request.prepend_header("User-Agent", "curl/7.82.0")
+    |> request.prepend_header("Host", "localhost:8001")
+    |> request.prepend_header("Content-Length", "13")
     |> request.prepend_header("Accept", "*/*")
     |> request.set_body(bit_string.from_string("hello, world!"))
     |> Ok
 
-  parse_request(bs)
+  parse_request(bs, dynamic.unsafe_coerce(dynamic.from("")))
   |> should.equal(req)
 }
