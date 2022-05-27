@@ -1,5 +1,5 @@
 name = "mist"
-version = "0.2.1"
+version = "0.3.0"
 
 licences = ["Apache-2.0"]
 description = "a misty Gleam web server"
@@ -11,7 +11,6 @@ gleam_erlang = "~> 0.9"
 gleam_http = "~> 3.0"
 gleam_otp = "~> 0.4"
 glisten = "~> 0.3"
-# glisten = "~> 0.2"
 
 [dev-dependencies]
 gleeunit = "~> 0.6"
