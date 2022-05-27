@@ -10,7 +10,8 @@ gleam_stdlib = "~> 0.21"
 gleam_erlang = "~> 0.9"
 gleam_http = "~> 3.0"
 gleam_otp = "~> 0.4"
-glisten = "~> 0.2"
+glisten = "~> 0.3"
+# glisten = "~> 0.2"
 
 [dev-dependencies]
 gleeunit = "~> 0.6"

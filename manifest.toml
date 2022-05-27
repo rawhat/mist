@@ -4,10 +4,10 @@
 packages = [
   { name = "gleam_erlang", version = "0.9.3", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_erlang", source = "hex", outer_checksum = "0430CFF5DAFAB54C97D6F19AA98BDDAD5E7AA245AC240547F4C0DBC26CDAE85E" },
   { name = "gleam_http", version = "3.0.1", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_http", source = "hex", outer_checksum = "02043655C5EEBBF533CC36BD95F881C94EE1B5959EA474CA3F597672716DB443" },
-  { name = "gleam_otp", version = "0.4.0", build_tools = ["gleam"], requirements = ["gleam_stdlib", "gleam_erlang"], otp_app = "gleam_otp", source = "hex", outer_checksum = "3F05090CEDFBA5B6DE2AEE20868F92E815D287E71807DAD5663DAA1B566953C2" },
+  { name = "gleam_otp", version = "0.4.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_stdlib"], otp_app = "gleam_otp", source = "hex", outer_checksum = "3F05090CEDFBA5B6DE2AEE20868F92E815D287E71807DAD5663DAA1B566953C2" },
   { name = "gleam_stdlib", version = "0.21.0", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "FB03CD50B477867DA65B1318252ABA02F76175754762D15BF6C792CF5B85BCC4" },
   { name = "gleeunit", version = "0.6.1", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleeunit", source = "hex", outer_checksum = "5BF486C3E135B7F5ED8C054925FC48E5B2C79016A39F416FD8CF2E860520EE55" },
-  { name = "glisten", version = "0.2.2", build_tools = ["gleam"], requirements = ["gleam_stdlib", "gleam_http", "gleam_otp"], otp_app = "glisten", source = "hex", outer_checksum = "DFC5CA3D5759A44D30E893942E3DBB2C24FBE57C87CBC83CE5D6328555D134B8" },
+  { name = "glisten", version = "0.3.0", build_tools = ["gleam"], requirements = ["gleam_otp", "gleam_stdlib", "gleam_http"], otp_app = "glisten", source = "hex", outer_checksum = "6458B9A96E399AE2487D035C50A55FE5AA82C2D4BE744BF8B6FE825C35E25AD6" },
 ]
 
 [requirements]
@@ -16,4 +16,4 @@ gleam_http = "~> 3.0"
 gleam_otp = "~> 0.4"
 gleam_stdlib = "~> 0.21"
 gleeunit = "~> 0.6"
-glisten = "~> 0.2"
+glisten = "~> 0.3"

@@ -1,19 +1,18 @@
 import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
-import gleam/bit_string
 import gleam/erlang/atom.{Atom}
 import gleam/http
 import gleam/http/request
 import gleam/http/response.{Response}
 import gleam/int
 import gleam/list
-import gleam/map
-import gleam/option.{Option}
+import gleam/map.{Map}
+import gleam/option.{Option, Some}
 import gleam/otp/actor
 import gleam/otp/process
 import gleam/result
 import gleam/string
-import glisten/tcp
+import glisten/tcp.{LoopState, Socket}
 
 pub type PacketType {
   Http
@@ -40,6 +39,8 @@ pub type DecodeError {
   InvalidMethod
   InvalidPath
   UnknownHeader
+  // TODO:  better name?
+  InvalidBody
 }
 
 external fn decode_packet(
@@ -57,22 +58,58 @@ pub fn from_header(value: BitString) -> String {
 
 pub fn parse_headers(
   bs: BitString,
-  headers: List(http.Header),
-) -> Result(#(List(http.Header), BitString), DecodeError) {
+  headers: Map(String, String),
+) -> Result(#(Map(String, String), BitString), DecodeError) {
   case decode_packet(HttphBin, bs, []) {
     Ok(BinaryData(HttpHeader(_, _field, field, value), rest)) -> {
       let field = from_header(field)
       assert Ok(value) = bit_string.to_string(value)
-      parse_headers(rest, [#(field, value), ..headers])
+      headers
+      |> map.insert(field, value)
+      |> parse_headers(rest, _)
     }
     Ok(EndOfHeaders(rest)) -> Ok(#(headers, rest))
     _ -> Error(UnknownHeader)
   }
 }
 
+pub type BodyBuffer {
+  BodyBuffer(remaining: Int, data: BitString)
+}
+
+pub fn parse_body(
+  socket: Socket,
+  buffer: BodyBuffer,
+) -> Result(BitString, DecodeError) {
+  case buffer.remaining > 0 {
+    True -> {
+      // TODO:  don't hard-code these, probably
+      let to_read = int.min(buffer.remaining, 8_000_000)
+      let timeout = 15_000
+      try data =
+        socket
+        |> tcp.receive_timeout(to_read, timeout)
+        |> result.replace_error(InvalidBody)
+      let amount_read = bit_builder.byte_size(data)
+      parse_body(
+        socket,
+        BodyBuffer(
+          remaining: buffer.remaining - amount_read,
+          data: <<
+            buffer.data:bit_string,
+            bit_builder.to_bit_string(data):bit_string,
+          >>,
+        ),
+      )
+    }
+    False -> Ok(buffer.data)
+  }
+}
+
 /// Turns the TCP message into an HTTP request
 pub fn parse_request(
   bs: BitString,
+  socket: Socket,
 ) -> Result(request.Request(BitString), DecodeError) {
   try BinaryData(req, rest) = decode_packet(HttpBin, bs, [])
   assert HttpRequest(method, AbsPath(path), _version) = req
@@ -83,20 +120,33 @@ pub fn parse_request(
     |> http.parse_method
     |> result.replace_error(InvalidMethod)
 
-  try #(headers, rest) = parse_headers(rest, [])
+  try #(headers, rest) = parse_headers(rest, map.new())
 
   try path =
     path
     |> bit_string.to_string
     |> result.replace_error(InvalidPath)
 
+  let body_size =
+    headers
+    |> map.get("content-length")
+    |> result.then(int.parse)
+    |> result.unwrap(0)
+
+  let #(remaining, initial_body) = case body_size {
+    0 -> #(0, <<>>)
+    _n -> #(body_size - bit_string.byte_size(rest), rest)
+  }
+
+  try body = parse_body(socket, BodyBuffer(remaining, initial_body))
+
   let req =
     request.new()
-    |> request.set_body(rest)
+    |> request.set_body(body)
     |> request.set_method(method)
     |> request.set_path(path)
 
-  Ok(request.Request(..req, headers: headers))
+  Ok(request.Request(..req, headers: map.to_list(headers)))
 }
 
 pub fn encode_headers(headers: map.Map(String, String)) -> BitBuilder {
@@ -142,7 +192,7 @@ pub fn to_bit_builder(resp: Response(BitString)) -> BitBuilder {
     map.from_list([
       #("content-type", "text/plain; charset=utf-8"),
       #("content-length", int.to_string(body_size)),
-      #("connection", "close"),
+      #("connection", "keep-alive"),
     ])
     |> list.fold(
       resp.headers,
@@ -187,20 +237,33 @@ pub type HandlerError {
 
 /// This method helps turn an HTTP handler into a TCP handler that you can
 /// pass to `mist.serve` or `glisten.serve`
-pub fn handler(func: Handler) -> tcp.LoopFn(Nil) {
+pub fn handler(func: Handler) -> tcp.LoopFn(Option(process.Timer)) {
   tcp.handler(fn(msg, state) {
-    let #(socket, _state) = state
+    let tcp.LoopState(socket, sender, data: timer) = state
+    let _ = case timer {
+      Some(t) -> process.cancel_timer(t)
+      _ -> process.TimerNotFound
+    }
 
-    msg
-    |> parse_request
-    |> result.map(fn(req) {
-      req
-      |> func
-      |> to_bit_builder
-      |> tcp.send(socket, _)
-      |> result.replace_error(Nil)
-    })
-    |> result.replace(actor.Stop(process.Normal))
-    |> result.unwrap(actor.Stop(process.Normal))
+    // TODO:  notify about malformed requests here, as well
+    assert Ok(req) = parse_request(msg, socket)
+    let resp = func(req)
+
+    let raw_response = to_bit_builder(resp)
+    assert Ok(_) = tcp.send(socket, raw_response)
+
+    // If the handler explicitly says to close the connection, we should
+    // probably listen to them
+    case response.get_header(resp, "connection") {
+      Ok("close") -> {
+        tcp.close(socket)
+        actor.Stop(process.Normal)
+      }
+      _ -> {
+        // TODO:  this should be a configuration
+        let timer = process.send_after(sender, 10_000, tcp.Close)
+        actor.Continue(LoopState(..state, data: Some(timer)))
+      }
+    }
   })
 }
