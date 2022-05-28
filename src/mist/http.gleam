@@ -84,21 +84,17 @@ pub fn parse_body(
   case buffer.remaining > 0 {
     True -> {
       // TODO:  don't hard-code these, probably
-      let to_read = int.min(buffer.remaining, 8_000_000)
+      let to_read = int.min(buffer.remaining, 1_000_000)
       let timeout = 15_000
       try data =
         socket
         |> tcp.receive_timeout(to_read, timeout)
         |> result.replace_error(InvalidBody)
-      let amount_read = bit_builder.byte_size(data)
       parse_body(
         socket,
         BodyBuffer(
-          remaining: buffer.remaining - amount_read,
-          data: <<
-            buffer.data:bit_string,
-            bit_builder.to_bit_string(data):bit_string,
-          >>,
+          remaining: buffer.remaining - to_read,
+          data: <<buffer.data:bit_string, data:bit_string>>,
         ),
       )
     }
