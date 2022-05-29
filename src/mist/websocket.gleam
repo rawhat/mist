@@ -149,7 +149,7 @@ pub fn parse_key(key: String) -> String {
 
 pub fn upgrade_socket(
   req: Request(BitString),
-) -> Result(Response(BitString), Request(BitString)) {
+) -> Result(Response(BitBuilder), Request(BitString)) {
   try _upgrade =
     request.get_header(req, "upgrade")
     |> result.replace_error(req)
@@ -163,7 +163,7 @@ pub fn upgrade_socket(
   let accept_key = parse_key(key)
 
   response.new(101)
-  |> response.set_body(<<"":utf8>>)
+  |> response.set_body(bit_builder.from_bit_string(<<"":utf8>>))
   |> response.prepend_header("Upgrade", "websocket")
   |> response.prepend_header("Connection", "Upgrade")
   |> response.prepend_header("Sec-WebSocket-Accept", accept_key)

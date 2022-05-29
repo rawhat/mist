@@ -56,8 +56,13 @@ pub fn from_header(value: BitString) -> String {
   string.lowercase(value)
 }
 
+pub type Buffer {
+  Buffer(remaining: Int, data: BitString)
+}
+
 pub fn parse_headers(
   bs: BitString,
+  socket: Socket,
   headers: Map(String, String),
 ) -> Result(#(Map(String, String), BitString), DecodeError) {
   case decode_packet(HttphBin, bs, []) {
@@ -66,39 +71,39 @@ pub fn parse_headers(
       assert Ok(value) = bit_string.to_string(value)
       headers
       |> map.insert(field, value)
-      |> parse_headers(rest, _)
+      |> parse_headers(rest, socket, _)
     }
     Ok(EndOfHeaders(rest)) -> Ok(#(headers, rest))
-    _ -> Error(UnknownHeader)
+    Ok(MoreData(size)) -> {
+      let amount_to_read = option.unwrap(size, 0)
+      try next = read_data(socket, Buffer(amount_to_read, bs), UnknownHeader)
+      parse_headers(next, socket, headers)
+    }
+    _other -> Error(UnknownHeader)
   }
 }
 
-pub type BodyBuffer {
-  BodyBuffer(remaining: Int, data: BitString)
-}
-
-pub fn parse_body(
+pub fn read_data(
   socket: Socket,
-  buffer: BodyBuffer,
+  buffer: Buffer,
+  error: DecodeError,
 ) -> Result(BitString, DecodeError) {
-  case buffer.remaining > 0 {
-    True -> {
-      // TODO:  don't hard-code these, probably
-      let to_read = int.min(buffer.remaining, 1_000_000)
-      let timeout = 15_000
-      try data =
-        socket
-        |> tcp.receive_timeout(to_read, timeout)
-        |> result.replace_error(InvalidBody)
-      parse_body(
-        socket,
-        BodyBuffer(
-          remaining: buffer.remaining - to_read,
-          data: <<buffer.data:bit_string, data:bit_string>>,
-        ),
-      )
-    }
-    False -> Ok(buffer.data)
+  // TODO:  don't hard-code these, probably
+  let to_read = int.min(buffer.remaining, 1_000_000)
+  let timeout = 15_000
+  try data =
+    socket
+    |> tcp.receive_timeout(to_read, timeout)
+    |> result.replace_error(error)
+  let next_buffer =
+    Buffer(
+      remaining: buffer.remaining - to_read,
+      data: <<buffer.data:bit_string, data:bit_string>>,
+    )
+
+  case next_buffer.remaining > 0 {
+    True -> read_data(socket, next_buffer, error)
+    False -> Ok(next_buffer.data)
   }
 }
 
@@ -116,7 +121,7 @@ pub fn parse_request(
     |> http.parse_method
     |> result.replace_error(InvalidMethod)
 
-  try #(headers, rest) = parse_headers(rest, map.new())
+  try #(headers, rest) = parse_headers(rest, socket, map.new())
 
   try path =
     path
@@ -129,12 +134,15 @@ pub fn parse_request(
     |> result.then(int.parse)
     |> result.unwrap(0)
 
-  let #(remaining, initial_body) = case body_size {
-    0 -> #(0, <<>>)
-    _n -> #(body_size - bit_string.byte_size(rest), rest)
+  let remaining = body_size - bit_string.byte_size(rest)
+  try body = case body_size, remaining {
+    0, 0 -> Ok(<<>>)
+    0, _n ->
+      // is this pipelining? check for GET?
+      Ok(rest)
+    _n, 0 -> Ok(rest)
+    _size, _rem -> read_data(socket, Buffer(remaining, rest), InvalidBody)
   }
-
-  try body = parse_body(socket, BodyBuffer(remaining, initial_body))
 
   let req =
     request.new()
@@ -181,8 +189,8 @@ pub fn status_to_bit_string(status: Int) -> BitString {
 }
 
 /// Turns an HTTP response into a TCP message
-pub fn to_bit_builder(resp: Response(BitString)) -> BitBuilder {
-  let body_size = bit_string.byte_size(resp.body)
+pub fn to_bit_builder(resp: Response(BitBuilder)) -> BitBuilder {
+  let body_size = bit_builder.byte_size(resp.body)
 
   let headers =
     map.from_list([
@@ -203,7 +211,7 @@ pub fn to_bit_builder(resp: Response(BitString)) -> BitBuilder {
     0 -> bit_builder.new()
     _size ->
       bit_builder.new()
-      |> bit_builder.append(resp.body)
+      |> bit_builder.append_builder(resp.body)
       |> bit_builder.append(<<"\r\n":utf8>>)
   }
 
@@ -224,7 +232,7 @@ pub fn to_bit_builder(resp: Response(BitString)) -> BitBuilder {
 }
 
 pub type Handler =
-  fn(request.Request(BitString)) -> Response(BitString)
+  fn(request.Request(BitString)) -> Response(BitBuilder)
 
 pub type HandlerError {
   InvalidRequest(DecodeError)

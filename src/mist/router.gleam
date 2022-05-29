@@ -1,3 +1,4 @@
+import gleam/bit_builder
 import gleam/http/request
 import gleam/http/response
 import gleam/list
@@ -93,7 +94,7 @@ pub fn new(routes: List(HttpHandler)) -> tcp.LoopFn(State) {
             |> result.unwrap(actor.Stop(process.Normal))
           Error(_) ->
             response.new(404)
-            |> response.set_body(<<"":utf8>>)
+            |> response.set_body(bit_builder.from_bit_string(<<"":utf8>>))
             |> http.to_bit_builder
             |> tcp.send(state.socket, _)
             |> result.replace_error(Nil)
@@ -111,7 +112,7 @@ pub fn example_router() {
       ["home"],
       fn(_req) {
         response.new(200)
-        |> response.set_body(<<"sup home boy":utf8>>)
+        |> response.set_body(bit_builder.from_bit_string(<<"sup home boy":utf8>>))
       },
     ),
     Websocket(["echo", "test"], websocket.echo_handler),
@@ -119,7 +120,9 @@ pub fn example_router() {
       ["*"],
       fn(_req) {
         response.new(200)
-        |> response.set_body(<<"Hello, world!":utf8>>)
+        |> response.set_body(bit_builder.from_bit_string(<<
+          "Hello, world!":utf8,
+        >>))
       },
     ),
   ])

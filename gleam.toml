@@ -14,3 +14,4 @@ glisten = "~> 0.3"
 
 [dev-dependencies]
 gleeunit = "~> 0.6"
+gleam_hackney = "~> 0.2"
