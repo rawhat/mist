@@ -73,9 +73,9 @@ pub fn main() {
     8080,
     http.handler(fn(_req) {
       response.new(200)
-      |> response.set_body(<<"hello, world!":utf8>>)
+      |> response.set_body(bit_builder.from_bit_string(<<"hello, world!":utf8>>))
     }),
-    Nil
+    None
   )
   erlang.sleep_forever()
 }
@@ -84,9 +84,9 @@ pub fn main() {
 #### Full HTTP echo handler
 ```gleam
 pub fn main() {
-  let service = fn(req: Request(BitString)) -> Response(BitString) {
+  let service = fn(req: Request(BitString)) -> Response(BitBuilder) {
     response.new(200)
-    |> response.set_body(req.body)
+    |> response.set_body(bit_builder.from_bit_string(req.body))
   }
   assert Ok(_) = glisten.serve(
     8080,
