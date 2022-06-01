@@ -5,8 +5,8 @@ import gleam/http/response.{Response}
 import gleam/list
 import gleam/result
 import gleam/string
-import mist/http
 import glisten/tcp.{Socket}
+import mist/encoder
 
 // TODO:  need binary here as well
 pub type Message {
@@ -111,7 +111,7 @@ pub fn upgrade(socket: Socket, req: Request(BitString)) -> Result(Nil, Nil) {
 
   try _sent =
     resp
-    |> http.to_bit_builder
+    |> encoder.to_bit_builder
     |> tcp.send(socket, _)
     |> result.replace_error(Nil)
 

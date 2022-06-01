@@ -1,7 +1,6 @@
 import gleam/bit_builder.{BitBuilder}
 import gleam/http/request
 import gleam/http/response.{Response}
-import gleam/option.{None}
 import gleam/otp/process.{Sender}
 import gleam/set
 import gleeunit/should
@@ -20,7 +19,8 @@ pub fn echo_handler() -> mhttp.Handler {
 
 pub fn open_server(port: Int, handler: mhttp.Handler) -> Sender(tcp.Acceptor) {
   assert Ok(listener) = tcp.listen(port, [])
-  assert Ok(sender) = tcp.start_acceptor(listener, None, mhttp.handler(handler))
+  assert Ok(sender) =
+    tcp.start_acceptor(listener, mhttp.new_state(), mhttp.handler(handler))
   sender
 }
 

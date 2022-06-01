@@ -38,27 +38,23 @@ For example:
 pub fn main() {
   let my_router =
     router.new([
-      Http1(
+      router.Http1(
         ["home"],
         fn(_req) {
           response.new(200)
-          |> response.set_body(<<"sup home boy":utf8>>)
+          |> response.set_body(bit_builder.from_bit_string(<<"sup home boy":utf8>>))
         },
       ),
-      Websocket(["echo", "test"], websocket.echo_handler),
-      Http1(
+      router.Websocket(["echo", "test"], websocket.echo_handler),
+      router.Http1(
         ["*"],
         fn(_req) {
           response.new(200)
-          |> response.set_body(<<"Hello, world!":utf8>>)
+          |> response.set_body(bit_builder.from_bit_string(<<"Hello, world!":utf8>>))
         },
       ),
     ])
-  assert Ok(_) = glisten.serve(
-    8080,
-    my_router,
-    router.new_state()
-  )
+  assert Ok(_) = serve(8080, my_router)
   erlang.sleep_forever()
 }
 ```
@@ -90,8 +86,8 @@ pub fn main() {
   }
   assert Ok(_) = glisten.serve(
     8080,
-    router.new([Http1(["*"], service)]),
-    router.new_state(),
+    router.new([router.Http1(["*"], service)]),
+    http.new_state(),
   )
   erlang.sleep_forever()
 }
@@ -102,8 +98,8 @@ pub fn main() {
 pub fn main() {
   assert Ok(_) = glisten.serve(
     8080,
-    router.new([Websocket(["echo", "test"], websocket.echo_handler)]),
-    router.new_state(),
+    router.new([router.Websocket(["echo", "test"], websocket.echo_handler)]),
+    http.new_state(),
   )
   erlang.sleep_forever()
 }

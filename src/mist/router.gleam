@@ -2,12 +2,13 @@ import gleam/bit_builder
 import gleam/http/request
 import gleam/http/response
 import gleam/list
-import gleam/option.{None, Option, Some}
+import gleam/option.{None, Some}
 import gleam/otp/actor
 import gleam/otp/process
 import gleam/result
 import glisten/tcp.{LoopState}
-import mist/http
+import mist/encoder
+import mist/http.{State}
 import mist/websocket.{TextFrame, TextMessage}
 
 pub type Route(state) {
@@ -21,18 +22,6 @@ pub type Router {
 pub type HttpHandler {
   Http1(path: List(String), handler: http.Handler)
   Websocket(path: List(String), handler: websocket.Handler)
-}
-
-pub type State {
-  State(
-    upgraded_handler: Option(
-      fn(websocket.Message, tcp.Socket) -> Result(Nil, Nil),
-    ),
-  )
-}
-
-pub fn new_state() -> State {
-  State(upgraded_handler: None)
 }
 
 pub fn validate_path(path: List(String), req: List(String)) -> Result(Nil, Nil) {
@@ -80,14 +69,17 @@ pub fn new(routes: List(HttpHandler)) -> tcp.LoopFn(State) {
             req
             |> websocket.upgrade(state.socket, _)
             |> result.replace(actor.Continue(
-              LoopState(..state, data: State(Some(handler))),
+              LoopState(
+                ..state,
+                data: State(..state.data, upgraded_handler: Some(handler)),
+              ),
             ))
             |> result.replace_error(actor.Stop(process.Normal))
             |> result.unwrap_both
           Ok(Http1(_path, handler)) ->
             req
             |> handler
-            |> http.to_bit_builder
+            |> encoder.to_bit_builder
             |> tcp.send(state.socket, _)
             |> result.replace_error(Nil)
             |> result.replace(actor.Stop(process.Normal))
@@ -95,7 +87,7 @@ pub fn new(routes: List(HttpHandler)) -> tcp.LoopFn(State) {
           Error(_) ->
             response.new(404)
             |> response.set_body(bit_builder.from_bit_string(<<"":utf8>>))
-            |> http.to_bit_builder
+            |> encoder.to_bit_builder
             |> tcp.send(state.socket, _)
             |> result.replace_error(Nil)
             |> result.replace(actor.Stop(process.Normal))

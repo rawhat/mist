@@ -5,14 +5,15 @@ import gleam/http
 import gleam/http/request
 import gleam/http/response.{Response}
 import gleam/int
-import gleam/list
 import gleam/map.{Map}
-import gleam/option.{Option, Some}
+import gleam/option.{None, Option, Some}
 import gleam/otp/actor
 import gleam/otp/process
 import gleam/result
 import gleam/string
 import glisten/tcp.{LoopState, Socket}
+import mist/encoder
+import mist/websocket
 
 pub type PacketType {
   Http
@@ -153,84 +154,6 @@ pub fn parse_request(
   Ok(request.Request(..req, headers: map.to_list(headers)))
 }
 
-pub fn encode_headers(headers: map.Map(String, String)) -> BitBuilder {
-  map.fold(
-    headers,
-    bit_builder.new(),
-    fn(builder, header, value) {
-      builder
-      |> bit_builder.append_string(header)
-      |> bit_builder.append(<<": ":utf8>>)
-      |> bit_builder.append_string(value)
-      |> bit_builder.append(<<"\r\n":utf8>>)
-    },
-  )
-}
-
-pub fn status_to_bit_string(status: Int) -> BitString {
-  // Obviously nowhere near exhaustive...
-  case status {
-    101 -> <<"Switching Protocols":utf8>>
-    200 -> <<"Ok":utf8>>
-    201 -> <<"Created":utf8>>
-    202 -> <<"Accepted":utf8>>
-    204 -> <<"No Content":utf8>>
-    301 -> <<"Moved Permanently":utf8>>
-    400 -> <<"Bad Request":utf8>>
-    401 -> <<"Unauthorized":utf8>>
-    403 -> <<"Forbidden":utf8>>
-    404 -> <<"Not Found":utf8>>
-    405 -> <<"Method Not Allowed":utf8>>
-    500 -> <<"Internal Server Error":utf8>>
-    502 -> <<"Bad Gateway":utf8>>
-    503 -> <<"Service Unavailable":utf8>>
-    504 -> <<"Gateway Timeout":utf8>>
-  }
-}
-
-/// Turns an HTTP response into a TCP message
-pub fn to_bit_builder(resp: Response(BitBuilder)) -> BitBuilder {
-  let body_size = bit_builder.byte_size(resp.body)
-
-  let headers =
-    map.from_list([
-      #("content-type", "text/plain; charset=utf-8"),
-      #("content-length", int.to_string(body_size)),
-      #("connection", "keep-alive"),
-    ])
-    |> list.fold(
-      resp.headers,
-      _,
-      fn(defaults, tup) {
-        let #(key, value) = tup
-        map.insert(defaults, key, value)
-      },
-    )
-
-  let body_builder = case body_size {
-    0 -> bit_builder.new()
-    _size ->
-      bit_builder.new()
-      |> bit_builder.append_builder(resp.body)
-      |> bit_builder.append(<<"\r\n":utf8>>)
-  }
-
-  let status_string =
-    resp.status
-    |> int.to_string
-    |> bit_builder.from_string
-    |> bit_builder.append(<<" ":utf8>>)
-    |> bit_builder.append(status_to_bit_string(resp.status))
-
-  bit_builder.new()
-  |> bit_builder.append(<<"HTTP/1.1 ":utf8>>)
-  |> bit_builder.append_builder(status_string)
-  |> bit_builder.append(<<"\r\n":utf8>>)
-  |> bit_builder.append_builder(encode_headers(headers))
-  |> bit_builder.append(<<"\r\n":utf8>>)
-  |> bit_builder.append_builder(body_builder)
-}
-
 pub type Handler =
   fn(request.Request(BitString)) -> Response(BitBuilder)
 
@@ -239,12 +162,25 @@ pub type HandlerError {
   NotFound
 }
 
+pub type State {
+  State(
+    idle_timer: Option(process.Timer),
+    upgraded_handler: Option(
+      fn(websocket.Message, tcp.Socket) -> Result(Nil, Nil),
+    ),
+  )
+}
+
+pub fn new_state() -> State {
+  State(None, None)
+}
+
 /// This method helps turn an HTTP handler into a TCP handler that you can
 /// pass to `mist.serve` or `glisten.serve`
-pub fn handler(func: Handler) -> tcp.LoopFn(Option(process.Timer)) {
-  tcp.handler(fn(msg, state) {
-    let tcp.LoopState(socket, sender, data: timer) = state
-    let _ = case timer {
+pub fn handler(func: Handler) -> tcp.LoopFn(State) {
+  tcp.handler(fn(msg, socket_state: tcp.LoopState(State)) {
+    let tcp.LoopState(socket, sender, data: state) = socket_state
+    let _ = case state.idle_timer {
       Some(t) -> process.cancel_timer(t)
       _ -> process.TimerNotFound
     }
@@ -253,7 +189,7 @@ pub fn handler(func: Handler) -> tcp.LoopFn(Option(process.Timer)) {
     assert Ok(req) = parse_request(msg, socket)
     let resp = func(req)
 
-    let raw_response = to_bit_builder(resp)
+    let raw_response = encoder.to_bit_builder(resp)
     assert Ok(_) = tcp.send(socket, raw_response)
 
     // If the handler explicitly says to close the connection, we should
@@ -266,7 +202,12 @@ pub fn handler(func: Handler) -> tcp.LoopFn(Option(process.Timer)) {
       _ -> {
         // TODO:  this should be a configuration
         let timer = process.send_after(sender, 10_000, tcp.Close)
-        actor.Continue(LoopState(..state, data: Some(timer)))
+        actor.Continue(
+          LoopState(
+            ..socket_state,
+            data: State(..state, idle_timer: Some(timer)),
+          ),
+        )
       }
     }
   })
