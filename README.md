@@ -21,9 +21,9 @@ you can customize to your heart's content.  In that case, you want:
 pub fn main() {
   assert Ok(_) = mist.serve(
     8080,
-    http.handler(fn(_req) {
+    http.handler(fn(req: Request(BitString)) {
       response.new(200)
-      // ...
+      |> response.set_body(bit_builder.from_bit_string(<<"hello, world!":utf8>>))
     })
   )
   erlang.sleep_forever()
@@ -31,79 +31,33 @@ pub fn main() {
 ```
 
 Maybe you also want to work with websockets.  Maybe those should only be
-upgradable at a certain endpoint.  For that, you can use the router module.
+upgradable at a certain endpoint.  For that, you can use `http_func`.
 For example:
 
 ```gleam
 pub fn main() {
-  let my_router =
-    router.new([
-      router.Http1(
-        ["home"],
-        fn(_req) {
+  assert Ok(_) = serve(
+    8080,
+    http.handler_func(fn(req: Request(BitString)) {
+      case request.path_segments(req) {
+        ["echo", "test"] -> Upgrade(websocket.echo_handler)
+        ["home"] ->
           response.new(200)
           |> response.set_body(bit_builder.from_bit_string(<<"sup home boy":utf8>>))
-        },
-      ),
-      router.Websocket(["echo", "test"], websocket.echo_handler),
-      router.Http1(
-        ["*"],
-        fn(_req) {
+          |> HttpResponse
+        _ ->
           response.new(200)
           |> response.set_body(bit_builder.from_bit_string(<<"Hello, world!":utf8>>))
-        },
-      ),
-    ])
-  assert Ok(_) = serve(8080, my_router)
-  erlang.sleep_forever()
-}
-```
-
-If you need something a little more complex, you can always use the helpers
-exported by the various `glisten`/`mist` modules.
-
-#### HTTP Hello World
-```gleam
-pub fn main() {
-  assert Ok(_) = glisten.serve(
-    8080,
-    http.handler(fn(_req) {
-      response.new(200)
-      |> response.set_body(bit_builder.from_bit_string(<<"hello, world!":utf8>>))
-    }),
-    None
+          |> HttpResponse
+      }
+    })
   )
   erlang.sleep_forever()
 }
 ```
 
-#### Full HTTP echo handler
-```gleam
-pub fn main() {
-  let service = fn(req: Request(BitString)) -> Response(BitBuilder) {
-    response.new(200)
-    |> response.set_body(bit_builder.from_bit_string(req.body))
-  }
-  assert Ok(_) = glisten.serve(
-    8080,
-    router.new([router.Http1(["*"], service)]),
-    http.new_state(),
-  )
-  erlang.sleep_forever()
-}
-```
-
-#### Websocket echo handler
-```gleam
-pub fn main() {
-  assert Ok(_) = glisten.serve(
-    8080,
-    router.new([router.Websocket(["echo", "test"], websocket.echo_handler)]),
-    http.new_state(),
-  )
-  erlang.sleep_forever()
-}
-```
+If you need something a little more complex or custom, you can always use the
+helpers exported by the various `glisten`/`mist` modules.
 
 ## Benchmarks
 

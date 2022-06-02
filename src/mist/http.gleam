@@ -2,7 +2,7 @@ import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
 import gleam/erlang/atom.{Atom}
 import gleam/http
-import gleam/http/request
+import gleam/http/request.{Request}
 import gleam/http/response.{Response}
 import gleam/int
 import gleam/map.{Map}
@@ -175,39 +175,93 @@ pub fn new_state() -> State {
   State(None, None)
 }
 
-/// This method helps turn an HTTP handler into a TCP handler that you can
-/// pass to `mist.serve` or `glisten.serve`
-pub fn handler(func: Handler) -> tcp.LoopFn(State) {
-  tcp.handler(fn(msg, socket_state: tcp.LoopState(State)) {
+pub type HandlerResponse {
+  Upgrade(with_handler: websocket.Handler)
+  HttpResponse(response: Response(BitBuilder))
+}
+
+pub type HandlerFunc =
+  fn(Request(BitString)) -> HandlerResponse
+
+const stop_normal = actor.Stop(process.Normal)
+
+/// Creates a standard HTTP handler service to pass to `mist.serve`
+pub fn handler(handler: Handler) -> tcp.LoopFn(State) {
+  handler_func(fn(req) {
+    req
+    |> handler
+    |> HttpResponse
+  })
+}
+
+/// This is a more flexible handler. It will allow you to upgrade a connection
+/// to a websocket connection, or deal with a regular HTTP req->resp workflow.
+pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
+  tcp.handler(fn(msg, socket_state: LoopState(State)) {
     let tcp.LoopState(socket, sender, data: state) = socket_state
-    let _ = case state.idle_timer {
-      Some(t) -> process.cancel_timer(t)
-      _ -> process.TimerNotFound
-    }
-
-    // TODO:  notify about malformed requests here, as well
-    assert Ok(req) = parse_request(msg, socket)
-    let resp = func(req)
-
-    let raw_response = encoder.to_bit_builder(resp)
-    assert Ok(_) = tcp.send(socket, raw_response)
-
-    // If the handler explicitly says to close the connection, we should
-    // probably listen to them
-    case response.get_header(resp, "connection") {
-      Ok("close") -> {
-        tcp.close(socket)
-        actor.Stop(process.Normal)
-      }
-      _ -> {
-        // TODO:  this should be a configuration
-        let timer = process.send_after(sender, 10_000, tcp.Close)
-        actor.Continue(
-          LoopState(
-            ..socket_state,
-            data: State(..state, idle_timer: Some(timer)),
-          ),
-        )
+    case state.upgraded_handler {
+      Some(handler) ->
+        case websocket.frame_from_message(msg) {
+          Ok(websocket.TextFrame(payload: payload, ..)) ->
+            payload
+            |> websocket.TextMessage
+            |> handler(socket)
+            |> result.replace(actor.Continue(socket_state))
+            |> result.replace_error(stop_normal)
+            |> result.unwrap_both
+          Error(_) ->
+            // TODO:  not normal
+            stop_normal
+        }
+      None -> {
+        let _ = case state.idle_timer {
+          Some(t) -> process.cancel_timer(t)
+          _ -> process.TimerNotFound
+        }
+        msg
+        |> parse_request(socket)
+        |> result.replace_error(stop_normal)
+        |> result.map(fn(req) {
+          case handler(req) {
+            HttpResponse(http_resp) ->
+              socket
+              |> tcp.send(encoder.to_bit_builder(http_resp))
+              |> result.map(fn(_sent) {
+                // If the handler explicitly says to close the connection, we should
+                // probably listen to them
+                case response.get_header(http_resp, "connection") {
+                  Ok("close") -> {
+                    tcp.close(socket)
+                    actor.Stop(process.Normal)
+                  }
+                  _ -> {
+                    // TODO:  this should be a configuration
+                    let timer = process.send_after(sender, 10_000, tcp.Close)
+                    actor.Continue(
+                      LoopState(
+                        ..socket_state,
+                        data: State(..state, idle_timer: Some(timer)),
+                      ),
+                    )
+                  }
+                }
+              })
+              |> result.replace_error(stop_normal)
+              |> result.unwrap_both
+            Upgrade(with_handler) ->
+              req
+              |> websocket.upgrade(socket, _)
+              |> result.replace(actor.Continue(
+                LoopState(
+                  ..socket_state,
+                  data: State(..state, upgraded_handler: Some(with_handler)),
+                ),
+              ))
+              |> result.replace_error(actor.Stop(process.Normal))
+              |> result.unwrap_both
+          }
+        })
+        |> result.unwrap_both
       }
     }
   })
