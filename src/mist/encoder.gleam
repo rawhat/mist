@@ -1,4 +1,5 @@
 import gleam/bit_builder.{BitBuilder}
+import gleam/http.{Header}
 import gleam/http/response.{Response}
 import gleam/int
 import gleam/list
@@ -31,12 +32,18 @@ pub fn to_bit_builder(resp: Response(BitBuilder)) -> BitBuilder {
       |> bit_builder.append(<<"\r\n":utf8>>)
   }
 
+  resp.status
+  |> response_builder(map.to_list(headers))
+  |> bit_builder.append_builder(body_builder)
+}
+
+pub fn response_builder(status: Int, headers: List(Header)) -> BitBuilder {
   let status_string =
-    resp.status
+    status
     |> int.to_string
     |> bit_builder.from_string
     |> bit_builder.append(<<" ":utf8>>)
-    |> bit_builder.append(status_to_bit_string(resp.status))
+    |> bit_builder.append(status_to_bit_string(status))
 
   bit_builder.new()
   |> bit_builder.append(<<"HTTP/1.1 ":utf8>>)
@@ -44,7 +51,6 @@ pub fn to_bit_builder(resp: Response(BitBuilder)) -> BitBuilder {
   |> bit_builder.append(<<"\r\n":utf8>>)
   |> bit_builder.append_builder(encode_headers(headers))
   |> bit_builder.append(<<"\r\n":utf8>>)
-  |> bit_builder.append_builder(body_builder)
 }
 
 pub fn status_to_bit_string(status: Int) -> BitString {
@@ -68,11 +74,13 @@ pub fn status_to_bit_string(status: Int) -> BitString {
   }
 }
 
-pub fn encode_headers(headers: map.Map(String, String)) -> BitBuilder {
-  map.fold(
+pub fn encode_headers(headers: List(Header)) -> BitBuilder {
+  list.fold(
     headers,
     bit_builder.new(),
-    fn(builder, header, value) {
+    fn(builder, tup) {
+      let #(header, value) = tup
+
       builder
       |> bit_builder.append_string(header)
       |> bit_builder.append(<<": ":utf8>>)

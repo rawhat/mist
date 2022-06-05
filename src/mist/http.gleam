@@ -13,6 +13,7 @@ import gleam/result
 import gleam/string
 import glisten/tcp.{LoopState, Socket}
 import mist/encoder
+import mist/file
 import mist/websocket
 
 pub type PacketType {
@@ -176,8 +177,15 @@ pub fn new_state() -> State {
 }
 
 pub type HandlerResponse {
-  Upgrade(with_handler: websocket.Handler)
   HttpResponse(response: Response(BitBuilder))
+  SendFile(
+    file_descriptor: file.FileDescriptor,
+    response: Response(BitBuilder),
+    content_type: String,
+    offset: Int,
+    length: Int,
+  )
+  Upgrade(with_handler: websocket.Handler)
 }
 
 pub type HandlerFunc =
@@ -232,7 +240,7 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
                 case response.get_header(http_resp, "connection") {
                   Ok("close") -> {
                     tcp.close(socket)
-                    actor.Stop(process.Normal)
+                    stop_normal
                   }
                   _ -> {
                     // TODO:  this should be a configuration
@@ -248,6 +256,27 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
               })
               |> result.replace_error(stop_normal)
               |> result.unwrap_both
+            SendFile(file_descriptor, resp, content_type, offset, length) -> {
+              let header =
+                resp
+                |> response.prepend_header(
+                  "content-length",
+                  int.to_string(length - offset),
+                )
+                |> response.prepend_header("content-type", content_type)
+                |> fn(r: Response(BitBuilder)) {
+                  encoder.response_builder(resp.status, r.headers)
+                }
+              socket
+              |> tcp.send(header)
+              |> result.map(fn(_) {
+                file.sendfile(file_descriptor, socket, offset, length, [])
+              })
+              |> result.replace(actor.Continue(socket_state))
+              // TODO:  not normal
+              |> result.replace_error(stop_normal)
+              |> result.unwrap_both
+            }
             Upgrade(with_handler) ->
               req
               |> websocket.upgrade(socket, _)
@@ -257,7 +286,8 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
                   data: State(..state, upgraded_handler: Some(with_handler)),
                 ),
               ))
-              |> result.replace_error(actor.Stop(process.Normal))
+              // TODO:  not normal
+              |> result.replace_error(stop_normal)
               |> result.unwrap_both
           }
         })
