@@ -3,7 +3,7 @@ import gleam/bit_string
 import gleam/erlang/atom.{Atom}
 import gleam/http
 import gleam/http/request.{Request}
-import gleam/http/response.{Response}
+import gleam/http/response
 import gleam/int
 import gleam/map.{Map}
 import gleam/option.{None, Option, Some}
@@ -156,7 +156,7 @@ pub fn parse_request(
 }
 
 pub type Handler =
-  fn(request.Request(BitString)) -> Response(BitBuilder)
+  fn(request.Request(BitString)) -> response.Response(BitBuilder)
 
 pub type HandlerError {
   InvalidRequest(DecodeError)
@@ -176,15 +176,18 @@ pub fn new_state() -> State {
   State(None, None)
 }
 
-pub type HandlerResponse {
-  HttpResponse(response: Response(BitBuilder))
-  SendFile(
+pub type HttpResponseBody {
+  BitBuilderBody(BitBuilder)
+  FileBody(
     file_descriptor: file.FileDescriptor,
-    response: Response(BitBuilder),
     content_type: String,
     offset: Int,
     length: Int,
   )
+}
+
+pub type HandlerResponse {
+  Response(response: response.Response(HttpResponseBody))
   Upgrade(with_handler: websocket.Handler)
 }
 
@@ -198,7 +201,8 @@ pub fn handler(handler: Handler) -> tcp.LoopFn(State) {
   handler_func(fn(req) {
     req
     |> handler
-    |> HttpResponse
+    |> response.map(BitBuilderBody)
+    |> Response
   })
 }
 
@@ -231,13 +235,17 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
         |> result.replace_error(stop_normal)
         |> result.map(fn(req) {
           case handler(req) {
-            HttpResponse(http_resp) ->
-              socket
-              |> tcp.send(encoder.to_bit_builder(http_resp))
+            Response(
+              response: response.Response(body: BitBuilderBody(body), ..) as resp,
+            ) ->
+              resp
+              |> response.set_body(body)
+              |> encoder.to_bit_builder
+              |> tcp.send(socket, _)
               |> result.map(fn(_sent) {
                 // If the handler explicitly says to close the connection, we should
                 // probably listen to them
-                case response.get_header(http_resp, "connection") {
+                case response.get_header(resp, "connection") {
                   Ok("close") -> {
                     tcp.close(socket)
                     stop_normal
@@ -256,7 +264,12 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
               })
               |> result.replace_error(stop_normal)
               |> result.unwrap_both
-            SendFile(file_descriptor, resp, content_type, offset, length) -> {
+            Response(
+              response: response.Response(
+                body: FileBody(file_descriptor, content_type, offset, length),
+                ..,
+              ) as resp,
+            ) -> {
               let header =
                 resp
                 |> response.prepend_header(
@@ -264,7 +277,8 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
                   int.to_string(length - offset),
                 )
                 |> response.prepend_header("content-type", content_type)
-                |> fn(r: Response(BitBuilder)) {
+                |> response.set_body(bit_builder.new())
+                |> fn(r: response.Response(BitBuilder)) {
                   encoder.response_builder(resp.status, r.headers)
                 }
               socket

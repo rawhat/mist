@@ -14,18 +14,21 @@ and its documentation can be found at <https://hexdocs.pm/mist>.
 
 ## Usage
 
-Right now there are 2 options.  Let's say you want a "simple" HTTP server that
-you can customize to your heart's content.  In that case, you want:
+Right now there are a few options.  Let's say you want a "simple" HTTP server
+that you can customize to your heart's content.  In that case, you want:
 
 ```gleam
 pub fn main() {
-  assert Ok(_) = mist.serve(
-    8080,
-    http.handler(fn(req: Request(BitString)) {
-      response.new(200)
-      |> response.set_body(bit_builder.from_bit_string(<<"hello, world!":utf8>>))
-    })
-  )
+  assert Ok(_) =
+    serve(
+      8080,
+      http.handler(fn(_req: Request(BitString)) {
+        response.new(200)
+        |> response.set_body(bit_builder.from_bit_string(<<
+          "hello, world!":utf8,
+        >>))
+      }),
+    )
   erlang.sleep_forever()
 }
 ```
@@ -36,22 +39,70 @@ For example:
 
 ```gleam
 pub fn main() {
-  assert Ok(_) = serve(
-    8080,
-    http.handler_func(fn(req: Request(BitString)) {
-      case request.path_segments(req) {
-        ["echo", "test"] -> Upgrade(websocket.echo_handler)
-        ["home"] ->
-          response.new(200)
-          |> response.set_body(bit_builder.from_bit_string(<<"sup home boy":utf8>>))
-          |> HttpResponse
-        _ ->
-          response.new(200)
-          |> response.set_body(bit_builder.from_bit_string(<<"Hello, world!":utf8>>))
-          |> HttpResponse
-      }
-    })
-  )
+  assert Ok(_) =
+    serve(
+      8080,
+      http.handler_func(fn(req: Request(BitString)) {
+        case request.path_segments(req) {
+          ["echo", "test"] -> Upgrade(websocket.echo_handler)
+          ["home"] ->
+            response.new(200)
+            |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<
+              "sup home boy":utf8,
+            >>)))
+            // NOTE: This is response from `mist/http`
+            |> Response
+          _ ->
+            response.new(200)
+            |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<
+              "Hello, world!":utf8,
+            >>)))
+            |> Response
+        }
+      }),
+    )
+  erlang.sleep_forever()
+}
+```
+
+There is some initial support for sending files as well:
+
+```gleam
+import mist/file
+import mist/http.{BitBuilderBody, FileBody} as mhttp
+// ...
+
+pub fn main() {
+  assert Ok(_) =
+    serve(
+      8080,
+      http.handler_func(fn(req: Request(BitString)) {
+        case request.path_segments(req) {
+          ["static", ..path] -> {
+            // verify, validate, etc
+            let file_path =
+              path
+              |> string.join("/")
+              |> string.append("/", _)
+              |> bit_string.from_string
+            let size = file.size(file_path)
+            assert Ok(fd) = file.open(file_path)
+            response.new(200)
+            |> response.set_body(FileBody(fd, int.to_string(size), 0, size - 1))
+            |> mhttp.Response
+          }
+          [] | ["index.html"] ->
+            // ...
+            response.new(404)
+            |> response.set_body(BitBuilderBody(bit_builder.new()))
+            |> mhttp.Response
+          _ ->
+            response.new(404)
+            |> response.set_body(BitBuilderBody(bit_builder.new()))
+            |> mhttp.Response
+        }
+      }),
+    )
   erlang.sleep_forever()
 }
 ```

@@ -7,13 +7,13 @@ pub type FileMode {
   Raw
 }
 
-pub external fn file_open(
+external fn file_open(
   file: BitString,
   modes: List(FileMode),
 ) -> Result(FileDescriptor, Atom) =
   "file" "open"
 
-pub external fn file_size(path: String) -> Int =
+pub external fn size(path: BitString) -> Int =
   "filelib" "file_size"
 
 pub external fn uri_unquote(uri: String) -> String =
@@ -27,3 +27,7 @@ pub external fn sendfile(
   options: List(a),
 ) -> Result(Int, Atom) =
   "file" "sendfile"
+
+pub fn open(file: BitString) -> Result(FileDescriptor, Atom) {
+  file_open(file, [Raw])
+}
