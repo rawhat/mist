@@ -1,6 +1,7 @@
 import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
 import gleam/erlang/atom.{Atom}
+import gleam/erlang.{Errored, Exited, Thrown, rescue}
 import gleam/http
 import gleam/http/request.{Request}
 import gleam/http/response
@@ -14,6 +15,7 @@ import gleam/string
 import glisten/tcp.{LoopState, Socket}
 import mist/encoder
 import mist/file
+import mist/logger
 import mist/websocket
 
 pub type PacketType {
@@ -217,8 +219,12 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
           Ok(websocket.TextFrame(payload: payload, ..)) ->
             payload
             |> websocket.TextMessage
-            |> handler(socket)
+            |> fn(ws_msg) { rescue(fn() { handler(ws_msg, socket) }) }
             |> result.replace(actor.Continue(socket_state))
+            |> result.map_error(fn(err) {
+              logger.error(err)
+              err
+            })
             |> result.replace_error(stop_normal)
             |> result.unwrap_both
           Error(_) ->
@@ -234,10 +240,10 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
         |> parse_request(socket)
         |> result.replace_error(stop_normal)
         |> result.map(fn(req) {
-          case handler(req) {
-            Response(
+          case rescue(fn() { handler(req) }) {
+            Ok(Response(
               response: response.Response(body: BitBuilderBody(body), ..) as resp,
-            ) ->
+            )) ->
               resp
               |> response.set_body(body)
               |> encoder.to_bit_builder
@@ -264,12 +270,12 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
               })
               |> result.replace_error(stop_normal)
               |> result.unwrap_both
-            Response(
+            Ok(Response(
               response: response.Response(
                 body: FileBody(file_descriptor, content_type, offset, length),
                 ..,
               ) as resp,
-            ) -> {
+            )) -> {
               let header =
                 resp
                 |> response.prepend_header(
@@ -291,7 +297,7 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
               |> result.replace_error(stop_normal)
               |> result.unwrap_both
             }
-            Upgrade(with_handler) ->
+            Ok(Upgrade(with_handler)) ->
               req
               |> websocket.upgrade(socket, _)
               |> result.replace(actor.Continue(
@@ -303,6 +309,20 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
               // TODO:  not normal
               |> result.replace_error(stop_normal)
               |> result.unwrap_both
+            Error(Exited(msg) as err) | Error(Thrown(msg) as err) | Error(
+              Errored(msg) as err,
+            ) -> {
+              logger.error(err)
+              response.new(500)
+              |> response.set_body(bit_builder.from_bit_string(<<
+                "Internal Server Error":utf8,
+              >>))
+              |> response.prepend_header("content-length", "21")
+              |> encoder.to_bit_builder
+              |> tcp.send(socket, _)
+              tcp.close(socket)
+              actor.Stop(process.Abnormal(msg))
+            }
           }
         })
         |> result.unwrap_both
