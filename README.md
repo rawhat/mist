@@ -27,15 +27,11 @@ pub fn main() {
         |> response.set_body(bit_builder.from_bit_string(<<
           "hello, world!":utf8,
         >>))
-        |> response.prepend_header("content-length", "13")
       },
     )
   erlang.sleep_forever()
 }
 ```
-
-NOTE:  We do not automatically set content type or length. Some tools can hang
-if the `content-length` header has not been set.
 
 Maybe you also want to work with websockets.  Maybe those should only be
 upgradable at a certain endpoint.  For that, you can use `http_func`.
@@ -54,7 +50,6 @@ pub fn main() {
             |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<
               "sup home boy":utf8,
             >>)))
-            |> response.prepend_header("content-length", "12")
             // NOTE: This is response from `mist/http`
             |> Response
           _ ->
@@ -62,7 +57,6 @@ pub fn main() {
             |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<
               "Hello, world!":utf8,
             >>)))
-            |> response.prepend_header("content-length", "13")
             |> Response
         }
       }),

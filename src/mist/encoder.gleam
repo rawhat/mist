@@ -10,7 +10,10 @@ pub fn to_bit_builder(resp: Response(BitBuilder)) -> BitBuilder {
   let body_size = bit_builder.byte_size(resp.body)
 
   let headers =
-    map.from_list([#("connection", "keep-alive")])
+    map.from_list([
+      #("content-length", int.to_string(body_size)),
+      #("connection", "keep-alive"),
+    ])
     |> list.fold(
       resp.headers,
       _,
