@@ -3,6 +3,8 @@ import gleam/bit_string
 import gleam/http/request.{Request}
 import gleam/http/response.{Response}
 import gleam/list
+import gleam/option.{None, Option, Some}
+import gleam/otp/process.{Sender}
 import gleam/result
 import gleam/string
 import glisten/tcp.{Socket}
@@ -104,6 +106,7 @@ pub fn frame_to_bit_builder(frame: Frame) -> BitBuilder {
   }
 }
 
+// TODO: improve this error type
 pub fn upgrade(socket: Socket, req: Request(BitString)) -> Result(Nil, Nil) {
   try resp =
     upgrade_socket(req)
@@ -174,4 +177,22 @@ pub fn echo_handler(msg: Message, socket: Socket) -> Result(Nil, Nil) {
   assert Ok(_resp) = send(socket, msg.data)
 
   Ok(Nil)
+}
+
+pub type WebsocketHandler {
+  WebsocketHandler(
+    on_init: Option(fn(Sender(tcp.HandlerMessage)) -> Nil),
+    handler: Handler,
+  )
+}
+
+pub fn with_handler(func: Handler) -> WebsocketHandler {
+  WebsocketHandler(on_init: None, handler: func)
+}
+
+pub fn on_init(
+  handler: WebsocketHandler,
+  func: fn(Sender(tcp.HandlerMessage)) -> Nil,
+) -> WebsocketHandler {
+  WebsocketHandler(..handler, on_init: Some(func))
 }

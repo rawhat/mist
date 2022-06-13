@@ -24,3 +24,47 @@ pub fn serve(
   |> tcp.acceptor_pool_with_data(mhttp.new_state())
   |> glisten.serve(port, _)
 }
+
+import gleam/bit_builder
+import gleam/erlang
+import gleam/http/request.{Request}
+import gleam/http/response
+import gleam/io
+import gleam/otp/process.{Sender}
+import mist/http.{BitBuilderBody, Response, Upgrade}
+import mist/websocket
+
+fn on_init(sender: Sender(a)) -> Nil {
+  io.debug(#("we got a ws connection", sender))
+  Nil
+}
+
+pub fn main() {
+  assert Ok(_) =
+    serve(
+      8080,
+      http.handler_func(fn(req: Request(BitString)) {
+        case request.path_segments(req) {
+          ["echo", "test"] ->
+            websocket.echo_handler
+            |> websocket.with_handler
+            |> websocket.on_init(on_init)
+            |> Upgrade
+          ["home"] ->
+            response.new(200)
+            |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<
+              "sup home boy":utf8,
+            >>)))
+            // NOTE: This is response from `mist/http`
+            |> Response
+          _ ->
+            response.new(200)
+            |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<
+              "Hello, world!":utf8,
+            >>)))
+            |> Response
+        }
+      }),
+    )
+  erlang.sleep_forever()
+}

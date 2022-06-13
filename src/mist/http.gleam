@@ -168,9 +168,7 @@ pub type HandlerError {
 pub type State {
   State(
     idle_timer: Option(process.Timer),
-    upgraded_handler: Option(
-      fn(websocket.Message, tcp.Socket) -> Result(Nil, Nil),
-    ),
+    upgraded_handler: Option(websocket.WebsocketHandler),
   )
 }
 
@@ -190,7 +188,7 @@ pub type HttpResponseBody {
 
 pub type HandlerResponse {
   Response(response: response.Response(HttpResponseBody))
-  Upgrade(with_handler: websocket.Handler)
+  Upgrade(websocket.WebsocketHandler)
 }
 
 pub type HandlerFunc =
@@ -214,12 +212,14 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
   tcp.handler(fn(msg, socket_state: LoopState(State)) {
     let tcp.LoopState(socket, sender, data: state) = socket_state
     case state.upgraded_handler {
-      Some(handler) ->
+      Some(ws_handler) ->
         case websocket.frame_from_message(msg) {
           Ok(websocket.TextFrame(payload: payload, ..)) ->
             payload
             |> websocket.TextMessage
-            |> fn(ws_msg) { rescue(fn() { handler(ws_msg, socket) }) }
+            |> fn(ws_msg) {
+              rescue(fn() { ws_handler.handler(ws_msg, socket) })
+            }
             |> result.replace(actor.Continue(socket_state))
             |> result.map_error(fn(err) {
               logger.error(err)
@@ -275,20 +275,18 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
                 body: FileBody(file_descriptor, content_type, offset, length),
                 ..,
               ) as resp,
-            )) -> {
-              let header =
-                resp
-                |> response.prepend_header(
-                  "content-length",
-                  int.to_string(length - offset),
-                )
-                |> response.prepend_header("content-type", content_type)
-                |> response.set_body(bit_builder.new())
-                |> fn(r: response.Response(BitBuilder)) {
-                  encoder.response_builder(resp.status, r.headers)
-                }
-              socket
-              |> tcp.send(header)
+            )) ->
+              resp
+              |> response.prepend_header(
+                "content-length",
+                int.to_string(length - offset),
+              )
+              |> response.prepend_header("content-type", content_type)
+              |> response.set_body(bit_builder.new())
+              |> fn(r: response.Response(BitBuilder)) {
+                encoder.response_builder(resp.status, r.headers)
+              }
+              |> tcp.send(socket, _)
               |> result.map(fn(_) {
                 file.sendfile(file_descriptor, socket, offset, length, [])
               })
@@ -296,10 +294,15 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
               // TODO:  not normal
               |> result.replace_error(stop_normal)
               |> result.unwrap_both
-            }
             Ok(Upgrade(with_handler)) ->
               req
               |> websocket.upgrade(socket, _)
+              |> result.map(fn(_nil) {
+                let _ = case with_handler.on_init {
+                  Some(func) -> func(sender)
+                  _ -> Nil
+                }
+              })
               |> result.replace(actor.Continue(
                 LoopState(
                   ..socket_state,
