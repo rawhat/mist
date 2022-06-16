@@ -8,7 +8,10 @@ pub fn run_service(
   port: Int,
   handler: mhttp.Handler,
 ) -> Result(Nil, glisten.StartError) {
-  glisten.serve(port, mhttp.handler(handler), mhttp.new_state())
+  handler
+  |> mhttp.handler
+  |> tcp.acceptor_pool_with_data(mhttp.new_state())
+  |> glisten.serve(port, _)
 }
 
 /// Slightly more flexible alternative to `run_service`. This allows hooking
@@ -17,5 +20,7 @@ pub fn serve(
   port: Int,
   handler: tcp.LoopFn(State),
 ) -> Result(Nil, glisten.StartError) {
-  glisten.serve(port, handler, mhttp.new_state())
+  handler
+  |> tcp.acceptor_pool_with_data(mhttp.new_state())
+  |> glisten.serve(port, _)
 }

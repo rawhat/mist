@@ -17,10 +17,17 @@ pub fn echo_handler() -> mhttp.Handler {
   }
 }
 
-pub fn open_server(port: Int, handler: mhttp.Handler) -> Sender(tcp.Acceptor) {
+pub fn open_server(
+  port: Int,
+  handler: mhttp.Handler,
+) -> Sender(tcp.AcceptorMessage) {
   assert Ok(listener) = tcp.listen(port, [])
-  assert Ok(sender) =
-    tcp.start_acceptor(listener, mhttp.new_state(), mhttp.handler(handler))
+  let pool =
+    handler
+    |> mhttp.handler
+    |> tcp.acceptor_pool_with_data(mhttp.new_state())
+    |> fn(func) { func(listener) }
+  assert Ok(sender) = tcp.start_acceptor(pool)
   sender
 }
 
