@@ -34,17 +34,23 @@ pub fn main() {
 ```
 
 Maybe you also want to work with websockets.  Maybe those should only be
-upgradable at a certain endpoint.  For that, you can use `http_func`.
-For example:
+upgradable at a certain endpoint.  For that, you can use `http_func`. The
+websocket methods help you build a handler with connect/disconnect handlers.
+You can use these to, for example, track connected clients.  For example:
 
 ```gleam
 pub fn main() {
   assert Ok(_) =
-    mist.serve(
+    serve(
       8080,
       http.handler_func(fn(req: Request(BitString)) {
         case request.path_segments(req) {
-          ["echo", "test"] -> Upgrade(websocket.echo_handler)
+          ["echo", "test"] ->
+            websocket.echo_handler
+            |> websocket.with_handler
+            |> websocket.on_init(on_init) // do something with the Sender
+            |> websocket.on_close(on_close) // same
+            |> Upgrade
           ["home"] ->
             response.new(200)
             |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<

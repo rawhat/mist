@@ -223,13 +223,31 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
             |> result.replace(actor.Continue(socket_state))
             |> result.map_error(fn(err) {
               logger.error(err)
+              let _ = case ws_handler.on_close {
+                Some(func) -> func(sender)
+                _ -> Nil
+              }
               err
             })
             |> result.replace_error(stop_normal)
             |> result.unwrap_both
-          Error(_) ->
+          Ok(websocket.CloseFrame(..) as frame) -> {
+            assert Ok(_) =
+              tcp.send(socket, websocket.frame_to_bit_builder(frame))
+            let _ = case ws_handler.on_close {
+              Some(func) -> func(sender)
+              _ -> Nil
+            }
+            actor.Stop(process.Normal)
+          }
+          Error(_) -> {
+            let _ = case ws_handler.on_close {
+              Some(func) -> func(sender)
+              _ -> Nil
+            }
             // TODO:  not normal
             stop_normal
+          }
         }
       None -> {
         let _ = case state.idle_timer {

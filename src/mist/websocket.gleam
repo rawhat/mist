@@ -21,6 +21,8 @@ pub type Handler =
 // TODO:  there are other message types, AND ALSO will need to buffer across
 // multiple frames, potentially
 pub type Frame {
+  // TODO:  should this include data?
+  CloseFrame(payload_length: Int, payload: String)
   TextFrame(payload_length: Int, payload: String)
   // We don't care about basicaly everything else for now
   PingFrame(payload_length: Int, payload: String)
@@ -73,23 +75,14 @@ pub fn frame_from_message(message: BitString) -> Result(Frame, Nil) {
 
   case opcode {
     1 -> TextFrame(payload_length: payload_length, payload: data)
+    8 -> CloseFrame(payload_length: payload_length, payload: data)
   }
   |> Ok
 }
 
-// TODO:  support other message types here too
-pub fn message_to_frame(data: String) -> Frame {
-  TextFrame(
-    payload_length: data
-    |> bit_string.from_string
-    |> bit_string.byte_size,
-    payload: data,
-  )
-}
-
 pub fn frame_to_bit_builder(frame: Frame) -> BitBuilder {
   case frame {
-    TextFrame(payload_length, payload) -> {
+    TextFrame(payload_length, payload) | CloseFrame(payload_length, payload) -> {
       let fin = 1
       let mask_flag = 0
       let payload_bs = bit_string.from_string(payload)
@@ -181,13 +174,14 @@ pub fn echo_handler(msg: Message, socket: Socket) -> Result(Nil, Nil) {
 
 pub type WebsocketHandler {
   WebsocketHandler(
+    on_close: Option(fn(Sender(tcp.HandlerMessage)) -> Nil),
     on_init: Option(fn(Sender(tcp.HandlerMessage)) -> Nil),
     handler: Handler,
   )
 }
 
 pub fn with_handler(func: Handler) -> WebsocketHandler {
-  WebsocketHandler(on_init: None, handler: func)
+  WebsocketHandler(on_close: None, on_init: None, handler: func)
 }
 
 pub fn on_init(
@@ -195,4 +189,11 @@ pub fn on_init(
   func: fn(Sender(tcp.HandlerMessage)) -> Nil,
 ) -> WebsocketHandler {
   WebsocketHandler(..handler, on_init: Some(func))
+}
+
+pub fn on_close(
+  handler: WebsocketHandler,
+  func: fn(Sender(tcp.HandlerMessage)) -> Nil,
+) -> WebsocketHandler {
+  WebsocketHandler(..handler, on_close: Some(func))
 }
