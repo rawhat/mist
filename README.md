@@ -94,7 +94,7 @@ pub fn main() {
             let size = file.size(file_path)
             assert Ok(fd) = file.open(file_path)
             response.new(200)
-            |> response.set_body(FileBody(fd, int.to_string(size), 0, size - 1))
+            |> response.set_body(FileBody(fd, int.to_string(size), 0, size))
             |> Response
           }
           _ ->
