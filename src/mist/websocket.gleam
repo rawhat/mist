@@ -7,7 +7,7 @@ import gleam/option.{None, Option, Some}
 import gleam/otp/process.{Sender}
 import gleam/result
 import gleam/string
-import glisten/tcp.{Socket}
+import glisten/tcp.{HandlerMessage, Socket}
 import mist/encoder
 
 // TODO:  need binary here as well
@@ -16,7 +16,7 @@ pub type Message {
 }
 
 pub type Handler =
-  fn(Message, Socket) -> Result(Nil, Nil)
+  fn(Message, Sender(HandlerMessage)) -> Result(Nil, Nil)
 
 // TODO:  there are other message types, AND ALSO will need to buffer across
 // multiple frames, potentially
@@ -114,14 +114,18 @@ pub fn upgrade(socket: Socket, req: Request(BitString)) -> Result(Nil, Nil) {
   Ok(Nil)
 }
 
-pub fn send(socket: Socket, data: String) -> Result(Nil, tcp.SocketReason) {
+pub fn to_text_frame(data: String) -> BitBuilder {
   let size =
     data
     |> bit_string.from_string
     |> bit_string.byte_size
-  let msg = frame_to_bit_builder(TextFrame(size, data))
-  let resp = tcp.send(socket, msg)
-  resp
+  frame_to_bit_builder(TextFrame(size, data))
+}
+
+pub fn send(socket: Socket, data: String) -> Result(Nil, tcp.SocketReason) {
+  data
+  |> to_text_frame
+  |> tcp.send(socket, _)
 }
 
 const websocket_key = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -166,8 +170,11 @@ pub fn upgrade_socket(
   |> Ok
 }
 
-pub fn echo_handler(msg: Message, socket: Socket) -> Result(Nil, Nil) {
-  assert Ok(_resp) = send(socket, msg.data)
+pub fn echo_handler(
+  msg: Message,
+  sender: Sender(HandlerMessage),
+) -> Result(Nil, Nil) {
+  let _ = process.send(sender, tcp.SendMessage(to_text_frame(msg.data)))
 
   Ok(Nil)
 }

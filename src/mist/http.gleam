@@ -218,7 +218,7 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
             payload
             |> websocket.TextMessage
             |> fn(ws_msg) {
-              rescue(fn() { ws_handler.handler(ws_msg, socket) })
+              rescue(fn() { ws_handler.handler(ws_msg, sender) })
             }
             |> result.replace(actor.Continue(socket_state))
             |> result.map_error(fn(err) {
