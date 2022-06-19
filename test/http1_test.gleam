@@ -21,7 +21,11 @@ pub fn set_up_echo_server_test_() {
   #(
     Setup,
     fn() { open_server(8888, echo_handler()) },
-    [it_echoes_with_data, it_supports_large_header_fields],
+    [
+      it_echoes_with_data,
+      it_supports_large_header_fields,
+      it_supports_patch_requests,
+    ],
   )
 }
 
@@ -88,4 +92,18 @@ pub fn it_supports_large_header_fields() {
   assert Ok(resp) = hackney.send(big_request)
 
   response_should_equal(resp, expected)
+}
+
+pub fn it_supports_patch_requests() {
+  let req =
+    request.new()
+    |> request.set_host("localhost:8888")
+    |> request.set_path("/")
+    |> request.set_body("hello, world!")
+    |> request.set_method(http.Patch)
+    |> request.set_scheme(http.Http)
+
+  assert Ok(resp) = hackney.send(req)
+
+  response_should_equal(resp, get_default_response())
 }

@@ -1,5 +1,6 @@
 import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
+import gleam/dynamic.{Dynamic}
 import gleam/erlang/atom.{Atom}
 import gleam/erlang.{Errored, Exited, Thrown, rescue}
 import gleam/http
@@ -29,7 +30,7 @@ pub type HttpUri {
 }
 
 pub type HttpPacket {
-  HttpRequest(Atom, HttpUri, #(Int, Int))
+  HttpRequest(Dynamic, HttpUri, #(Int, Int))
   HttpHeader(Int, Atom, BitString, BitString)
 }
 
@@ -43,6 +44,7 @@ pub type DecodeError {
   InvalidMethod
   InvalidPath
   UnknownHeader
+  UnknownMethod
   // TODO:  better name?
   InvalidBody
 }
@@ -111,19 +113,32 @@ pub fn read_data(
   }
 }
 
+external fn is_atom(value: Dynamic) -> Bool =
+  "erlang" "is_atom"
+
+fn decode_atom(value: Dynamic) -> Result(Atom, List(dynamic.DecodeError)) {
+  case is_atom(value) {
+    True -> Ok(dynamic.unsafe_coerce(value))
+    False -> Error([dynamic.DecodeError("Atom", dynamic.classify(value), [])])
+  }
+}
+
 /// Turns the TCP message into an HTTP request
 pub fn parse_request(
   bs: BitString,
   socket: Socket,
 ) -> Result(request.Request(BitString), DecodeError) {
   try BinaryData(req, rest) = decode_packet(HttpBin, bs, [])
-  assert HttpRequest(method, AbsPath(path), _version) = req
+  assert HttpRequest(http_method, AbsPath(path), _version) = req
 
   try method =
-    method
-    |> atom.to_string
-    |> http.parse_method
-    |> result.replace_error(InvalidMethod)
+    http_method
+    |> decode_atom
+    |> result.map(atom.to_string)
+    |> result.or(dynamic.string(http_method))
+    |> result.replace_error(Nil)
+    |> result.then(http.parse_method)
+    |> result.replace_error(UnknownMethod)
 
   try #(headers, rest) = parse_headers(rest, socket, map.new())
 
@@ -256,6 +271,7 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
         }
         msg
         |> parse_request(socket)
+        |> result.map_error(logger.error)
         |> result.replace_error(stop_normal)
         |> result.map(fn(req) {
           case rescue(fn() { handler(req) }) {
