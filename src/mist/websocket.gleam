@@ -196,7 +196,7 @@ pub fn upgrade_socket(
 
 /// Helper to encapsulate the logic to send a provided message over the
 /// WebSocket
-pub fn send(sender: Sender(HandlerMessage), message: Message) -> Nil {
+pub fn send(message: Message, sender: Sender(HandlerMessage)) -> Nil {
   case message {
     TextMessage(data) ->
       data
@@ -214,7 +214,7 @@ pub fn echo_handler(
   message: Message,
   sender: Sender(HandlerMessage),
 ) -> Result(Nil, Nil) {
-  let _ = send(sender, message)
+  let _ = send(message, sender)
 
   Ok(Nil)
 }
