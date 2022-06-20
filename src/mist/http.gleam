@@ -228,10 +228,35 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
     let tcp.LoopState(socket, sender, data: state) = socket_state
     case state.upgraded_handler {
       Some(ws_handler) ->
-        case websocket.frame_from_message(msg) {
-          Ok(websocket.TextFrame(payload: payload, ..)) ->
-            payload
-            |> websocket.TextMessage
+        case websocket.frame_from_message(socket, msg) {
+          Ok(websocket.PingFrame(_, _)) -> {
+            assert Ok(_) =
+              tcp.send(
+                socket,
+                websocket.frame_to_bit_builder(websocket.PongFrame(0, <<>>)),
+              )
+            actor.Continue(socket_state)
+          }
+          Ok(websocket.CloseFrame(..) as frame) -> {
+            assert Ok(_) =
+              tcp.send(socket, websocket.frame_to_bit_builder(frame))
+            let _ = case ws_handler.on_close {
+              Some(func) -> func(sender)
+              _ -> Nil
+            }
+            actor.Stop(process.Normal)
+          }
+          Ok(websocket.PongFrame(..)) -> stop_normal
+          Ok(frame) ->
+            case frame {
+              websocket.TextFrame(_length, payload) -> {
+                assert Ok(msg) = bit_string.to_string(payload)
+                websocket.TextMessage(msg)
+              }
+              // NOTE:  this doesn't need to be exhaustive since we already
+              // cover the cases above
+              _frame -> websocket.BinaryMessage(frame.payload)
+            }
             |> fn(ws_msg) {
               rescue(fn() { ws_handler.handler(ws_msg, sender) })
             }
@@ -246,15 +271,6 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
             })
             |> result.replace_error(stop_normal)
             |> result.unwrap_both
-          Ok(websocket.CloseFrame(..) as frame) -> {
-            assert Ok(_) =
-              tcp.send(socket, websocket.frame_to_bit_builder(frame))
-            let _ = case ws_handler.on_close {
-              Some(func) -> func(sender)
-              _ -> Nil
-            }
-            actor.Stop(process.Normal)
-          }
           Error(_) -> {
             let _ = case ws_handler.on_close {
               Some(func) -> func(sender)
