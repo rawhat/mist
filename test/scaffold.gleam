@@ -1,4 +1,5 @@
 import gleam/bit_builder.{BitBuilder}
+import gleam/http
 import gleam/http/request
 import gleam/http/response.{Response}
 import gleam/otp/process.{Sender}
@@ -24,7 +25,7 @@ pub fn open_server(
   assert Ok(listener) = tcp.listen(port, [])
   let pool =
     handler
-    |> mhttp.handler
+    |> mhttp.handler(4_000_000)
     |> tcp.acceptor_pool_with_data(mhttp.new_state())
     |> fn(func) { func(listener) }
   assert Ok(sender) = tcp.start_acceptor(pool)
@@ -56,6 +57,15 @@ pub fn response_should_equal(
     )
 
   should.equal(missing_headers, extra_headers)
+}
+
+pub fn make_request(path: String, body: String) -> request.Request(String) {
+  request.new()
+  |> request.set_host("localhost:8888")
+  |> request.set_method(http.Post)
+  |> request.set_path(path)
+  |> request.set_body(body)
+  |> request.set_scheme(http.Http)
 }
 
 type IoFormat {

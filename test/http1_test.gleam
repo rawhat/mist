@@ -3,7 +3,9 @@ import gleam/http
 import gleam/http/request
 import gleam/http/response.{Response}
 import gleam/hackney
-import scaffold.{echo_handler, open_server, response_should_equal}
+import gleam/string
+import scaffold.{echo_handler, make_request, open_server, response_should_equal}
+import gleam/http/request
 
 pub type Fixture {
   Foreach
@@ -25,6 +27,7 @@ pub fn set_up_echo_server_test_() {
       it_echoes_with_data,
       it_supports_large_header_fields,
       it_supports_patch_requests,
+      it_rejects_large_requests,
     ],
   )
 }
@@ -40,12 +43,7 @@ fn get_default_response() -> Response(BitBuilder) {
 }
 
 pub fn it_echoes_with_data() {
-  let req =
-    request.new()
-    |> request.set_host("localhost:8888")
-    |> request.set_path("/")
-    |> request.set_body("hello, world!")
-    |> request.set_scheme(http.Http)
+  let req = make_request("/", "hello, world!")
 
   assert Ok(resp) = hackney.send(req)
 
@@ -54,10 +52,7 @@ pub fn it_echoes_with_data() {
 
 pub fn it_supports_large_header_fields() {
   let big_request =
-    request.new()
-    |> request.set_host("localhost:8888")
-    |> request.set_path("/")
-    |> request.set_scheme(http.Http)
+    make_request("/", "")
     |> request.prepend_header(
       "user-agent",
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:100.0) Gecko/20100101 Firefox/100.0",
@@ -96,14 +91,26 @@ pub fn it_supports_large_header_fields() {
 
 pub fn it_supports_patch_requests() {
   let req =
-    request.new()
-    |> request.set_host("localhost:8888")
-    |> request.set_path("/")
-    |> request.set_body("hello, world!")
+    make_request("/", "hello, world!")
     |> request.set_method(http.Patch)
-    |> request.set_scheme(http.Http)
 
   assert Ok(resp) = hackney.send(req)
 
   response_should_equal(resp, get_default_response())
+}
+
+pub fn it_rejects_large_requests() {
+  let req =
+    string.repeat("a", 4_000_001)
+    |> make_request("/", _)
+
+  assert Ok(resp) = hackney.send(req)
+
+  let expected =
+    response.new(413)
+    |> response.set_body(bit_builder.from_bit_string(<<>>))
+    |> response.prepend_header("content-length", "0")
+    |> response.prepend_header("connection", "close")
+
+  response_should_equal(resp, expected)
 }

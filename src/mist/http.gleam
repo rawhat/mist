@@ -7,10 +7,12 @@ import gleam/http
 import gleam/http/request.{Request}
 import gleam/http/response
 import gleam/int
+import gleam/list
 import gleam/map.{Map}
 import gleam/option.{None, Option, Some}
 import gleam/otp/actor
 import gleam/otp/process
+import gleam/pair
 import gleam/result
 import gleam/string
 import glisten/tcp.{LoopState, Socket}
@@ -41,12 +43,14 @@ pub type DecodedPacket {
 }
 
 pub type DecodeError {
+  MalformedRequest
   InvalidMethod
   InvalidPath
   UnknownHeader
   UnknownMethod
   // TODO:  better name?
   InvalidBody
+  DiscardPacket
 }
 
 external fn decode_packet(
@@ -127,49 +131,60 @@ fn decode_atom(value: Dynamic) -> Result(Atom, List(dynamic.DecodeError)) {
 pub fn parse_request(
   bs: BitString,
   socket: Socket,
-) -> Result(request.Request(BitString), DecodeError) {
-  try BinaryData(req, rest) = decode_packet(HttpBin, bs, [])
-  assert HttpRequest(http_method, AbsPath(path), _version) = req
-
-  try method =
-    http_method
-    |> decode_atom
-    |> result.map(atom.to_string)
-    |> result.or(dynamic.string(http_method))
-    |> result.replace_error(Nil)
-    |> result.then(http.parse_method)
-    |> result.replace_error(UnknownMethod)
-
-  try #(headers, rest) = parse_headers(rest, socket, map.new())
-
-  try path =
-    path
-    |> bit_string.to_string
-    |> result.replace_error(InvalidPath)
-
-  let body_size =
-    headers
-    |> map.get("content-length")
-    |> result.then(int.parse)
-    |> result.unwrap(0)
-
-  let remaining = body_size - bit_string.byte_size(rest)
-  try body = case body_size, remaining {
-    0, 0 -> Ok(<<>>)
-    0, _n ->
-      // is this pipelining? check for GET?
-      Ok(rest)
-    _n, 0 -> Ok(rest)
-    _size, _rem -> read_data(socket, Buffer(remaining, rest), InvalidBody)
+) -> Result(request.Request(Body), DecodeError) {
+  case decode_packet(HttpBin, bs, []) {
+    Ok(BinaryData(HttpRequest(http_method, AbsPath(path), _version), rest)) -> {
+      try method =
+        http_method
+        |> decode_atom
+        |> result.map(atom.to_string)
+        |> result.or(dynamic.string(http_method))
+        |> result.replace_error(Nil)
+        |> result.then(http.parse_method)
+        |> result.replace_error(UnknownMethod)
+      try #(headers, rest) = parse_headers(rest, socket, map.new())
+      try path =
+        path
+        |> bit_string.to_string
+        |> result.replace_error(InvalidPath)
+      let req =
+        request.new()
+        |> request.set_body(Unread(rest, socket))
+        |> request.set_method(method)
+        |> request.set_path(path)
+      Ok(request.Request(..req, headers: map.to_list(headers)))
+    }
+    _ -> Error(DiscardPacket)
   }
+}
 
-  let req =
-    request.new()
-    |> request.set_body(body)
-    |> request.set_method(method)
-    |> request.set_path(path)
+pub opaque type Body {
+  Unread(rest: BitString, socket: Socket)
+  Read(data: BitString)
+}
 
-  Ok(request.Request(..req, headers: map.to_list(headers)))
+pub fn read_body(req: Request(Body)) -> Result(Request(BitString), DecodeError) {
+  case req.body {
+    Unread(rest, socket) -> {
+      let body_size =
+        req.headers
+        |> list.find(fn(tup) { pair.first(tup) == "content-length" })
+        |> result.map(pair.second)
+        |> result.then(int.parse)
+        |> result.unwrap(0)
+      let remaining = body_size - bit_string.byte_size(rest)
+      case body_size, remaining {
+        0, 0 -> Ok(<<>>)
+        0, _n -> Ok(rest)
+        // is this pipelining? check for GET?
+        _n, 0 -> Ok(rest)
+        _size, _rem -> read_data(socket, Buffer(remaining, rest), InvalidBody)
+      }
+      |> result.map(request.set_body(req, _))
+      |> result.replace_error(InvalidBody)
+    }
+    Read(_data) -> Error(InvalidBody)
+  }
 }
 
 pub type Handler =
@@ -207,15 +222,39 @@ pub type HandlerResponse {
 }
 
 pub type HandlerFunc =
-  fn(Request(BitString)) -> HandlerResponse
+  fn(Request(Body)) -> HandlerResponse
 
 const stop_normal = actor.Stop(process.Normal)
 
 /// Creates a standard HTTP handler service to pass to `mist.serve`
-pub fn handler(handler: Handler) -> tcp.LoopFn(State) {
+pub fn handler(handler: Handler, max_body_limit: Int) -> tcp.LoopFn(State) {
+  let bad_request =
+    response.new(400)
+    |> response.set_body(bit_builder.new())
   handler_func(fn(req) {
-    req
-    |> handler
+    case request.get_header(req, "content-length") {
+      Ok("0") | Error(Nil) ->
+        req
+        |> request.set_body(<<>>)
+        |> handler
+      Ok(size) ->
+        size
+        |> int.parse
+        |> result.map(fn(size) {
+          case size > max_body_limit {
+            True ->
+              response.new(413)
+              |> response.set_body(bit_builder.new())
+              |> response.prepend_header("connection", "close")
+            False ->
+              req
+              |> read_body
+              |> result.map(handler)
+              |> result.unwrap(bad_request)
+          }
+        })
+        |> result.unwrap(bad_request)
+    }
     |> response.map(BitBuilderBody)
     |> Response
   })
@@ -287,7 +326,16 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
         }
         msg
         |> parse_request(socket)
-        |> result.map_error(logger.error)
+        |> result.map_error(fn(err) {
+          case err {
+            DiscardPacket -> Nil
+            _ -> {
+              logger.error(err)
+              tcp.close(socket)
+              Nil
+            }
+          }
+        })
         |> result.replace_error(stop_normal)
         |> result.map(fn(req) {
           case rescue(fn() { handler(req) }) {
@@ -346,7 +394,7 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
               |> result.unwrap_both
             Ok(Upgrade(with_handler)) ->
               req
-              |> websocket.upgrade(socket, _)
+              |> upgrade(socket, _)
               |> result.map(fn(_nil) {
                 let _ = case with_handler.on_init {
                   Some(func) -> func(sender)
@@ -382,4 +430,42 @@ pub fn handler_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
       }
     }
   })
+}
+
+pub fn upgrade_socket(
+  req: Request(Body),
+) -> Result(response.Response(BitBuilder), Request(Body)) {
+  try _upgrade =
+    request.get_header(req, "upgrade")
+    |> result.replace_error(req)
+  try key =
+    request.get_header(req, "sec-websocket-key")
+    |> result.replace_error(req)
+  try _version =
+    request.get_header(req, "sec-websocket-version")
+    |> result.replace_error(req)
+
+  let accept_key = websocket.parse_key(key)
+
+  response.new(101)
+  |> response.set_body(bit_builder.from_bit_string(<<"":utf8>>))
+  |> response.prepend_header("Upgrade", "websocket")
+  |> response.prepend_header("Connection", "Upgrade")
+  |> response.prepend_header("Sec-WebSocket-Accept", accept_key)
+  |> Ok
+}
+
+// TODO: improve this error type
+pub fn upgrade(socket: Socket, req: Request(Body)) -> Result(Nil, Nil) {
+  try resp =
+    upgrade_socket(req)
+    |> result.replace_error(Nil)
+
+  try _sent =
+    resp
+    |> encoder.to_bit_builder
+    |> tcp.send(socket, _)
+    |> result.replace_error(Nil)
+
+  Ok(Nil)
 }

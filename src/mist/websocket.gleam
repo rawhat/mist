@@ -1,14 +1,10 @@
 import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
-import gleam/http/request.{Request}
-import gleam/http/response.{Response}
 import gleam/list
 import gleam/option.{None, Option, Some}
 import gleam/otp/process.{Sender}
-import gleam/result
 import gleam/string
 import glisten/tcp.{HandlerMessage, Socket}
-import mist/encoder
 
 pub type Message {
   BinaryMessage(data: BitString)
@@ -127,21 +123,6 @@ fn make_frame(opcode: Int, length: Int, payload: BitString) -> BitBuilder {
   |> bit_builder.from_bit_string
 }
 
-// TODO: improve this error type
-pub fn upgrade(socket: Socket, req: Request(BitString)) -> Result(Nil, Nil) {
-  try resp =
-    upgrade_socket(req)
-    |> result.replace_error(Nil)
-
-  try _sent =
-    resp
-    |> encoder.to_bit_builder
-    |> tcp.send(socket, _)
-    |> result.replace_error(Nil)
-
-  Ok(Nil)
-}
-
 fn to_text_frame(data: BitString) -> BitBuilder {
   let size = bit_string.byte_size(data)
   frame_to_bit_builder(TextFrame(size, data))
@@ -169,29 +150,6 @@ pub fn parse_key(key: String) -> String {
   |> string.append(websocket_key)
   |> crypto_hash(Sha, _)
   |> base64_encode
-}
-
-pub fn upgrade_socket(
-  req: Request(BitString),
-) -> Result(Response(BitBuilder), Request(BitString)) {
-  try _upgrade =
-    request.get_header(req, "upgrade")
-    |> result.replace_error(req)
-  try key =
-    request.get_header(req, "sec-websocket-key")
-    |> result.replace_error(req)
-  try _version =
-    request.get_header(req, "sec-websocket-version")
-    |> result.replace_error(req)
-
-  let accept_key = parse_key(key)
-
-  response.new(101)
-  |> response.set_body(bit_builder.from_bit_string(<<"":utf8>>))
-  |> response.prepend_header("Upgrade", "websocket")
-  |> response.prepend_header("Connection", "Upgrade")
-  |> response.prepend_header("Sec-WebSocket-Accept", accept_key)
-  |> Ok
 }
 
 /// Helper to encapsulate the logic to send a provided message over the

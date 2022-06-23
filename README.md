@@ -28,6 +28,7 @@ pub fn main() {
           "hello, world!":utf8,
         >>))
       },
+      max_body_limit: 4_000_000
     )
   erlang.sleep_forever()
 }
@@ -43,22 +44,41 @@ pub fn main() {
   assert Ok(_) =
     serve(
       8080,
-      http.handler_func(fn(req: Request(BitString)) {
-        case request.path_segments(req) {
-          ["echo", "test"] ->
+      mhttp.handler_func(fn(req) {
+        case req.method, request.path_segments(req) {
+          http.Get, ["echo", "test"] ->
             websocket.echo_handler
             |> websocket.with_handler
             |> websocket.on_init(on_init) // do something with the Sender
             |> websocket.on_close(on_close) // same
             |> Upgrade
-          ["home"] ->
+          http.Post, ["echo", "body"] ->
+            req
+            |> mhttp.read_body
+            |> result.map(fn(req) {
+              response.new(200)
+              |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(
+                req.body,
+              )))
+              |> response.prepend_header(
+                "content-type",
+                request.get_header(req, "content-type")
+                |> result.unwrap("application/octet-stream"),
+              )
+            })
+            |> result.unwrap(
+              response.new(400)
+              |> response.set_body(BitBuilderBody(bit_builder.new())),
+            )
+            |> Response
+          http.Get, ["home"] ->
             response.new(200)
             |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<
               "sup home boy":utf8,
             >>)))
             // NOTE: This is response from `mist/http`
             |> Response
-          _ ->
+          _, _ ->
             response.new(200)
             |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<
               "Hello, world!":utf8,

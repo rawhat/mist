@@ -66,6 +66,7 @@ pub fn status_to_bit_string(status: Int) -> BitString {
     403 -> <<"Forbidden":utf8>>
     404 -> <<"Not Found":utf8>>
     405 -> <<"Method Not Allowed":utf8>>
+    413 -> <<"Request Entity Too Large":utf8>>
     500 -> <<"Internal Server Error":utf8>>
     502 -> <<"Bad Gateway":utf8>>
     503 -> <<"Service Unavailable":utf8>>
