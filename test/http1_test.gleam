@@ -33,6 +33,7 @@ pub fn set_up_echo_server_test_() {
       it_supports_patch_requests,
       it_rejects_large_requests,
       it_supports_chunked_encoding,
+      it_support_query_parameters,
     ],
   )
 }
@@ -153,4 +154,21 @@ pub fn it_supports_chunked_encoding() {
     |> response.set_body(bit_builder.from_string(string.repeat("a", 10_000)))
 
   bitstring_response_should_equal(actual, expected)
+}
+
+pub fn it_support_query_parameters() {
+  let req =
+    make_request("/", "hello, world!")
+    |> request.set_method(http.Get)
+    |> request.set_query([
+      #("something", "123"),
+      #("another", "true"),
+      #("a-complicated-one", uri.percent_encode("is the thing")),
+    ])
+
+  assert Ok(resp) = hackney.send(req)
+
+  let expected = get_default_response()
+
+  string_response_should_equal(resp, expected)
 }
