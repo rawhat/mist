@@ -1,10 +1,14 @@
 import gleam/bit_builder.{BitBuilder}
+import gleam/bit_string
 import gleam/http
 import gleam/http/request
 import gleam/http/response.{Response}
 import gleam/hackney
 import gleam/string
-import scaffold.{echo_handler, make_request, open_server, response_should_equal}
+import gleam/uri
+import scaffold.{
+  bitstring_response_should_equal, echo_handler, make_request, open_server, string_response_should_equal,
+}
 import gleam/http/request
 
 pub type Fixture {
@@ -28,6 +32,7 @@ pub fn set_up_echo_server_test_() {
       it_supports_large_header_fields,
       it_supports_patch_requests,
       it_rejects_large_requests,
+      it_supports_chunked_encoding,
     ],
   )
 }
@@ -47,7 +52,7 @@ pub fn it_echoes_with_data() {
 
   assert Ok(resp) = hackney.send(req)
 
-  response_should_equal(resp, get_default_response())
+  string_response_should_equal(resp, get_default_response())
 }
 
 pub fn it_supports_large_header_fields() {
@@ -86,7 +91,7 @@ pub fn it_supports_large_header_fields() {
 
   assert Ok(resp) = hackney.send(big_request)
 
-  response_should_equal(resp, expected)
+  string_response_should_equal(resp, expected)
 }
 
 pub fn it_supports_patch_requests() {
@@ -96,7 +101,7 @@ pub fn it_supports_patch_requests() {
 
   assert Ok(resp) = hackney.send(req)
 
-  response_should_equal(resp, get_default_response())
+  string_response_should_equal(resp, get_default_response())
 }
 
 pub fn it_rejects_large_requests() {
@@ -112,5 +117,40 @@ pub fn it_rejects_large_requests() {
     |> response.prepend_header("content-length", "0")
     |> response.prepend_header("connection", "close")
 
-  response_should_equal(resp, expected)
+  string_response_should_equal(resp, expected)
+}
+
+external fn stream_request(
+  method: http.Method,
+  path: String,
+  headers: List(#(String, String)),
+  body: BitString,
+) -> Result(#(Int, List(#(String, String)), BitString), Nil) =
+  "hackney_ffi" "stream_request"
+
+pub fn it_supports_chunked_encoding() {
+  let req =
+    string.repeat("a", 10_000)
+    |> bit_string.from_string
+    |> make_request("/", _)
+    |> request.set_method(http.Post)
+    |> request.prepend_header("transfer-encoding", "chunked")
+
+  let path =
+    req
+    |> request.to_uri
+    |> uri.to_string
+  assert Ok(#(status, headers, body)) =
+    stream_request(req.method, path, req.headers, req.body)
+  let actual = response.Response(status, headers, body)
+
+  let expected =
+    response.new(200)
+    |> response.prepend_header("user-agent", "hackney/1.18.1")
+    |> response.prepend_header("host", "localhost:8888")
+    |> response.prepend_header("connection", "keep-alive")
+    |> response.prepend_header("content-length", "10000")
+    |> response.set_body(bit_builder.from_string(string.repeat("a", 10_000)))
+
+  bitstring_response_should_equal(actual, expected)
 }

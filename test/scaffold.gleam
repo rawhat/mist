@@ -2,6 +2,7 @@ import gleam/bit_builder.{BitBuilder}
 import gleam/http
 import gleam/http/request
 import gleam/http/response.{Response}
+import gleam/list
 import gleam/otp/process.{Sender}
 import gleam/set
 import gleeunit/should
@@ -10,9 +11,19 @@ import mist/http as mhttp
 
 pub fn echo_handler() -> mhttp.Handler {
   fn(req: request.Request(BitString)) {
+    let headers =
+      list.filter(
+        req.headers,
+        fn(p) {
+          case p {
+            #("transfer-encoding", "chunked") -> False
+            _ -> True
+          }
+        },
+      )
     Response(
       status: 200,
-      headers: req.headers,
+      headers: headers,
       body: bit_builder.from_bit_string(req.body),
     )
   }
@@ -32,15 +43,20 @@ pub fn open_server(
   sender
 }
 
-pub fn response_should_equal(
-  actual: Response(String),
-  expected: Response(BitBuilder),
-) {
-  should.equal(actual.status, expected.status)
+fn compare_bitstring_body(actual: BitString, expected: BitBuilder) {
+  actual
+  |> bit_builder.from_bit_string
+  |> should.equal(expected)
+}
 
-  actual.body
+fn compare_string_body(actual: String, expected: BitBuilder) {
+  actual
   |> bit_builder.from_string
-  |> should.equal(expected.body)
+  |> should.equal(expected)
+}
+
+fn compare_headers_and_status(actual: Response(a), expected: Response(b)) {
+  should.equal(actual.status, expected.status)
 
   let expected_headers = set.from_list(expected.headers)
   let actual_headers = set.from_list(actual.headers)
@@ -59,7 +75,23 @@ pub fn response_should_equal(
   should.equal(missing_headers, extra_headers)
 }
 
-pub fn make_request(path: String, body: String) -> request.Request(String) {
+pub fn string_response_should_equal(
+  actual: Response(String),
+  expected: Response(BitBuilder),
+) {
+  compare_headers_and_status(actual, expected)
+  compare_string_body(actual.body, expected.body)
+}
+
+pub fn bitstring_response_should_equal(
+  actual: Response(BitString),
+  expected: Response(BitBuilder),
+) {
+  compare_headers_and_status(actual, expected)
+  compare_bitstring_body(actual.body, expected.body)
+}
+
+pub fn make_request(path: String, body: body) -> request.Request(body) {
   request.new()
   |> request.set_host("localhost:8888")
   |> request.set_method(http.Post)

@@ -2,6 +2,7 @@ import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
 import gleam/dynamic.{Dynamic}
 import gleam/erlang/atom.{Atom}
+import gleam/erlang/charlist.{Charlist}
 import gleam/erlang.{Errored, Exited, Thrown, rescue}
 import gleam/http
 import gleam/http/request.{Request}
@@ -117,6 +118,63 @@ pub fn read_data(
   }
 }
 
+external fn binary_match(
+  source: BitString,
+  pattern: BitString,
+) -> Result(#(Int, Int), Nil) =
+  "http_ffi" "binary_match"
+
+external fn string_to_int(string: Charlist, base: Int) -> Result(Int, Nil) =
+  "http_ffi" "string_to_int"
+
+const crnl = <<13:int, 10:int>>
+
+fn read_chunk(
+  socket: Socket,
+  buffer: Buffer,
+  body: BitBuilder,
+) -> Result(BitBuilder, DecodeError) {
+  case buffer.data, binary_match(buffer.data, crnl) {
+    _, Ok(#(offset, _)) -> {
+      assert <<
+        chunk:binary-size(offset),
+        _return:int,
+        _newline:int,
+        rest:binary,
+      >> = buffer.data
+      try chunk_size =
+        chunk
+        |> bit_string.to_string
+        |> result.map(charlist.from_string)
+        |> result.replace_error(InvalidBody)
+      try size =
+        string_to_int(chunk_size, 16)
+        |> result.replace_error(InvalidBody)
+      case size {
+        0 -> Ok(body)
+        size ->
+          case rest {
+            <<next_chunk:binary-size(size), 13:int, 10:int, rest:binary>> ->
+              read_chunk(
+                socket,
+                Buffer(0, rest),
+                bit_builder.append(body, next_chunk),
+              )
+            _ -> {
+              try next = read_data(socket, Buffer(0, buffer.data), InvalidBody)
+              read_chunk(socket, Buffer(0, next), body)
+            }
+          }
+      }
+    }
+    <<>>, _ -> {
+      try next = read_data(socket, Buffer(0, buffer.data), InvalidBody)
+      read_chunk(socket, Buffer(0, next), body)
+    }
+    _, Error(Nil) -> Error(InvalidBody)
+  }
+}
+
 external fn is_atom(value: Dynamic) -> Bool =
   "erlang" "is_atom"
 
@@ -164,8 +222,13 @@ pub opaque type Body {
 }
 
 pub fn read_body(req: Request(Body)) -> Result(Request(BitString), DecodeError) {
-  case req.body {
-    Unread(rest, socket) -> {
+  case request.get_header(req, "transfer-encoding"), req.body {
+    Ok("chunked"), Unread(rest, socket) -> {
+      try chunk =
+        read_chunk(socket, Buffer(remaining: 0, data: rest), bit_builder.new())
+      Ok(request.set_body(req, bit_builder.to_bit_string(chunk)))
+    }
+    _, Unread(rest, socket) -> {
       let body_size =
         req.headers
         |> list.find(fn(tup) { pair.first(tup) == "content-length" })
@@ -183,7 +246,7 @@ pub fn read_body(req: Request(Body)) -> Result(Request(BitString), DecodeError) 
       |> result.map(request.set_body(req, _))
       |> result.replace_error(InvalidBody)
     }
-    Read(_data) -> Error(InvalidBody)
+    _, Read(_data) -> Error(InvalidBody)
   }
 }
 
@@ -232,12 +295,20 @@ pub fn handler(handler: Handler, max_body_limit: Int) -> tcp.LoopFn(State) {
     response.new(400)
     |> response.set_body(bit_builder.new())
   handler_func(fn(req) {
-    case request.get_header(req, "content-length") {
-      Ok("0") | Error(Nil) ->
+    case request.get_header(req, "content-length"), request.get_header(
+      req,
+      "transfer-encoding",
+    ) {
+      Ok("0"), _ | Error(Nil), Error(Nil) ->
         req
         |> request.set_body(<<>>)
         |> handler
-      Ok(size) ->
+      _, Ok("chunked") ->
+        req
+        |> read_body
+        |> result.map(handler)
+        |> result.unwrap(bad_request)
+      Ok(size), _ ->
         size
         |> int.parse
         |> result.map(fn(size) {
