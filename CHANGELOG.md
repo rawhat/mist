@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.7.0
+
+- Stop automatically reading body
+  - `run_service` now accepts maximum body size
+  - `http` module exports `read_body` to manually parse body
+- Support `Transfer-Encoding: chunked` requests
+- Properly support query parameters
+
 ## v0.6.1
 
 - Fix `websocket.send` argument order
