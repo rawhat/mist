@@ -307,10 +307,10 @@ pub fn handler(handler: Handler, max_body_limit: Int) -> tcp.LoopFn(State) {
     response.new(400)
     |> response.set_body(bit_builder.new())
   handler_func(fn(req) {
-    case request.get_header(req, "content-length"), request.get_header(
-      req,
-      "transfer-encoding",
-    ) {
+    case
+      request.get_header(req, "content-length"),
+      request.get_header(req, "transfer-encoding")
+    {
       Ok("0"), _ | Error(Nil), Error(Nil) ->
         req
         |> request.set_body(<<>>)

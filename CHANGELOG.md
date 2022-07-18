@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.7.1
+
+- Revert `websocket.send` change
+  - It should be a similar order to `process.send`
+
 ## v0.7.0
 
 - Stop automatically reading body

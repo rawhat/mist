@@ -154,7 +154,7 @@ pub fn parse_key(key: String) -> String {
 
 /// Helper to encapsulate the logic to send a provided message over the
 /// WebSocket
-pub fn send(message: Message, sender: Sender(HandlerMessage)) -> Nil {
+pub fn send(sender: Sender(HandlerMessage), message: Message) -> Nil {
   case message {
     TextMessage(data) ->
       data
@@ -172,7 +172,7 @@ pub fn echo_handler(
   message: Message,
   sender: Sender(HandlerMessage),
 ) -> Result(Nil, Nil) {
-  let _ = send(message, sender)
+  let _ = send(sender, message)
 
   Ok(Nil)
 }
