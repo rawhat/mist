@@ -44,17 +44,15 @@ pub fn main() {
   assert Ok(_) =
     serve(
       8080,
-      mhttp.handler_func(fn(req) {
+      handler.with_func(fn(req) {
         case req.method, request.path_segments(req) {
-          http.Get, ["echo", "test"] ->
+          Get, ["echo", "test"] ->
             websocket.echo_handler
             |> websocket.with_handler
-            |> websocket.on_init(on_init) // do something with the Sender
-            |> websocket.on_close(on_close) // same
             |> Upgrade
-          http.Post, ["echo", "body"] ->
+          Post, ["echo", "body"] ->
             req
-            |> mhttp.read_body
+            |> http.read_body
             |> result.map(fn(req) {
               response.new(200)
               |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(
@@ -71,7 +69,7 @@ pub fn main() {
               |> response.set_body(BitBuilderBody(bit_builder.new())),
             )
             |> Response
-          http.Get, ["home"] ->
+          Get, ["home"] ->
             response.new(200)
             |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<
               "sup home boy":utf8,
@@ -100,9 +98,9 @@ import mist/http.{BitBuilderBody, FileBody, Response} as mhttp
 
 pub fn main() {
   assert Ok(_) =
-    mist.serve(
+    serve(
       8080,
-      mhttp.handler_func(fn(req: Request(BitString)) {
+      handler.with_func(fn(req: Request(Body)) {
         case request.path_segments(req) {
           ["static", ..path] -> {
             // verify, validate, etc

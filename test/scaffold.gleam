@@ -7,9 +7,9 @@ import gleam/otp/process.{Sender}
 import gleam/set
 import gleeunit/should
 import glisten/tcp
-import mist/http as mhttp
+import mist/handler.{Handler}
 
-pub fn echo_handler() -> mhttp.Handler {
+pub fn echo_handler() -> Handler {
   fn(req: request.Request(BitString)) {
     let headers =
       list.filter(
@@ -29,15 +29,12 @@ pub fn echo_handler() -> mhttp.Handler {
   }
 }
 
-pub fn open_server(
-  port: Int,
-  handler: mhttp.Handler,
-) -> Sender(tcp.AcceptorMessage) {
+pub fn open_server(port: Int, handler: Handler) -> Sender(tcp.AcceptorMessage) {
   assert Ok(listener) = tcp.listen(port, [])
   let pool =
     handler
-    |> mhttp.handler(4_000_000)
-    |> tcp.acceptor_pool_with_data(mhttp.new_state())
+    |> handler.with(4_000_000)
+    |> tcp.acceptor_pool_with_data(handler.new_state())
     |> fn(func) { func(listener) }
   assert Ok(sender) = tcp.start_acceptor(pool)
   sender
