@@ -3,7 +3,7 @@ import glisten/tcp
 import mist/handler.{State}
 import gleam/bit_builder
 import gleam/bit_string
-import gleam/erlang
+import gleam/erlang/process
 import gleam/http/request.{Request}
 import gleam/http/response
 import gleam/int
@@ -65,5 +65,5 @@ pub fn main() {
         }
       }),
     )
-  erlang.sleep_forever()
+  process.sleep_forever()
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.0
+
+- BREAKING:
+  - refactor `http.handle` and `http.handle_func` into separate module
+
+The `handler_func` implementation was about 250 lines. That seemed a little
+excessive and unclear, so I just pulled that stuff out into separate functions.
+I also thought it might be nice to have a separate `handler` module that housed
+this code. The actual consumer changes are minimal.
+
 ## v0.7.1
 
 - Revert `websocket.send` change
