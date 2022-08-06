@@ -85,7 +85,7 @@ pub fn main() {
         }
       }),
     )
-  erlang.sleep_forever()
+  process.sleep_forever()
 }
 ```
 
