@@ -18,6 +18,11 @@ Right now there are a few options.  Let's say you want a "simple" HTTP server
 that you can customize to your heart's content.  In that case, you want:
 
 ```gleam
+import mist
+import gleam/bit_builder
+import gleam/erlang/process
+import gleam/http/response
+
 pub fn main() {
   assert Ok(_) =
     mist.run_service(
@@ -30,7 +35,7 @@ pub fn main() {
       },
       max_body_limit: 4_000_000
     )
-  erlang.sleep_forever()
+  process.sleep_forever()
 }
 ```
 
@@ -40,9 +45,20 @@ The websocket methods help you build a handler with connect/disconnect handlers.
 You can use these to, for example, track connected clients.  For example:
 
 ```gleam
+import mist
+import gleam/bit_builder
+import gleam/erlang/process
+import gleam/http.{Get, Post}
+import gleam/http/request
+import gleam/http/response
+import gleam/result
+import mist/handler.{Response, Upgrade}
+import mist/http.{BitBuilderBody}
+import mist/websocket
+
 pub fn main() {
   assert Ok(_) =
-    serve(
+    mist.serve(
       8080,
       handler.with_func(fn(req) {
         case req.method, request.path_segments(req) {
@@ -74,7 +90,6 @@ pub fn main() {
             |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<
               "sup home boy":utf8,
             >>)))
-            // NOTE: This is response from `mist/http`
             |> Response
           _, _ ->
             response.new(200)
@@ -92,13 +107,21 @@ pub fn main() {
 There is some initial support for sending files as well:
 
 ```gleam
+import gleam/bit_builder
+import gleam/bit_string
+import gleam/erlang/process
+import gleam/http/request.{Request}
+import gleam/http/response
+import gleam/int
+import gleam/string
+import mist
 import mist/file
-import mist/http.{BitBuilderBody, FileBody, Response} as mhttp
-// ...
+import mist/handler.{Response}
+import mist/http.{BitBuilderBody, Body, FileBody}
 
 pub fn main() {
   assert Ok(_) =
-    serve(
+    mist.serve(
       8080,
       handler.with_func(fn(req: Request(Body)) {
         case request.path_segments(req) {
@@ -122,7 +145,7 @@ pub fn main() {
         }
       }),
     )
-  erlang.sleep_forever()
+  process.sleep_forever()
 }
 ```
 
