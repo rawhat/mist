@@ -47,7 +47,7 @@ import gleam/http.{Get, Post}
 import gleam/http/request
 import gleam/http/response
 import gleam/result
-import mist
+import mist.{serve}
 import mist/handler
 import mist/handler.{Response, Upgrade}
 import mist/http.{BitBuilderBody}
@@ -55,7 +55,7 @@ import mist/websocket
 
 pub fn main() {
   assert Ok(_) =
-    mist.serve(
+    serve(
       8080,
       handler.with_func(fn(req) {
         case req.method, request.path_segments(req) {
