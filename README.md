@@ -42,7 +42,6 @@ You can use these to, for example, track connected clients.  For example:
 ```gleam
 import gleam/bit_builder
 import gleam/erlang/process
-import gleam/erlang/process
 import gleam/http.{Get, Post}
 import gleam/http/request
 import gleam/http/response
