@@ -40,9 +40,22 @@ The websocket methods help you build a handler with connect/disconnect handlers.
 You can use these to, for example, track connected clients.  For example:
 
 ```gleam
+import gleam/bit_builder
+import gleam/erlang/process
+import gleam/erlang/process
+import gleam/http.{Get, Post}
+import gleam/http/request
+import gleam/http/response
+import gleam/result
+import mist
+import mist/handler
+import mist/handler.{Response, Upgrade}
+import mist/http.{BitBuilderBody}
+import mist/websocket
+
 pub fn main() {
   assert Ok(_) =
-    serve(
+    mist.serve(
       8080,
       handler.with_func(fn(req) {
         case req.method, request.path_segments(req) {
@@ -74,7 +87,6 @@ pub fn main() {
             |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<
               "sup home boy":utf8,
             >>)))
-            // NOTE: This is response from `mist/http`
             |> Response
           _, _ ->
             response.new(200)
