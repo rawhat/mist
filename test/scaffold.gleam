@@ -1,9 +1,9 @@
 import gleam/bit_builder.{BitBuilder}
+import gleam/erlang/process.{Subject}
 import gleam/http
 import gleam/http/request
 import gleam/http/response.{Response}
 import gleam/list
-import gleam/otp/process.{Sender}
 import gleam/set
 import gleeunit/should
 import glisten/tcp
@@ -29,7 +29,7 @@ pub fn echo_handler() -> Handler {
   }
 }
 
-pub fn open_server(port: Int, handler: Handler) -> Sender(tcp.AcceptorMessage) {
+pub fn open_server(port: Int, handler: Handler) -> Subject(tcp.AcceptorMessage) {
   assert Ok(listener) = tcp.listen(port, [])
   let pool =
     handler

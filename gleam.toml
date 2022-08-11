@@ -7,9 +7,9 @@ repository = { type = "github", user = "rawhat", repo = "mist" }
 
 [dependencies]
 gleam_stdlib = "~> 0.22"
-gleam_erlang = "~> 0.14"
+gleam_erlang = "~> 0.15"
 gleam_http = "~> 3.0"
-gleam_otp = "~> 0.4"
+gleam_otp = "~> 0.5"
 glisten = "~> 0.5"
 
 [dev-dependencies]

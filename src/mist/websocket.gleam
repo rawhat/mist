@@ -1,8 +1,8 @@
 import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
+import gleam/erlang/process.{Subject}
 import gleam/list
 import gleam/option.{None, Option, Some}
-import gleam/otp/process.{Sender}
 import gleam/string
 import glisten/tcp.{HandlerMessage, Socket}
 
@@ -12,7 +12,7 @@ pub type Message {
 }
 
 pub type Handler =
-  fn(Message, Sender(HandlerMessage)) -> Result(Nil, Nil)
+  fn(Message, Subject(HandlerMessage)) -> Result(Nil, Nil)
 
 // TODO:  there are other message types, AND ALSO will need to buffer across
 // multiple frames, potentially
@@ -154,7 +154,7 @@ pub fn parse_key(key: String) -> String {
 
 /// Helper to encapsulate the logic to send a provided message over the
 /// WebSocket
-pub fn send(sender: Sender(HandlerMessage), message: Message) -> Nil {
+pub fn send(sender: Subject(HandlerMessage), message: Message) -> Nil {
   case message {
     TextMessage(data) ->
       data
@@ -170,7 +170,7 @@ pub fn send(sender: Sender(HandlerMessage), message: Message) -> Nil {
 
 pub fn echo_handler(
   message: Message,
-  sender: Sender(HandlerMessage),
+  sender: Subject(HandlerMessage),
 ) -> Result(Nil, Nil) {
   let _ = send(sender, message)
 
@@ -179,8 +179,8 @@ pub fn echo_handler(
 
 pub type WebsocketHandler {
   WebsocketHandler(
-    on_close: Option(fn(Sender(tcp.HandlerMessage)) -> Nil),
-    on_init: Option(fn(Sender(tcp.HandlerMessage)) -> Nil),
+    on_close: Option(fn(Subject(tcp.HandlerMessage)) -> Nil),
+    on_init: Option(fn(Subject(tcp.HandlerMessage)) -> Nil),
     handler: Handler,
   )
 }
@@ -191,14 +191,14 @@ pub fn with_handler(func: Handler) -> WebsocketHandler {
 
 pub fn on_init(
   handler: WebsocketHandler,
-  func: fn(Sender(tcp.HandlerMessage)) -> Nil,
+  func: fn(Subject(tcp.HandlerMessage)) -> Nil,
 ) -> WebsocketHandler {
   WebsocketHandler(..handler, on_init: Some(func))
 }
 
 pub fn on_close(
   handler: WebsocketHandler,
-  func: fn(Sender(tcp.HandlerMessage)) -> Nil,
+  func: fn(Subject(tcp.HandlerMessage)) -> Nil,
 ) -> WebsocketHandler {
   WebsocketHandler(..handler, on_close: Some(func))
 }

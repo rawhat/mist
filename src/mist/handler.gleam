@@ -1,12 +1,13 @@
 import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
+import gleam/dynamic
 import gleam/erlang.{Errored, Exited, Thrown, rescue}
+import gleam/erlang/process
 import gleam/http/request.{Request}
 import gleam/http/response
 import gleam/int
 import gleam/option.{None, Option, Some}
 import gleam/otp/actor
-import gleam/otp/process
 import gleam/result
 import glisten/tcp.{LoopState}
 import mist/encoder
@@ -169,7 +170,7 @@ fn log_and_error(
       |> encoder.to_bit_builder
       |> tcp.send(socket, _)
       tcp.close(socket)
-      actor.Stop(process.Abnormal(msg))
+      actor.Stop(process.Abnormal(dynamic.unsafe_coerce(msg)))
     }
   }
 }
@@ -256,10 +257,10 @@ pub fn with(handler: Handler, max_body_limit: Int) -> tcp.LoopFn(State) {
     response.new(400)
     |> response.set_body(bit_builder.new())
   with_func(fn(req) {
-    case
-      request.get_header(req, "content-length"),
-      request.get_header(req, "transfer-encoding")
-    {
+    case request.get_header(req, "content-length"), request.get_header(
+      req,
+      "transfer-encoding",
+    ) {
       Ok("0"), _ | Error(Nil), Error(Nil) ->
         req
         |> request.set_body(<<>>)
