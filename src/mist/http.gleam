@@ -172,16 +172,6 @@ fn read_chunk(
   }
 }
 
-external fn is_atom(value: Dynamic) -> Bool =
-  "erlang" "is_atom"
-
-fn decode_atom(value: Dynamic) -> Result(Atom, List(dynamic.DecodeError)) {
-  case is_atom(value) {
-    True -> Ok(dynamic.unsafe_coerce(value))
-    False -> Error([dynamic.DecodeError("Atom", dynamic.classify(value), [])])
-  }
-}
-
 /// Turns the TCP message into an HTTP request
 pub fn parse_request(
   bs: BitString,
@@ -191,10 +181,10 @@ pub fn parse_request(
     Ok(BinaryData(HttpRequest(http_method, AbsPath(path), _version), rest)) -> {
       try method =
         http_method
-        |> decode_atom
+        |> atom.from_dynamic
         |> result.map(atom.to_string)
         |> result.or(dynamic.string(http_method))
-        |> result.replace_error(Nil)
+        |> result.nil_error
         |> result.then(http.parse_method)
         |> result.replace_error(UnknownMethod)
       try #(headers, rest) = parse_headers(rest, socket, map.new())
@@ -284,7 +274,7 @@ pub fn upgrade_socket(
   let accept_key = websocket.parse_key(key)
 
   response.new(101)
-  |> response.set_body(bit_builder.from_bit_string(<<"":utf8>>))
+  |> response.set_body(bit_builder.new())
   |> response.prepend_header("Upgrade", "websocket")
   |> response.prepend_header("Connection", "Upgrade")
   |> response.prepend_header("Sec-WebSocket-Accept", accept_key)
@@ -295,13 +285,13 @@ pub fn upgrade_socket(
 pub fn upgrade(socket: Socket, req: Request(Body)) -> Result(Nil, Nil) {
   try resp =
     upgrade_socket(req)
-    |> result.replace_error(Nil)
+    |> result.nil_error
 
   try _sent =
     resp
     |> encoder.to_bit_builder
     |> tcp.send(socket, _)
-    |> result.replace_error(Nil)
+    |> result.nil_error
 
   Ok(Nil)
 }
