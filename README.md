@@ -52,6 +52,7 @@ import gleam/http.{Get, Post}
 import gleam/http/request
 import gleam/http/response
 import gleam/result
+import glisten/socket.{Tcp}
 import mist/handler.{Response, Upgrade}
 import mist/http.{BitBuilderBody}
 import mist/websocket
@@ -68,7 +69,7 @@ pub fn main() {
             |> Upgrade
           Post, ["echo", "body"] ->
             req
-            |> http.read_body
+            |> http.read_body(Tcp)
             |> result.map(fn(req) {
               response.new(200)
               |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(
@@ -101,6 +102,51 @@ pub fn main() {
       }),
     )
   process.sleep_forever()
+}
+```
+
+You might also want to use SSL.  You can do that with the following options.
+
+With `run_service_ssl`:
+
+```gleam
+import mist
+import gleam/bit_builder
+import gleam/erlang/process
+import gleam/http/response
+
+pub fn main() {
+  assert Ok(_) =
+    mist.run_service_ssl(
+      port: 8080,
+      certfile: "/path/to/server.crt",
+      certkey: "/path/to/server.key",
+      handler: fn(_req) {
+        response.new(200)
+        |> response.set_body(bit_builder.from_bit_string(<<
+          "hello, world!":utf8,
+        >>))
+      },
+      max_body_limit: 4_000_000
+    )
+  process.sleep_forever()
+}
+```
+
+With `serve_ssl`:
+
+```gleam
+pub fn main() {
+  assert Ok(_) =
+    mist.serve_ssl(
+      port: 8080,
+      certfile: "...",
+      certkey: "...",
+      handler.with_func(fn(req) {
+        todo
+      }
+    )
+  // ...
 }
 ```
 

@@ -4,7 +4,10 @@ import gleam/erlang/process.{Subject}
 import gleam/list
 import gleam/option.{None, Option, Some}
 import gleam/string
-import glisten/tcp.{HandlerMessage, Socket}
+import glisten/handler.{HandlerMessage, SendMessage}
+import glisten/socket.{Socket, Ssl, Tcp, Transport}
+import glisten/ssl
+import glisten/tcp
 
 pub type Message {
   BinaryMessage(data: BitString)
@@ -52,8 +55,13 @@ fn unmask_data(
 
 pub fn frame_from_message(
   socket: Socket,
+  transport: Transport,
   message: BitString,
 ) -> Result(Frame, Nil) {
+  let receive = case transport {
+    Tcp -> tcp.receive
+    Ssl -> ssl.receive
+  }
   assert <<_fin:1, rest:bit_string>> = message
   assert <<_reserved:3, rest:bit_string>> = rest
   assert <<opcode:int-size(4), rest:bit_string>> = rest
@@ -83,7 +91,7 @@ pub fn frame_from_message(
       let data = case payload_length - bit_string.byte_size(rest) {
         0 -> unmask_data(rest, [mask1, mask2, mask3, mask4], 0, <<>>)
         need -> {
-          assert Ok(needed) = tcp.receive(socket, need)
+          assert Ok(needed) = receive(socket, need)
           rest
           |> bit_string.append(needed)
           |> unmask_data([mask1, mask2, mask3, mask4], 0, <<>>)
@@ -162,7 +170,7 @@ pub fn send(sender: Subject(HandlerMessage), message: Message) -> Nil {
       |> to_text_frame
     BinaryMessage(data) -> to_binary_frame(data)
   }
-  |> tcp.SendMessage
+  |> SendMessage
   |> process.send(sender, _)
 
   Nil
@@ -179,8 +187,8 @@ pub fn echo_handler(
 
 pub type WebsocketHandler {
   WebsocketHandler(
-    on_close: Option(fn(Subject(tcp.HandlerMessage)) -> Nil),
-    on_init: Option(fn(Subject(tcp.HandlerMessage)) -> Nil),
+    on_close: Option(fn(Subject(HandlerMessage)) -> Nil),
+    on_init: Option(fn(Subject(HandlerMessage)) -> Nil),
     handler: Handler,
   )
 }
@@ -191,14 +199,14 @@ pub fn with_handler(func: Handler) -> WebsocketHandler {
 
 pub fn on_init(
   handler: WebsocketHandler,
-  func: fn(Subject(tcp.HandlerMessage)) -> Nil,
+  func: fn(Subject(HandlerMessage)) -> Nil,
 ) -> WebsocketHandler {
   WebsocketHandler(..handler, on_init: Some(func))
 }
 
 pub fn on_close(
   handler: WebsocketHandler,
-  func: fn(Subject(tcp.HandlerMessage)) -> Nil,
+  func: fn(Subject(HandlerMessage)) -> Nil,
 ) -> WebsocketHandler {
   WebsocketHandler(..handler, on_close: Some(func))
 }

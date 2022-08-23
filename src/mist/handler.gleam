@@ -9,7 +9,10 @@ import gleam/int
 import gleam/option.{None, Option, Some}
 import gleam/otp/actor
 import gleam/result
-import glisten/tcp.{LoopState}
+import glisten/handler.{Close, LoopFn, LoopState}
+import glisten/socket.{Socket, Ssl, Tcp, Transport}
+import glisten/ssl
+import glisten/tcp
 import mist/encoder
 import mist/file
 import mist/http.{
@@ -49,9 +52,9 @@ pub fn new_state() -> State {
 
 /// This is a more flexible handler. It will allow you to upgrade a connection
 /// to a websocket connection, or deal with a regular HTTP req->resp workflow.
-pub fn with_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
-  tcp.handler(fn(msg, socket_state: LoopState(State)) {
-    let tcp.LoopState(socket, data: state, ..) = socket_state
+pub fn with_func(handler: HandlerFunc) -> LoopFn(State) {
+  handler.func(fn(msg, socket_state: LoopState(State)) {
+    let LoopState(socket, transport: transport, data: state, ..) = socket_state
     case state.upgraded_handler {
       Some(ws_handler) ->
         handle_websocket_message(socket_state, ws_handler, msg)
@@ -62,13 +65,17 @@ pub fn with_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
             _ -> process.TimerNotFound
           }
           msg
-          |> http.parse_request(socket)
+          |> http.parse_request(socket, transport)
           |> result.map_error(fn(err) {
             case err {
               DiscardPacket -> Nil
               _ -> {
+                let close = case transport {
+                  Tcp -> tcp.close
+                  Ssl -> ssl.close
+                }
                 logger.error(err)
-                tcp.close(socket)
+                close(socket)
                 Nil
               }
             }
@@ -77,7 +84,11 @@ pub fn with_func(handler: HandlerFunc) -> tcp.LoopFn(State) {
           |> result.then(fn(req) {
             rescue(fn() { handler(req) })
             |> result.map(fn(resp) { #(req, resp) })
-            |> result.map_error(log_and_error(_, socket_state.socket))
+            |> result.map_error(log_and_error(
+              _,
+              socket_state.socket,
+              socket_state.transport,
+            ))
           })
           |> result.map(fn(req_resp) {
             let #(req, response) = req_resp
@@ -103,18 +114,21 @@ fn handle_websocket_message(
   handler: websocket.WebsocketHandler,
   msg: BitString,
 ) -> actor.Next(LoopState(State)) {
-  case websocket.frame_from_message(state.socket, msg) {
+  let send = case state.transport {
+    Tcp -> tcp.send
+    Ssl -> ssl.send
+  }
+  case websocket.frame_from_message(state.socket, state.transport, msg) {
     Ok(websocket.PingFrame(_, _)) -> {
       assert Ok(_) =
-        tcp.send(
+        send(
           state.socket,
           websocket.frame_to_bit_builder(websocket.PongFrame(0, <<>>)),
         )
       actor.Continue(state)
     }
     Ok(websocket.CloseFrame(..) as frame) -> {
-      assert Ok(_) =
-        tcp.send(state.socket, websocket.frame_to_bit_builder(frame))
+      assert Ok(_) = send(state.socket, websocket.frame_to_bit_builder(frame))
       let _ = case handler.on_close {
         Some(func) -> func(state.sender)
         _ -> Nil
@@ -157,8 +171,13 @@ fn handle_websocket_message(
 
 fn log_and_error(
   error: erlang.Crash,
-  socket: tcp.Socket,
+  socket: Socket,
+  transport: Transport,
 ) -> actor.Next(LoopState(State)) {
+  let #(send, close) = case transport {
+    Tcp -> #(tcp.send, tcp.close)
+    Ssl -> #(ssl.send, tcp.close)
+  }
   case error {
     Exited(msg) | Thrown(msg) | Errored(msg) -> {
       logger.error(error)
@@ -168,8 +187,8 @@ fn log_and_error(
       >>))
       |> response.prepend_header("content-length", "21")
       |> encoder.to_bit_builder
-      |> tcp.send(socket, _)
-      tcp.close(socket)
+      |> send(socket, _)
+      close(socket)
       actor.Stop(process.Abnormal(dynamic.unsafe_coerce(msg)))
     }
   }
@@ -180,21 +199,25 @@ fn handle_bit_builder_body(
   body: BitBuilder,
   state: LoopState(State),
 ) -> actor.Next(LoopState(State)) {
+  let #(send, close) = case state.transport {
+    Tcp -> #(tcp.send, tcp.close)
+    Ssl -> #(ssl.send, tcp.close)
+  }
   resp
   |> response.set_body(body)
   |> encoder.to_bit_builder
-  |> tcp.send(state.socket, _)
+  |> send(state.socket, _)
   |> result.map(fn(_sent) {
     // If the handler explicitly says to close the connection, we should
     // probably listen to them
     case response.get_header(resp, "connection") {
       Ok("close") -> {
-        tcp.close(state.socket)
+        close(state.socket)
         stop_normal
       }
       _ -> {
         // TODO:  this should be a configuration
-        let timer = process.send_after(state.sender, 10_000, tcp.Close)
+        let timer = process.send_after(state.sender, 10_000, Close)
         actor.Continue(
           LoopState(..state, data: State(..state.data, idle_timer: Some(timer))),
         )
@@ -209,6 +232,10 @@ fn handle_file_body(
   resp: response.Response(HttpResponseBody),
   state: LoopState(State),
 ) -> actor.Next(LoopState(State)) {
+  let send = case state.transport {
+    Tcp -> tcp.send
+    Ssl -> ssl.send
+  }
   assert FileBody(file_descriptor, content_type, offset, length) = resp.body
   resp
   |> response.prepend_header("content-length", int.to_string(length - offset))
@@ -217,7 +244,7 @@ fn handle_file_body(
   |> fn(r: response.Response(BitBuilder)) {
     encoder.response_builder(resp.status, r.headers)
   }
-  |> tcp.send(state.socket, _)
+  |> send(state.socket, _)
   |> result.map(fn(_) {
     file.sendfile(file_descriptor, state.socket, offset, length, [])
   })
@@ -233,7 +260,7 @@ fn handle_upgrade(
   state: LoopState(State),
 ) -> actor.Next(LoopState(State)) {
   req
-  |> http.upgrade(state.socket, _)
+  |> http.upgrade(state.socket, state.transport, _)
   |> result.map(fn(_nil) {
     let _ = case handler.on_init {
       Some(func) -> func(state.sender)
@@ -252,7 +279,11 @@ fn handle_upgrade(
 }
 
 /// Creates a standard HTTP handler service to pass to `mist.serve`
-pub fn with(handler: Handler, max_body_limit: Int) -> tcp.LoopFn(State) {
+pub fn with(
+  handler: Handler,
+  transport: Transport,
+  max_body_limit: Int,
+) -> LoopFn(State) {
   let bad_request =
     response.new(400)
     |> response.set_body(bit_builder.new())
@@ -267,7 +298,7 @@ pub fn with(handler: Handler, max_body_limit: Int) -> tcp.LoopFn(State) {
         |> handler
       _, Ok("chunked") ->
         req
-        |> http.read_body
+        |> http.read_body(transport)
         |> result.map(handler)
         |> result.unwrap(bad_request)
       Ok(size), _ ->
@@ -281,7 +312,7 @@ pub fn with(handler: Handler, max_body_limit: Int) -> tcp.LoopFn(State) {
               |> response.prepend_header("connection", "close")
             False ->
               req
-              |> http.read_body
+              |> http.read_body(transport)
               |> result.map(handler)
               |> result.unwrap(bad_request)
           }

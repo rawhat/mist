@@ -1,5 +1,5 @@
 import gleam/erlang/atom.{Atom}
-import glisten/tcp.{Socket}
+import glisten/socket.{Socket}
 
 pub external type FileDescriptor
 

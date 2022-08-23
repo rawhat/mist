@@ -14,7 +14,9 @@ import gleam/pair
 import gleam/result
 import gleam/string
 import gleam/uri
-import glisten/tcp.{Socket}
+import glisten/socket.{Socket, Ssl, Tcp, Transport}
+import glisten/ssl
+import glisten/tcp
 import mist/encoder
 import mist/file
 import mist/websocket
@@ -71,6 +73,7 @@ pub type Buffer {
 pub fn parse_headers(
   bs: BitString,
   socket: Socket,
+  transport: Transport,
   headers: Map(String, String),
 ) -> Result(#(Map(String, String), BitString), DecodeError) {
   case decode_packet(HttphBin, bs, []) {
@@ -79,13 +82,14 @@ pub fn parse_headers(
       assert Ok(value) = bit_string.to_string(value)
       headers
       |> map.insert(field, value)
-      |> parse_headers(rest, socket, _)
+      |> parse_headers(rest, socket, transport, _)
     }
     Ok(EndOfHeaders(rest)) -> Ok(#(headers, rest))
     Ok(MoreData(size)) -> {
       let amount_to_read = option.unwrap(size, 0)
-      try next = read_data(socket, Buffer(amount_to_read, bs), UnknownHeader)
-      parse_headers(next, socket, headers)
+      try next =
+        read_data(socket, transport, Buffer(amount_to_read, bs), UnknownHeader)
+      parse_headers(next, socket, transport, headers)
     }
     _other -> Error(UnknownHeader)
   }
@@ -93,15 +97,20 @@ pub fn parse_headers(
 
 pub fn read_data(
   socket: Socket,
+  transport: Transport,
   buffer: Buffer,
   error: DecodeError,
 ) -> Result(BitString, DecodeError) {
+  let receive_timeout = case transport {
+    Tcp -> tcp.receive_timeout
+    Ssl -> ssl.receive_timeout
+  }
   // TODO:  don't hard-code these, probably
   let to_read = int.min(buffer.remaining, 1_000_000)
   let timeout = 15_000
   try data =
     socket
-    |> tcp.receive_timeout(to_read, timeout)
+    |> receive_timeout(to_read, timeout)
     |> result.replace_error(error)
   let next_buffer =
     Buffer(
@@ -110,7 +119,7 @@ pub fn read_data(
     )
 
   case next_buffer.remaining > 0 {
-    True -> read_data(socket, next_buffer, error)
+    True -> read_data(socket, transport, next_buffer, error)
     False -> Ok(next_buffer.data)
   }
 }
@@ -128,6 +137,7 @@ const crnl = <<13:int, 10:int>>
 
 fn read_chunk(
   socket: Socket,
+  transport: Transport,
   buffer: Buffer,
   body: BitBuilder,
 ) -> Result(BitBuilder, DecodeError) {
@@ -154,19 +164,27 @@ fn read_chunk(
             <<next_chunk:binary-size(size), 13:int, 10:int, rest:binary>> ->
               read_chunk(
                 socket,
+                transport,
                 Buffer(0, rest),
                 bit_builder.append(body, next_chunk),
               )
             _ -> {
-              try next = read_data(socket, Buffer(0, buffer.data), InvalidBody)
-              read_chunk(socket, Buffer(0, next), body)
+              try next =
+                read_data(
+                  socket,
+                  transport,
+                  Buffer(0, buffer.data),
+                  InvalidBody,
+                )
+              read_chunk(socket, transport, Buffer(0, next), body)
             }
           }
       }
     }
     <<>>, _ -> {
-      try next = read_data(socket, Buffer(0, buffer.data), InvalidBody)
-      read_chunk(socket, Buffer(0, next), body)
+      try next =
+        read_data(socket, transport, Buffer(0, buffer.data), InvalidBody)
+      read_chunk(socket, transport, Buffer(0, next), body)
     }
     _, Error(Nil) -> Error(InvalidBody)
   }
@@ -176,6 +194,7 @@ fn read_chunk(
 pub fn parse_request(
   bs: BitString,
   socket: Socket,
+  transport: Transport,
 ) -> Result(request.Request(Body), DecodeError) {
   case decode_packet(HttpBin, bs, []) {
     Ok(BinaryData(HttpRequest(http_method, AbsPath(path), _version), rest)) -> {
@@ -187,7 +206,7 @@ pub fn parse_request(
         |> result.nil_error
         |> result.then(http.parse_method)
         |> result.replace_error(UnknownMethod)
-      try #(headers, rest) = parse_headers(rest, socket, map.new())
+      try #(headers, rest) = parse_headers(rest, socket, transport, map.new())
       try path =
         path
         |> bit_string.to_string
@@ -219,11 +238,19 @@ pub opaque type Body {
   Read(data: BitString)
 }
 
-pub fn read_body(req: Request(Body)) -> Result(Request(BitString), DecodeError) {
+pub fn read_body(
+  req: Request(Body),
+  transport: Transport,
+) -> Result(Request(BitString), DecodeError) {
   case request.get_header(req, "transfer-encoding"), req.body {
     Ok("chunked"), Unread(rest, socket) -> {
       try chunk =
-        read_chunk(socket, Buffer(remaining: 0, data: rest), bit_builder.new())
+        read_chunk(
+          socket,
+          transport,
+          Buffer(remaining: 0, data: rest),
+          bit_builder.new(),
+        )
       Ok(request.set_body(req, bit_builder.to_bit_string(chunk)))
     }
     _, Unread(rest, socket) -> {
@@ -239,7 +266,8 @@ pub fn read_body(req: Request(Body)) -> Result(Request(BitString), DecodeError) 
         0, _n -> Ok(rest)
         // is this pipelining? check for GET?
         _n, 0 -> Ok(rest)
-        _size, _rem -> read_data(socket, Buffer(remaining, rest), InvalidBody)
+        _size, _rem ->
+          read_data(socket, transport, Buffer(remaining, rest), InvalidBody)
       }
       |> result.map(request.set_body(req, _))
       |> result.replace_error(InvalidBody)
@@ -282,15 +310,24 @@ pub fn upgrade_socket(
 }
 
 // TODO: improve this error type
-pub fn upgrade(socket: Socket, req: Request(Body)) -> Result(Nil, Nil) {
+pub fn upgrade(
+  socket: Socket,
+  transport: Transport,
+  req: Request(Body),
+) -> Result(Nil, Nil) {
   try resp =
     upgrade_socket(req)
     |> result.nil_error
 
+  let send = case transport {
+    Tcp -> tcp.send
+    Ssl -> ssl.send
+  }
+
   try _sent =
     resp
     |> encoder.to_bit_builder
-    |> tcp.send(socket, _)
+    |> send(socket, _)
     |> result.nil_error
 
   Ok(Nil)
