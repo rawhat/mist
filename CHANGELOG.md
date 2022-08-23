@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.9.0
+
+- Add SSL support via the `run_service_ssl` and `serve_ssl` methods
+- Some refactorings in the internal libraries, if you were depending on them
+
+## v0.8.3
+
+- Update `glisten` version
+
+## v0.8.2
+
+- Fixed up broken README examples
+
+## v0.8.1
+
+- Removed a `main` method I accidentally left in :(
+
 ## v0.8.0
 
 - BREAKING:
