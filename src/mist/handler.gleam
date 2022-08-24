@@ -10,9 +10,8 @@ import gleam/option.{None, Option, Some}
 import gleam/otp/actor
 import gleam/result
 import glisten/handler.{Close, LoopFn, LoopState}
-import glisten/socket.{Socket, Ssl, Tcp, Transport}
-import glisten/ssl
-import glisten/tcp
+import glisten/socket.{Socket}
+import glisten/socket/transport.{Transport}
 import mist/encoder
 import mist/file
 import mist/http.{
@@ -70,12 +69,8 @@ pub fn with_func(handler: HandlerFunc) -> LoopFn(State) {
             case err {
               DiscardPacket -> Nil
               _ -> {
-                let close = case transport {
-                  Tcp -> tcp.close
-                  Ssl -> ssl.close
-                }
                 logger.error(err)
-                close(socket)
+                transport.close(socket)
                 Nil
               }
             }
@@ -114,21 +109,21 @@ fn handle_websocket_message(
   handler: websocket.WebsocketHandler,
   msg: BitString,
 ) -> actor.Next(LoopState(State)) {
-  let send = case state.transport {
-    Tcp -> tcp.send
-    Ssl -> ssl.send
-  }
   case websocket.frame_from_message(state.socket, state.transport, msg) {
     Ok(websocket.PingFrame(_, _)) -> {
       assert Ok(_) =
-        send(
+        state.transport.send(
           state.socket,
           websocket.frame_to_bit_builder(websocket.PongFrame(0, <<>>)),
         )
       actor.Continue(state)
     }
     Ok(websocket.CloseFrame(..) as frame) -> {
-      assert Ok(_) = send(state.socket, websocket.frame_to_bit_builder(frame))
+      assert Ok(_) =
+        state.transport.send(
+          state.socket,
+          websocket.frame_to_bit_builder(frame),
+        )
       let _ = case handler.on_close {
         Some(func) -> func(state.sender)
         _ -> Nil
@@ -174,10 +169,6 @@ fn log_and_error(
   socket: Socket,
   transport: Transport,
 ) -> actor.Next(LoopState(State)) {
-  let #(send, close) = case transport {
-    Tcp -> #(tcp.send, tcp.close)
-    Ssl -> #(ssl.send, tcp.close)
-  }
   case error {
     Exited(msg) | Thrown(msg) | Errored(msg) -> {
       logger.error(error)
@@ -187,8 +178,8 @@ fn log_and_error(
       >>))
       |> response.prepend_header("content-length", "21")
       |> encoder.to_bit_builder
-      |> send(socket, _)
-      close(socket)
+      |> transport.send(socket, _)
+      transport.close(socket)
       actor.Stop(process.Abnormal(dynamic.unsafe_coerce(msg)))
     }
   }
@@ -199,20 +190,16 @@ fn handle_bit_builder_body(
   body: BitBuilder,
   state: LoopState(State),
 ) -> actor.Next(LoopState(State)) {
-  let #(send, close) = case state.transport {
-    Tcp -> #(tcp.send, tcp.close)
-    Ssl -> #(ssl.send, tcp.close)
-  }
   resp
   |> response.set_body(body)
   |> encoder.to_bit_builder
-  |> send(state.socket, _)
+  |> state.transport.send(state.socket, _)
   |> result.map(fn(_sent) {
     // If the handler explicitly says to close the connection, we should
     // probably listen to them
     case response.get_header(resp, "connection") {
       Ok("close") -> {
-        close(state.socket)
+        state.transport.close(state.socket)
         stop_normal
       }
       _ -> {
@@ -232,10 +219,6 @@ fn handle_file_body(
   resp: response.Response(HttpResponseBody),
   state: LoopState(State),
 ) -> actor.Next(LoopState(State)) {
-  let send = case state.transport {
-    Tcp -> tcp.send
-    Ssl -> ssl.send
-  }
   assert FileBody(file_descriptor, content_type, offset, length) = resp.body
   resp
   |> response.prepend_header("content-length", int.to_string(length - offset))
@@ -244,7 +227,7 @@ fn handle_file_body(
   |> fn(r: response.Response(BitBuilder)) {
     encoder.response_builder(resp.status, r.headers)
   }
-  |> send(state.socket, _)
+  |> state.transport.send(state.socket, _)
   |> result.map(fn(_) {
     file.sendfile(file_descriptor, state.socket, offset, length, [])
   })

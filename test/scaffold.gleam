@@ -7,7 +7,7 @@ import gleam/list
 import gleam/set
 import gleeunit/should
 import glisten/acceptor.{AcceptorMessage}
-import glisten/socket.{Tcp}
+import glisten/socket/transport
 import glisten/tcp
 import mist/handler.{Handler}
 
@@ -35,7 +35,7 @@ pub fn open_server(port: Int, handler: Handler) -> Subject(AcceptorMessage) {
   assert Ok(listener) = tcp.listen(port, [])
   let pool =
     handler
-    |> handler.with(Tcp, 4_000_000)
+    |> handler.with(transport.tcp(), 4_000_000)
     |> acceptor.new_pool_with_data(handler.new_state())
     |> fn(func) { func(listener) }
   assert Ok(sender) = acceptor.start(pool)

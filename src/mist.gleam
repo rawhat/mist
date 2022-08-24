@@ -1,7 +1,7 @@
 import glisten
 import glisten/acceptor
 import glisten/handler.{LoopFn}
-import glisten/socket.{Ssl, Tcp}
+import glisten/socket/transport
 import mist/handler.{State}
 
 /// Runs an HTTP Request->Response server at the given port, with your defined
@@ -14,7 +14,7 @@ pub fn run_service(
   max_body_limit max_body_limit: Int,
 ) -> Result(Nil, glisten.StartError) {
   handler
-  |> handler.with(Tcp, max_body_limit)
+  |> handler.with(transport.tcp(), max_body_limit)
   |> acceptor.new_pool_with_data(handler.new_state())
   |> glisten.serve(port, _)
 }
@@ -29,7 +29,7 @@ pub fn run_service_ssl(
   max_body_limit max_body_limit: Int,
 ) -> Result(Nil, glisten.StartError) {
   handler
-  |> handler.with(Ssl, max_body_limit)
+  |> handler.with(transport.ssl(), max_body_limit)
   |> acceptor.new_pool_with_data(handler.new_state())
   |> glisten.serve_ssl(
     port: port,

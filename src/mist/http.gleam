@@ -14,9 +14,8 @@ import gleam/pair
 import gleam/result
 import gleam/string
 import gleam/uri
-import glisten/socket.{Socket, Ssl, Tcp, Transport}
-import glisten/ssl
-import glisten/tcp
+import glisten/socket.{Socket}
+import glisten/socket/transport.{Transport}
 import mist/encoder
 import mist/file
 import mist/websocket
@@ -101,16 +100,12 @@ pub fn read_data(
   buffer: Buffer,
   error: DecodeError,
 ) -> Result(BitString, DecodeError) {
-  let receive_timeout = case transport {
-    Tcp -> tcp.receive_timeout
-    Ssl -> ssl.receive_timeout
-  }
   // TODO:  don't hard-code these, probably
   let to_read = int.min(buffer.remaining, 1_000_000)
   let timeout = 15_000
   try data =
     socket
-    |> receive_timeout(to_read, timeout)
+    |> transport.receive_timeout(to_read, timeout)
     |> result.replace_error(error)
   let next_buffer =
     Buffer(
@@ -319,15 +314,10 @@ pub fn upgrade(
     upgrade_socket(req)
     |> result.nil_error
 
-  let send = case transport {
-    Tcp -> tcp.send
-    Ssl -> ssl.send
-  }
-
   try _sent =
     resp
     |> encoder.to_bit_builder
-    |> send(socket, _)
+    |> transport.send(socket, _)
     |> result.nil_error
 
   Ok(Nil)
