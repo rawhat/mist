@@ -271,10 +271,10 @@ pub fn with(
     response.new(400)
     |> response.set_body(bit_builder.new())
   with_func(fn(req) {
-    case request.get_header(req, "content-length"), request.get_header(
-      req,
-      "transfer-encoding",
-    ) {
+    case
+      request.get_header(req, "content-length"),
+      request.get_header(req, "transfer-encoding")
+    {
       Ok("0"), _ | Error(Nil), Error(Nil) ->
         req
         |> request.set_body(<<>>)
