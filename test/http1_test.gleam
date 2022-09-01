@@ -9,7 +9,6 @@ import gleam/uri
 import scaffold.{
   bitstring_response_should_equal, echo_handler, make_request, open_server, string_response_should_equal,
 }
-import gleam/http/request
 
 pub type Fixture {
   Foreach

@@ -1,6 +1,6 @@
 import glisten
 import glisten/acceptor
-import glisten/handler.{LoopFn}
+import glisten/handler.{LoopFn} as glisten_handler
 import glisten/socket/transport
 import mist/handler.{State}
 
