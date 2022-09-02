@@ -119,7 +119,7 @@ pub fn main() {
     mist.run_service_ssl(
       port: 8080,
       certfile: "/path/to/server.crt",
-      certkey: "/path/to/server.key",
+      keyfile: "/path/to/server.key",
       handler: fn(_req) {
         response.new(200)
         |> response.set_body(bit_builder.from_bit_string(<<
@@ -140,7 +140,7 @@ pub fn main() {
     mist.serve_ssl(
       port: 8080,
       certfile: "...",
-      certkey: "...",
+      keyfile: "...",
       handler.with_func(fn(req) {
         todo
       }

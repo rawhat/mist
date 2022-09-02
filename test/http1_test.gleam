@@ -34,6 +34,7 @@ pub fn set_up_echo_server_test_() {
       it_rejects_large_requests,
       it_supports_chunked_encoding,
       it_supports_query_parameters,
+      it_supports_expect_continue_header,
     ],
   )
 }
@@ -169,6 +170,32 @@ pub fn it_supports_query_parameters() {
   assert Ok(resp) = hackney.send(req)
 
   let expected = get_default_response()
+
+  string_response_should_equal(resp, expected)
+}
+
+pub fn it_supports_expect_continue_header() {
+  let req =
+    string.repeat("a", 1000)
+    |> make_request("/", _)
+    |> request.set_method(http.Post)
+    |> request.prepend_header("expect", "100-continue")
+
+  assert Ok(resp) = hackney.send(req)
+
+  let expected_body =
+    string.repeat("a", 1000)
+    |> bit_builder.from_string
+
+  let expected =
+    response.new(200)
+    |> response.prepend_header("user-agent", "hackney/1.18.1")
+    |> response.prepend_header("host", "localhost:8888")
+    |> response.prepend_header("connection", "keep-alive")
+    |> response.prepend_header("content-type", "application/octet-stream")
+    |> response.prepend_header("content-length", "1000")
+    |> response.prepend_header("expect", "100-continue")
+    |> response.set_body(expected_body)
 
   string_response_should_equal(resp, expected)
 }

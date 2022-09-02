@@ -42,8 +42,8 @@ pub fn run_service_ssl(
 /// into the `mist/http.{handler_func}` method. Note that the request body
 /// will not be automatically read. You will need to call `http.read_body`.
 pub fn serve(
-  port: Int,
-  handler: LoopFn(State),
+  port port: Int,
+  handler handler: LoopFn(State),
 ) -> Result(Nil, glisten.StartError) {
   handler
   |> acceptor.new_pool_with_data(handler.new_state())
@@ -52,10 +52,10 @@ pub fn serve(
 
 /// Similar to the `run_service` method, `serve` also has a similar SSL method.
 pub fn serve_ssl(
-  port: Int,
+  port port: Int,
   certfile certfile: String,
   keyfile keyfile: String,
-  handler: LoopFn(State),
+  handler handler: LoopFn(State),
 ) -> Result(Nil, glisten.StartError) {
   handler
   |> acceptor.new_pool_with_data(handler.new_state())

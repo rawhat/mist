@@ -177,6 +177,7 @@ fn log_and_error(
         "Internal Server Error":utf8,
       >>))
       |> response.prepend_header("content-length", "21")
+      |> http.add_default_headers
       |> encoder.to_bit_builder
       |> transport.send(socket, _)
       transport.close(socket)
@@ -192,6 +193,7 @@ fn handle_bit_builder_body(
 ) -> actor.Next(LoopState(State)) {
   resp
   |> response.set_body(body)
+  |> http.add_default_headers
   |> encoder.to_bit_builder
   |> state.transport.send(state.socket, _)
   |> result.map(fn(_sent) {

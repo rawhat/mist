@@ -3,25 +3,10 @@ import gleam/http.{Header}
 import gleam/http/response.{Response}
 import gleam/int
 import gleam/list
-import gleam/map
 
 /// Turns an HTTP response into a TCP message
 pub fn to_bit_builder(resp: Response(BitBuilder)) -> BitBuilder {
   let body_size = bit_builder.byte_size(resp.body)
-
-  let headers =
-    map.from_list([
-      #("content-length", int.to_string(body_size)),
-      #("connection", "keep-alive"),
-    ])
-    |> list.fold(
-      resp.headers,
-      _,
-      fn(defaults, tup) {
-        let #(key, value) = tup
-        map.insert(defaults, key, value)
-      },
-    )
 
   let body_builder = case body_size {
     0 -> bit_builder.new()
@@ -32,7 +17,7 @@ pub fn to_bit_builder(resp: Response(BitBuilder)) -> BitBuilder {
   }
 
   resp.status
-  |> response_builder(map.to_list(headers))
+  |> response_builder(resp.headers)
   |> bit_builder.append_builder(body_builder)
 }
 

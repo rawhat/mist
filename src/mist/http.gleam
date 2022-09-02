@@ -4,7 +4,7 @@ import gleam/dynamic.{Dynamic}
 import gleam/erlang/atom.{Atom}
 import gleam/erlang/charlist.{Charlist}
 import gleam/http/request.{Request}
-import gleam/http/response
+import gleam/http/response.{Response}
 import gleam/http
 import gleam/int
 import gleam/list
@@ -218,6 +218,10 @@ pub fn parse_request(
       }
       let req =
         request.new()
+        |> request.set_scheme(case transport {
+          transport.Ssl(..) -> http.Https
+          transport.Tcp(..) -> http.Http
+        })
         |> request.set_body(Unread(rest, socket))
         |> request.set_method(method)
         |> request.set_path(path)
@@ -250,6 +254,17 @@ pub fn read_body(req: Request(Body)) -> Result(Request(BitString), DecodeError) 
       Ok(request.set_body(req, bit_builder.to_bit_string(chunk)))
     }
     _, Unread(rest, socket) -> {
+      let _continue = case is_continue(req) {
+        True -> {
+          assert Ok(Nil) =
+            response.new(100)
+            |> response.set_body(bit_builder.new())
+            |> encoder.to_bit_builder
+            |> transport.send(socket, _)
+          Nil
+        }
+        False -> Nil
+      }
       let body_size =
         req.headers
         |> list.find(fn(tup) { pair.first(tup) == "content-length" })
@@ -284,7 +299,7 @@ pub type HttpResponseBody {
 
 pub fn upgrade_socket(
   req: Request(Body),
-) -> Result(response.Response(BitBuilder), Request(Body)) {
+) -> Result(Response(BitBuilder), Request(Body)) {
   try _upgrade =
     request.get_header(req, "upgrade")
     |> result.replace_error(req)
@@ -317,9 +332,39 @@ pub fn upgrade(
 
   try _sent =
     resp
+    |> add_default_headers
     |> encoder.to_bit_builder
     |> transport.send(socket, _)
     |> result.nil_error
 
   Ok(Nil)
+}
+
+pub fn add_default_headers(resp: Response(BitBuilder)) -> Response(BitBuilder) {
+  let body_size = bit_builder.byte_size(resp.body)
+
+  let headers =
+    map.from_list([
+      #("content-length", int.to_string(body_size)),
+      #("connection", "keep-alive"),
+    ])
+    |> list.fold(
+      resp.headers,
+      _,
+      fn(defaults, tup) {
+        let #(key, value) = tup
+        map.insert(defaults, key, value)
+      },
+    )
+    |> map.to_list
+
+  Response(..resp, headers: headers)
+}
+
+fn is_continue(req: Request(Body)) -> Bool {
+  req.headers
+  |> list.find(fn(tup) {
+    pair.first(tup) == "expect" && pair.second(tup) == "100-continue"
+  })
+  |> result.is_ok
 }
