@@ -52,7 +52,6 @@ import gleam/http.{Get, Post}
 import gleam/http/request
 import gleam/http/response
 import gleam/result
-import glisten/socket/transport
 import mist/handler.{Response, Upgrade}
 import mist/http.{BitBuilderBody}
 import mist/websocket
@@ -69,7 +68,7 @@ pub fn main() {
             |> Upgrade
           Post, ["echo", "body"] ->
             req
-            |> http.read_body(transport.tcp())
+            |> http.read_body
             |> result.map(fn(req) {
               response.new(200)
               |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(

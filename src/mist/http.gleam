@@ -233,10 +233,11 @@ pub opaque type Body {
   Read(data: BitString)
 }
 
-pub fn read_body(
-  req: Request(Body),
-  transport: Transport,
-) -> Result(Request(BitString), DecodeError) {
+pub fn read_body(req: Request(Body)) -> Result(Request(BitString), DecodeError) {
+  let transport = case req.scheme {
+    http.Https -> transport.ssl()
+    http.Http -> transport.tcp()
+  }
   case request.get_header(req, "transfer-encoding"), req.body {
     Ok("chunked"), Unread(rest, socket) -> {
       try chunk =

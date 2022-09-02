@@ -262,11 +262,7 @@ fn handle_upgrade(
 }
 
 /// Creates a standard HTTP handler service to pass to `mist.serve`
-pub fn with(
-  handler: Handler,
-  transport: Transport,
-  max_body_limit: Int,
-) -> LoopFn(State) {
+pub fn with(handler: Handler, max_body_limit: Int) -> LoopFn(State) {
   let bad_request =
     response.new(400)
     |> response.set_body(bit_builder.new())
@@ -281,7 +277,7 @@ pub fn with(
         |> handler
       _, Ok("chunked") ->
         req
-        |> http.read_body(transport)
+        |> http.read_body
         |> result.map(handler)
         |> result.unwrap(bad_request)
       Ok(size), _ ->
@@ -295,7 +291,7 @@ pub fn with(
               |> response.prepend_header("connection", "close")
             False ->
               req
-              |> http.read_body(transport)
+              |> http.read_body
               |> result.map(handler)
               |> result.unwrap(bad_request)
           }
