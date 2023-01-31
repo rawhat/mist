@@ -4,6 +4,23 @@
 
 - Support chunked responses, via `Chunked(Iterator(BitBuilder))`
 
+## v0.9.4
+
+- Utilize `request.scheme` to determine which transport to use automatically
+- Support the `Expect: 100-continue` header functionality
+
+## v0.9.3
+
+- Remove duplicate imports that errored on newer gleam versions
+
+## v0.9.2
+
+- Support more HTTP status codes
+
+## v0.9.1
+
+- Allow `state.transport` in handlers to abstract over `TCP`/`SSL`
+
 ## v0.9.0
 
 - Add SSL support via the `run_service_ssl` and `serve_ssl` methods
