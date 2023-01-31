@@ -6,6 +6,7 @@ import gleam/http/response.{Response}
 import gleam/hackney
 import gleam/string
 import gleam/uri
+import gleeunit/should
 import scaffold.{
   bitstring_response_should_equal, echo_handler, make_request, open_server,
   string_response_should_equal,
@@ -198,4 +199,18 @@ pub fn it_supports_expect_continue_header() {
     |> response.set_body(expected_body)
 
   string_response_should_equal(resp, expected)
+}
+
+pub fn it_sends_back_chunked_responses_test() {
+  let _server = scaffold.chunked_echo_server(8889, 100)
+
+  let req =
+    string.repeat("a", 1000)
+    |> make_request("/", _)
+    |> request.set_host("localhost:8889")
+    |> request.set_method(http.Post)
+
+  assert Ok(resp) = hackney.send(req)
+
+  should.equal(resp.status, 200)
 }

@@ -7,6 +7,7 @@ import gleam/http/request.{Request}
 import gleam/http/response.{Response}
 import gleam/http
 import gleam/int
+import gleam/iterator.{Iterator}
 import gleam/list
 import gleam/map.{Map}
 import gleam/option.{Option}
@@ -289,6 +290,7 @@ pub fn read_body(req: Request(Body)) -> Result(Request(BitString), DecodeError) 
 
 pub type HttpResponseBody {
   BitBuilderBody(BitBuilder)
+  Chunked(Iterator(BitBuilder))
   FileBody(
     file_descriptor: file.FileDescriptor,
     content_type: String,

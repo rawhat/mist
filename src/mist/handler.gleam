@@ -6,6 +6,7 @@ import gleam/erlang/process
 import gleam/http/request.{Request}
 import gleam/http/response
 import gleam/int
+import gleam/iterator.{Iterator}
 import gleam/option.{None, Option, Some}
 import gleam/otp/actor
 import gleam/result
@@ -15,7 +16,8 @@ import glisten/socket/transport.{Transport}
 import mist/encoder
 import mist/file
 import mist/http.{
-  BitBuilderBody, Body, DecodeError, DiscardPacket, FileBody, HttpResponseBody,
+  BitBuilderBody, Body, Chunked, DecodeError, DiscardPacket, FileBody,
+  HttpResponseBody,
 }
 import mist/logger
 import mist/websocket
@@ -91,6 +93,9 @@ pub fn with_func(handler: HandlerFunc) -> LoopFn(State) {
               Response(
                 response: response.Response(body: BitBuilderBody(body), ..) as resp,
               ) -> handle_bit_builder_body(resp, body, socket_state)
+              Response(
+                response: response.Response(body: Chunked(body), ..) as resp,
+              ) -> handle_chunked_body(resp, body, socket_state)
               Response(
                 response: response.Response(body: FileBody(..), ..) as resp,
               ) -> handle_file_body(resp, socket_state)
@@ -215,6 +220,45 @@ fn handle_bit_builder_body(
   })
   |> result.replace_error(stop_normal)
   |> result.unwrap_both
+}
+
+external fn integer_to_list(int: Int, base: Int) -> String =
+  "erlang" "integer_to_list"
+
+fn int_to_hex(int: Int) -> String {
+  integer_to_list(int, 16)
+}
+
+fn handle_chunked_body(
+  resp: response.Response(HttpResponseBody),
+  body: Iterator(BitBuilder),
+  state: LoopState(State),
+) -> actor.Next(LoopState(State)) {
+  let headers = [#("transfer-encoding", "chunked"), ..resp.headers]
+  let initial_payload = encoder.response_builder(resp.status, headers)
+
+  state.transport.send(state.socket, initial_payload)
+  |> result.then(fn(_ok) {
+    body
+    |> iterator.append(iterator.from_list([bit_builder.new()]))
+    |> iterator.try_fold(
+      Nil,
+      fn(_prev, chunk) {
+        let size = bit_builder.byte_size(chunk)
+        let encoded =
+          size
+          |> int_to_hex
+          |> bit_builder.from_string
+          |> bit_builder.append_string("\r\n")
+          |> bit_builder.append_builder(chunk)
+          |> bit_builder.append_string("\r\n")
+
+        state.transport.send(state.socket, encoded)
+      },
+    )
+  })
+  |> result.replace(actor.Continue(state))
+  |> result.unwrap(stop_normal)
 }
 
 fn handle_file_body(

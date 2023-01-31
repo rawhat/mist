@@ -117,7 +117,7 @@ pub fn frame_to_bit_builder(frame: Frame) -> BitBuilder {
 
 fn make_frame(opcode: Int, length: Int, payload: BitString) -> BitBuilder {
   let length_section = case length {
-    length if length > 65535 -> <<127:7, length:int-size(64)>>
+    length if length > 65_535 -> <<127:7, length:int-size(64)>>
     length if length >= 126 -> <<126:7, length:int-size(16)>>
     _length -> <<length:7>>
   }

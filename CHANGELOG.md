@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Support chunked responses, via `Chunked(Iterator(BitBuilder))`
+
 ## v0.9.0
 
 - Add SSL support via the `run_service_ssl` and `serve_ssl` methods

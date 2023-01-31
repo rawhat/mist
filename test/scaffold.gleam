@@ -9,6 +9,10 @@ import gleeunit/should
 import glisten/acceptor.{AcceptorMessage}
 import glisten/tcp
 import mist/handler.{Handler}
+import mist/http.{Chunked} as mhttp
+import gleam/bit_string
+import gleam/string
+import gleam/iterator
 
 pub fn echo_handler() -> Handler {
   fn(req: request.Request(BitString)) {
@@ -28,6 +32,36 @@ pub fn echo_handler() -> Handler {
       body: bit_builder.from_bit_string(req.body),
     )
   }
+}
+
+pub fn chunked_echo_server(
+  port: Int,
+  chunk_size: Int,
+) -> Subject(AcceptorMessage) {
+  assert Ok(listener) = tcp.listen(port, [])
+  let pool =
+    fn(req: request.Request(mhttp.Body)) {
+      assert Ok(req) = mhttp.read_body(req)
+      assert Ok(body) = bit_string.to_string(req.body)
+      let chunks =
+        body
+        |> string.to_graphemes
+        |> iterator.from_list
+        |> iterator.sized_chunk(chunk_size)
+        |> iterator.map(fn(chars) {
+          chars
+          |> string.join("")
+          |> bit_builder.from_string
+        })
+      response.new(200)
+      |> response.set_body(Chunked(chunks))
+      |> handler.Response
+    }
+    |> handler.with_func
+    |> acceptor.new_pool_with_data(handler.new_state())
+    |> fn(func) { func(listener) }
+  assert Ok(sender) = acceptor.start(pool)
+  sender
 }
 
 pub fn open_server(port: Int, handler: Handler) -> Subject(AcceptorMessage) {

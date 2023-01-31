@@ -149,7 +149,8 @@ pub fn main() {
 }
 ```
 
-There is some initial support for sending files as well:
+There is support for sending files as well. This uses the `file:sendfile` erlang
+method under the hood.
 
 ```gleam
 import gleam/bit_builder
@@ -193,6 +194,11 @@ pub fn main() {
   process.sleep_forever()
 }
 ```
+
+You can return chunked responses using the `mist/http.{Chunked}` response body
+type. This takes an `Iterator(BitBuilder)` and handles sending the initial
+response, and subsequent chunks in the proper format as they are emitted from
+the iterator.
 
 If you need something a little more complex or custom, you can always use the
 helpers exported by the various `glisten`/`mist` modules.
