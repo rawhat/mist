@@ -213,4 +213,5 @@ pub fn it_sends_back_chunked_responses_test() {
   let assert Ok(resp) = hackney.send(req)
 
   should.equal(resp.status, 200)
+  should.equal(resp.body, string.repeat("a", 1000))
 }
