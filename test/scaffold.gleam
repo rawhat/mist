@@ -38,11 +38,11 @@ pub fn chunked_echo_server(
   port: Int,
   chunk_size: Int,
 ) -> Subject(AcceptorMessage) {
-  assert Ok(listener) = tcp.listen(port, [])
+  let assert Ok(listener) = tcp.listen(port, [])
   let pool =
     fn(req: request.Request(mhttp.Body)) {
-      assert Ok(req) = mhttp.read_body(req)
-      assert Ok(body) = bit_string.to_string(req.body)
+      let assert Ok(req) = mhttp.read_body(req)
+      let assert Ok(body) = bit_string.to_string(req.body)
       let chunks =
         body
         |> string.to_graphemes
@@ -60,18 +60,18 @@ pub fn chunked_echo_server(
     |> handler.with_func
     |> acceptor.new_pool_with_data(handler.new_state())
     |> fn(func) { func(listener) }
-  assert Ok(sender) = acceptor.start(pool)
+  let assert Ok(sender) = acceptor.start(pool)
   sender
 }
 
 pub fn open_server(port: Int, handler: Handler) -> Subject(AcceptorMessage) {
-  assert Ok(listener) = tcp.listen(port, [])
+  let assert Ok(listener) = tcp.listen(port, [])
   let pool =
     handler
     |> handler.with(4_000_000)
     |> acceptor.new_pool_with_data(handler.new_state())
     |> fn(func) { func(listener) }
-  assert Ok(sender) = acceptor.start(pool)
+  let assert Ok(sender) = acceptor.start(pool)
   sender
 }
 

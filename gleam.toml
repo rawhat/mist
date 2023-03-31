@@ -6,12 +6,12 @@ description = "a misty Gleam web server"
 repository = { type = "github", user = "rawhat", repo = "mist" }
 
 [dependencies]
-gleam_stdlib = "~> 0.22"
-gleam_erlang = "~> 0.15"
-gleam_http = "~> 3.0"
+gleam_stdlib = "~> 0.28"
+gleam_erlang = "~> 0.18"
+gleam_http = "~> 3.1"
 gleam_otp = "~> 0.5"
-glisten = "~> 0.6"
+glisten = "~> 0.7"
 
 [dev-dependencies]
-gleeunit = "~> 0.6"
-gleam_hackney = "~> 0.2"
+gleeunit = "~> 0.10"
+gleam_hackney = "~> 1.0"

@@ -72,7 +72,7 @@ pub fn with_func(handler: HandlerFunc) -> LoopFn(State) {
               DiscardPacket -> Nil
               _ -> {
                 logger.error(err)
-                transport.close(socket)
+                let _ = transport.close(socket)
                 Nil
               }
             }
@@ -116,7 +116,7 @@ fn handle_websocket_message(
 ) -> actor.Next(LoopState(State)) {
   case websocket.frame_from_message(state.socket, state.transport, msg) {
     Ok(websocket.PingFrame(_, _)) -> {
-      assert Ok(_) =
+      let assert Ok(_) =
         state.transport.send(
           state.socket,
           websocket.frame_to_bit_builder(websocket.PongFrame(0, <<>>)),
@@ -124,7 +124,7 @@ fn handle_websocket_message(
       actor.Continue(state)
     }
     Ok(websocket.CloseFrame(..) as frame) -> {
-      assert Ok(_) =
+      let assert Ok(_) =
         state.transport.send(
           state.socket,
           websocket.frame_to_bit_builder(frame),
@@ -139,7 +139,7 @@ fn handle_websocket_message(
     Ok(frame) ->
       case frame {
         websocket.TextFrame(_length, payload) -> {
-          assert Ok(msg) = bit_string.to_string(payload)
+          let assert Ok(msg) = bit_string.to_string(payload)
           websocket.TextMessage(msg)
         }
         // NOTE:  this doesn't need to be exhaustive since we already
@@ -185,7 +185,7 @@ fn log_and_error(
       |> http.add_default_headers
       |> encoder.to_bit_builder
       |> transport.send(socket, _)
-      transport.close(socket)
+      let _ = transport.close(socket)
       actor.Stop(process.Abnormal(dynamic.unsafe_coerce(msg)))
     }
   }
@@ -206,7 +206,7 @@ fn handle_bit_builder_body(
     // probably listen to them
     case response.get_header(resp, "connection") {
       Ok("close") -> {
-        state.transport.close(state.socket)
+        let _ = state.transport.close(state.socket)
         stop_normal
       }
       _ -> {
@@ -265,7 +265,7 @@ fn handle_file_body(
   resp: response.Response(HttpResponseBody),
   state: LoopState(State),
 ) -> actor.Next(LoopState(State)) {
-  assert FileBody(file_descriptor, content_type, offset, length) = resp.body
+  let assert FileBody(file_descriptor, content_type, offset, length) = resp.body
   resp
   |> response.prepend_header("content-length", int.to_string(length - offset))
   |> response.prepend_header("content-type", content_type)

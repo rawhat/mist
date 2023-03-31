@@ -53,7 +53,7 @@ fn get_default_response() -> Response(BitBuilder) {
 pub fn it_echoes_with_data() {
   let req = make_request("/", "hello, world!")
 
-  assert Ok(resp) = hackney.send(req)
+  let assert Ok(resp) = hackney.send(req)
 
   string_response_should_equal(resp, get_default_response())
 }
@@ -92,7 +92,7 @@ pub fn it_supports_large_header_fields() {
     |> response.prepend_header("host", "localhost:8888")
     |> response.set_body(bit_builder.from_bit_string(<<>>))
 
-  assert Ok(resp) = hackney.send(big_request)
+  let assert Ok(resp) = hackney.send(big_request)
 
   string_response_should_equal(resp, expected)
 }
@@ -102,7 +102,7 @@ pub fn it_supports_patch_requests() {
     make_request("/", "hello, world!")
     |> request.set_method(http.Patch)
 
-  assert Ok(resp) = hackney.send(req)
+  let assert Ok(resp) = hackney.send(req)
 
   string_response_should_equal(resp, get_default_response())
 }
@@ -112,7 +112,7 @@ pub fn it_rejects_large_requests() {
     string.repeat("a", 4_000_001)
     |> make_request("/", _)
 
-  assert Ok(resp) = hackney.send(req)
+  let assert Ok(resp) = hackney.send(req)
 
   let expected =
     response.new(413)
@@ -143,7 +143,7 @@ pub fn it_supports_chunked_encoding() {
     req
     |> request.to_uri
     |> uri.to_string
-  assert Ok(#(status, headers, body)) =
+  let assert Ok(#(status, headers, body)) =
     stream_request(req.method, path, req.headers, req.body)
   let actual = response.Response(status, headers, body)
 
@@ -168,7 +168,7 @@ pub fn it_supports_query_parameters() {
       #("a-complicated-one", uri.percent_encode("is the thing")),
     ])
 
-  assert Ok(resp) = hackney.send(req)
+  let assert Ok(resp) = hackney.send(req)
 
   let expected = get_default_response()
 
@@ -182,7 +182,7 @@ pub fn it_supports_expect_continue_header() {
     |> request.set_method(http.Post)
     |> request.prepend_header("expect", "100-continue")
 
-  assert Ok(resp) = hackney.send(req)
+  let assert Ok(resp) = hackney.send(req)
 
   let expected_body =
     string.repeat("a", 1000)
@@ -210,7 +210,7 @@ pub fn it_sends_back_chunked_responses_test() {
     |> request.set_host("localhost:8889")
     |> request.set_method(http.Post)
 
-  assert Ok(resp) = hackney.send(req)
+  let assert Ok(resp) = hackney.send(req)
 
   should.equal(resp.status, 200)
 }

@@ -40,7 +40,7 @@ fn unmask_data(
   case data {
     <<>> -> resp
     <<masked:bit_string-size(8), rest:bit_string>> -> {
-      assert Ok(mask_value) = list.at(masks, index % 4)
+      let assert Ok(mask_value) = list.at(masks, index % 4)
       let unmasked = crypto_exor(mask_value, masked)
       unmask_data(
         rest,
@@ -57,26 +57,26 @@ pub fn frame_from_message(
   transport: Transport,
   message: BitString,
 ) -> Result(Frame, Nil) {
-  assert <<_fin:1, rest:bit_string>> = message
-  assert <<_reserved:3, rest:bit_string>> = rest
-  assert <<opcode:int-size(4), rest:bit_string>> = rest
+  let assert <<_fin:1, rest:bit_string>> = message
+  let assert <<_reserved:3, rest:bit_string>> = rest
+  let assert <<opcode:int-size(4), rest:bit_string>> = rest
   case opcode {
     1 | 2 -> {
       // mask
-      assert <<1:1, rest:bit_string>> = rest
-      assert <<payload_length:int-size(7), rest:bit_string>> = rest
+      let assert <<1:1, rest:bit_string>> = rest
+      let assert <<payload_length:int-size(7), rest:bit_string>> = rest
       let #(payload_length, rest) = case payload_length {
         126 -> {
-          assert <<length:int-size(16), rest:bit_string>> = rest
+          let assert <<length:int-size(16), rest:bit_string>> = rest
           #(length, rest)
         }
         127 -> {
-          assert <<length:int-size(64), rest:bit_string>> = rest
+          let assert <<length:int-size(64), rest:bit_string>> = rest
           #(length, rest)
         }
         _ -> #(payload_length, rest)
       }
-      assert <<
+      let assert <<
         mask1:bit_string-size(8),
         mask2:bit_string-size(8),
         mask3:bit_string-size(8),
@@ -86,7 +86,7 @@ pub fn frame_from_message(
       let data = case payload_length - bit_string.byte_size(rest) {
         0 -> unmask_data(rest, [mask1, mask2, mask3, mask4], 0, <<>>)
         need -> {
-          assert Ok(needed) = transport.receive(socket, need)
+          let assert Ok(needed) = transport.receive(socket, need)
           rest
           |> bit_string.append(needed)
           |> unmask_data([mask1, mask2, mask3, mask4], 0, <<>>)

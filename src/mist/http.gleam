@@ -61,7 +61,7 @@ external fn decode_packet(
   "http_ffi" "decode_packet"
 
 pub fn from_header(value: BitString) -> String {
-  assert Ok(value) = bit_string.to_string(value)
+  let assert Ok(value) = bit_string.to_string(value)
 
   string.lowercase(value)
 }
@@ -79,7 +79,7 @@ pub fn parse_headers(
   case decode_packet(HttphBin, bs, []) {
     Ok(BinaryData(HttpHeader(_, _field, field, value), rest)) -> {
       let field = from_header(field)
-      assert Ok(value) = bit_string.to_string(value)
+      let assert Ok(value) = bit_string.to_string(value)
       headers
       |> map.insert(field, value)
       |> parse_headers(rest, socket, transport, _)
@@ -87,8 +87,12 @@ pub fn parse_headers(
     Ok(EndOfHeaders(rest)) -> Ok(#(headers, rest))
     Ok(MoreData(size)) -> {
       let amount_to_read = option.unwrap(size, 0)
-      try next =
-        read_data(socket, transport, Buffer(amount_to_read, bs), UnknownHeader)
+      use next <- result.then(read_data(
+        socket,
+        transport,
+        Buffer(amount_to_read, bs),
+        UnknownHeader,
+      ))
       parse_headers(next, socket, transport, headers)
     }
     _other -> Error(UnknownHeader)
@@ -104,10 +108,11 @@ pub fn read_data(
   // TODO:  don't hard-code these, probably
   let to_read = int.min(buffer.remaining, 1_000_000)
   let timeout = 15_000
-  try data =
+  use data <- result.then(
     socket
     |> transport.receive_timeout(to_read, timeout)
-    |> result.replace_error(error)
+    |> result.replace_error(error),
+  )
   let next_buffer =
     Buffer(
       remaining: buffer.remaining - to_read,
@@ -139,20 +144,22 @@ fn read_chunk(
 ) -> Result(BitBuilder, DecodeError) {
   case buffer.data, binary_match(buffer.data, crnl) {
     _, Ok(#(offset, _)) -> {
-      assert <<
+      let assert <<
         chunk:binary-size(offset),
         _return:int,
         _newline:int,
         rest:binary,
       >> = buffer.data
-      try chunk_size =
+      use chunk_size <- result.then(
         chunk
         |> bit_string.to_string
         |> result.map(charlist.from_string)
-        |> result.replace_error(InvalidBody)
-      try size =
+        |> result.replace_error(InvalidBody),
+      )
+      use size <- result.then(
         string_to_int(chunk_size, 16)
-        |> result.replace_error(InvalidBody)
+        |> result.replace_error(InvalidBody),
+      )
       case size {
         0 -> Ok(body)
         size ->
@@ -165,21 +172,24 @@ fn read_chunk(
                 bit_builder.append(body, next_chunk),
               )
             _ -> {
-              try next =
-                read_data(
-                  socket,
-                  transport,
-                  Buffer(0, buffer.data),
-                  InvalidBody,
-                )
+              use next <- result.then(read_data(
+                socket,
+                transport,
+                Buffer(0, buffer.data),
+                InvalidBody,
+              ))
               read_chunk(socket, transport, Buffer(0, next), body)
             }
           }
       }
     }
     <<>>, _ -> {
-      try next =
-        read_data(socket, transport, Buffer(0, buffer.data), InvalidBody)
+      use next <- result.then(read_data(
+        socket,
+        transport,
+        Buffer(0, buffer.data),
+        InvalidBody,
+      ))
       read_chunk(socket, transport, Buffer(0, next), body)
     }
     _, Error(Nil) -> Error(InvalidBody)
@@ -194,19 +204,26 @@ pub fn parse_request(
 ) -> Result(request.Request(Body), DecodeError) {
   case decode_packet(HttpBin, bs, []) {
     Ok(BinaryData(HttpRequest(http_method, AbsPath(path), _version), rest)) -> {
-      try method =
+      use method <- result.then(
         http_method
         |> atom.from_dynamic
         |> result.map(atom.to_string)
         |> result.or(dynamic.string(http_method))
         |> result.nil_error
         |> result.then(http.parse_method)
-        |> result.replace_error(UnknownMethod)
-      try #(headers, rest) = parse_headers(rest, socket, transport, map.new())
-      try path =
+        |> result.replace_error(UnknownMethod),
+      )
+      use #(headers, rest) <- result.then(parse_headers(
+        rest,
+        socket,
+        transport,
+        map.new(),
+      ))
+      use path <- result.then(
         path
         |> bit_string.to_string
-        |> result.replace_error(InvalidPath)
+        |> result.replace_error(InvalidPath),
+      )
       let #(path, query) = case string.split(path, "?") {
         [path] -> #(path, [])
         [path, query_string] -> {
@@ -245,19 +262,18 @@ pub fn read_body(req: Request(Body)) -> Result(Request(BitString), DecodeError) 
   }
   case request.get_header(req, "transfer-encoding"), req.body {
     Ok("chunked"), Unread(rest, socket) -> {
-      try chunk =
-        read_chunk(
-          socket,
-          transport,
-          Buffer(remaining: 0, data: rest),
-          bit_builder.new(),
-        )
+      use chunk <- result.then(read_chunk(
+        socket,
+        transport,
+        Buffer(remaining: 0, data: rest),
+        bit_builder.new(),
+      ))
       Ok(request.set_body(req, bit_builder.to_bit_string(chunk)))
     }
     _, Unread(rest, socket) -> {
       let _continue = case is_continue(req) {
         True -> {
-          assert Ok(Nil) =
+          let assert Ok(Nil) =
             response.new(100)
             |> response.set_body(bit_builder.new())
             |> encoder.to_bit_builder
@@ -302,15 +318,18 @@ pub type HttpResponseBody {
 pub fn upgrade_socket(
   req: Request(Body),
 ) -> Result(Response(BitBuilder), Request(Body)) {
-  try _upgrade =
+  use _upgrade <- result.then(
     request.get_header(req, "upgrade")
-    |> result.replace_error(req)
-  try key =
+    |> result.replace_error(req),
+  )
+  use key <- result.then(
     request.get_header(req, "sec-websocket-key")
-    |> result.replace_error(req)
-  try _version =
+    |> result.replace_error(req),
+  )
+  use _version <- result.then(
     request.get_header(req, "sec-websocket-version")
-    |> result.replace_error(req)
+    |> result.replace_error(req),
+  )
 
   let accept_key = websocket.parse_key(key)
 
@@ -328,16 +347,18 @@ pub fn upgrade(
   transport: Transport,
   req: Request(Body),
 ) -> Result(Nil, Nil) {
-  try resp =
+  use resp <- result.then(
     upgrade_socket(req)
-    |> result.nil_error
+    |> result.nil_error,
+  )
 
-  try _sent =
+  use _sent <- result.then(
     resp
     |> add_default_headers
     |> encoder.to_bit_builder
     |> transport.send(socket, _)
-    |> result.nil_error
+    |> result.nil_error,
+  )
 
   Ok(Nil)
 }
