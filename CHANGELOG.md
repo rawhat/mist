@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## v0.10.0
 
 - Support chunked responses, via `Chunked(Iterator(BitBuilder))`
+- Convert syntax for gleam v0.27 support
 
 ## v0.9.4
 
