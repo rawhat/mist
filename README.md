@@ -24,7 +24,7 @@ import gleam/erlang/process
 import gleam/http/response
 
 pub fn main() {
-  assert Ok(_) =
+  let assert Ok(_) =
     mist.run_service(
       8080,
       fn(_req) {
@@ -57,7 +57,7 @@ import mist/http.{BitBuilderBody}
 import mist/websocket
 
 pub fn main() {
-  assert Ok(_) =
+  let assert Ok(_) =
     mist.serve(
       8080,
       handler.with_func(fn(req) {
@@ -115,7 +115,7 @@ import gleam/erlang/process
 import gleam/http/response
 
 pub fn main() {
-  assert Ok(_) =
+  let assert Ok(_) =
     mist.run_service_ssl(
       port: 8080,
       certfile: "/path/to/server.crt",
@@ -136,7 +136,7 @@ With `serve_ssl`:
 
 ```gleam
 pub fn main() {
-  assert Ok(_) =
+  let assert Ok(_) =
     mist.serve_ssl(
       port: 8080,
       certfile: "...",
@@ -166,7 +166,7 @@ import mist/handler.{Response}
 import mist/http.{BitBuilderBody, Body, FileBody}
 
 pub fn main() {
-  assert Ok(_) =
+  let assert Ok(_) =
     mist.serve(
       8080,
       handler.with_func(fn(req: Request(Body)) {
@@ -179,7 +179,7 @@ pub fn main() {
               |> string.append("/", _)
               |> bit_string.from_string
             let size = file.size(file_path)
-            assert Ok(fd) = file.open(file_path)
+            let assert Ok(fd) = file.open(file_path)
             response.new(200)
             |> response.set_body(FileBody(fd, int.to_string(size), 0, size))
             |> Response
