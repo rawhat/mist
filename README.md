@@ -48,7 +48,7 @@ You can use these to, for example, track connected clients.  For example:
 import mist
 import gleam/bit_builder
 import gleam/erlang/process
-import gleam/http.{Get, Post}
+import gleam/http.{Get, Post} as gleam_http
 import gleam/http/request
 import gleam/http/response
 import gleam/result
