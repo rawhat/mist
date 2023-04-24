@@ -1,7 +1,7 @@
 import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
 import gleam/http/request.{Request}
-import gleam/http/response.{Response}
+import gleam/http/response.{Response as HttpResponse}
 import gleam/iterator.{Iterator}
 import gleam/result
 import glisten
@@ -10,9 +10,20 @@ import glisten/handler.{LoopFn} as glisten_handler
 import mist/internal/handler.{
   HandlerResponse, Response as MistResponse, State, Upgrade,
 }
-import mist/internal/http.{BitBuilderBody, Body, Chunked, FileBody}
+import mist/internal/http.{BitBuilderBody, Body as HTTPBody, Chunked, FileBody}
 import mist/internal/file.{FileError}
 import mist/internal/websocket.{WebsocketHandler}
+
+/// This type reflects whether the body has been read from the socket yet.
+pub type Body =
+  HTTPBody
+
+/// Mist supports `BitBuilder`, `FileBody`, and `Chunked` response types. The
+/// helper methods provided can generate these from a `gleam/http/response`
+/// Response. This type is re-exported for pulling specific handlers out into
+/// separate functions.
+pub type Response =
+  HandlerResponse
 
 /// Runs an HTTP Request->Response server at the given port, with your defined
 /// handler. This will automatically read the full body contents up to the
@@ -102,7 +113,7 @@ pub fn read_body(
 /// A websocket handler is created using the `websocket.with_handler`
 /// method. This function enables the mist HTTP layer to build the properly
 /// formatted websocket upgrade response.
-pub fn upgrade(websocket_handler: WebsocketHandler) -> HandlerResponse {
+pub fn upgrade(websocket_handler: WebsocketHandler) -> Response {
   Upgrade(websocket_handler)
 }
 
@@ -110,7 +121,7 @@ pub fn upgrade(websocket_handler: WebsocketHandler) -> HandlerResponse {
 /// Response. When returning a response with no body, this will convert the
 /// type. Note that any previously set response body will be removed before
 /// sending.
-pub fn empty_response(resp: Response(a)) -> HandlerResponse {
+pub fn empty_response(resp: HttpResponse(a)) -> Response {
   resp
   |> response.set_body(BitBuilderBody(bit_builder.new()))
   |> MistResponse
@@ -118,10 +129,7 @@ pub fn empty_response(resp: Response(a)) -> HandlerResponse {
 
 /// The mist runtime only supports sending BitBuilder types, or files (see
 /// below). This method will erase any pre-existing response body.
-pub fn bit_builder_response(
-  resp: Response(a),
-  data: BitBuilder,
-) -> HandlerResponse {
+pub fn bit_builder_response(resp: HttpResponse(a), data: BitBuilder) -> Response {
   resp
   |> response.set_body(BitBuilderBody(data))
   |> MistResponse
@@ -133,10 +141,10 @@ pub fn bit_builder_response(
 /// for various cases. The size of the file will be added to the
 /// `content-length` header field.
 pub fn file_response(
-  resp: Response(a),
+  resp: HttpResponse(a),
   path: String,
   content_type: String,
-) -> Result(HandlerResponse, FileError) {
+) -> Result(Response, FileError) {
   let file_path = bit_string.from_string(path)
   let size = file.size(file_path)
   use fd <- result.map(file.open(file_path))
@@ -148,9 +156,9 @@ pub fn file_response(
 /// You can send chunks of responses from an iterator. The iterator must
 /// complete.
 pub fn chunked_response(
-  resp: Response(a),
+  resp: HttpResponse(a),
   iter: Iterator(BitBuilder),
-) -> HandlerResponse {
+) -> Response {
   resp
   |> response.set_body(Chunked(iter))
   |> MistResponse

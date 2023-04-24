@@ -6,19 +6,9 @@ import gleam/list
 
 /// Turns an HTTP response into a TCP message
 pub fn to_bit_builder(resp: Response(BitBuilder)) -> BitBuilder {
-  let body_size = bit_builder.byte_size(resp.body)
-
-  let body_builder = case body_size {
-    0 -> bit_builder.new()
-    _size ->
-      bit_builder.new()
-      |> bit_builder.append_builder(resp.body)
-      |> bit_builder.append(<<"\r\n":utf8>>)
-  }
-
   resp.status
   |> response_builder(resp.headers)
-  |> bit_builder.append_builder(body_builder)
+  |> bit_builder.append_builder(resp.body)
 }
 
 pub fn response_builder(status: Int, headers: List(Header)) -> BitBuilder {

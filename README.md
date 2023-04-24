@@ -1,6 +1,6 @@
 # mist
 
-A (hopefully) nice, pure Gleam web server
+A glistening Gleam web server.
 
 ## Installation
 
@@ -18,10 +18,10 @@ Right now there are a few options.  Let's say you want a "simple" HTTP server
 that you can customize to your heart's content.  In that case, you want:
 
 ```gleam
-import mist
 import gleam/bit_builder
 import gleam/erlang/process
 import gleam/http/response
+import mist
 
 pub fn main() {
   let assert Ok(_) =
@@ -29,9 +29,7 @@ pub fn main() {
       8080,
       fn(_req) {
         response.new(200)
-        |> response.set_body(bit_builder.from_bit_string(<<
-          "hello, world!":utf8,
-        >>))
+        |> response.set_body(bit_builder.from_string("hello, world!"))
       },
       max_body_limit: 4_000_000
     )
@@ -40,15 +38,15 @@ pub fn main() {
 ```
 
 Maybe you also want to work with websockets.  Maybe those should only be
-upgradable at a certain endpoint.  For that, you can use `handler.with_func`.
+upgradable at a certain endpoint.  For that, you can use `mist.handler_func`.
 The websocket methods help you build a handler with connect/disconnect handlers.
 You can use these to track connected clients, for example.
 
 ```gleam
 import gleam/bit_builder
 import gleam/erlang/process
-import gleam/http.{Get, Post} as gleam_http
-import gleam/http/request
+import gleam/http.{Get, Post}
+import gleam/http/request.{Request}
 import gleam/http/response
 import gleam/result
 import mist
@@ -60,44 +58,50 @@ pub fn main() {
       8080,
       mist.handler_func(fn(req) {
         case req.method, request.path_segments(req) {
-          Get, ["echo", "test"] ->
-            websocket.echo_handler
-            |> websocket.with_handler
-            // Here you can gain access to the `Subject` to send message to
-            // with:
-            // |> websocket.on_init(fn(subj) { ... })
-            // |> websocket.on_close(fn(subj) { ... })
-            |> mist.upgrade
-          Post, ["echo", "body"] ->
-            req
-            |> mist.read_body
-            |> result.map(fn(req) {
-              response.new(200)
-              |> response.prepend_header(
-                "content-type",
-                request.get_header(req, "content-type")
-                |> result.unwrap("application/octet-stream"),
-              )
-              |> mist.bit_builder_response(bit_builder.from_bit_string(req.body))
-            })
-            |> result.unwrap(
-              response.new(400)
-              |> empty_response,
-            )
+          Get, ["echo", "test"] -> websocket_echo()
+          Post, ["echo", "body"] -> echo_body(req)
           Get, ["home"] ->
             response.new(200)
-            |> mist.bit_builder_response(bit_builder.from_bit_string(<<
-              "sup home boy":utf8,
-            >>))
+            |> mist.bit_builder_response(
+              bit_builder.from_string("sup home boy")
+            )
           _, _ ->
             response.new(200)
-            |> mist.bit_builder_response(bit_builder.from_bit_string(<<
-              "Hello, world!":utf8,
-            >>))
+            |> mist.bit_builder_response(
+              bit_builder.from_string("Hello, world!")
+            )
         }
       }),
     )
   process.sleep_forever()
+}
+
+fn websocket_echo() {
+  websocket.echo_handler
+  |> websocket.with_handler
+  // Here you can gain access to the `Subject` to send message to
+  // with:
+  // |> websocket.on_init(fn(subj) { ... })
+  // |> websocket.on_close(fn(subj) { ... })
+  |> mist.upgrade
+}
+
+fn echo_body(req: Request(mist.Body)) {
+  req
+  |> mist.read_body
+  |> result.map(fn(req) {
+    response.new(200)
+    |> response.prepend_header(
+      "content-type",
+      request.get_header(req, "content-type")
+      |> result.unwrap("application/octet-stream"),
+    )
+    |> mist.bit_builder_response(bit_builder.from_bit_string(req.body))
+  })
+  |> result.unwrap(
+    response.new(400)
+    |> mist.empty_response,
+  )
 }
 ```
 
@@ -106,10 +110,10 @@ You might also want to use SSL.  You can do that with the following options.
 With `run_service_ssl`:
 
 ```gleam
-import mist
 import gleam/bit_builder
 import gleam/erlang/process
 import gleam/http/response
+import mist
 
 pub fn main() {
   let assert Ok(_) =
