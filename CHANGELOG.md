@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.11.0
+
+- Big public API refactoring and docs clean-up
+- Fixed erroneous extra CRLF after response body
+
 ## v0.10.0
 
 - Support chunked responses, via `Chunked(Iterator(BitBuilder))`
