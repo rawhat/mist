@@ -180,10 +180,13 @@ pub fn echo_handler(
   Ok(Nil)
 }
 
+pub type EventHandler =
+  fn(Subject(HandlerMessage)) -> Nil
+
 pub type WebsocketHandler {
   WebsocketHandler(
-    on_close: Option(fn(Subject(HandlerMessage)) -> Nil),
-    on_init: Option(fn(Subject(HandlerMessage)) -> Nil),
+    on_close: Option(EventHandler),
+    on_init: Option(EventHandler),
     handler: Handler,
   )
 }
@@ -194,14 +197,14 @@ pub fn with_handler(func: Handler) -> WebsocketHandler {
 
 pub fn on_init(
   handler: WebsocketHandler,
-  func: fn(Subject(HandlerMessage)) -> Nil,
+  func: EventHandler,
 ) -> WebsocketHandler {
   WebsocketHandler(..handler, on_init: Some(func))
 }
 
 pub fn on_close(
   handler: WebsocketHandler,
-  func: fn(Subject(HandlerMessage)) -> Nil,
+  func: EventHandler,
 ) -> WebsocketHandler {
   WebsocketHandler(..handler, on_close: Some(func))
 }

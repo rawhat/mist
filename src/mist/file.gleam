@@ -3,21 +3,8 @@ import glisten/socket.{Socket}
 
 pub external type FileDescriptor
 
-pub type FileMode {
-  Raw
-}
-
-external fn file_open(
-  file: BitString,
-  modes: List(FileMode),
-) -> Result(FileDescriptor, Atom) =
-  "file" "open"
-
 pub external fn size(path: BitString) -> Int =
   "filelib" "file_size"
-
-pub external fn uri_unquote(uri: String) -> String =
-  "uri_string" "unquote"
 
 pub external fn sendfile(
   file_descriptor: FileDescriptor,
@@ -28,6 +15,12 @@ pub external fn sendfile(
 ) -> Result(Int, Atom) =
   "file" "sendfile"
 
-pub fn open(file: BitString) -> Result(FileDescriptor, Atom) {
-  file_open(file, [Raw])
+pub type FileError {
+  IsDir
+  NoAccess
+  NoEntry
+  UnknownFileError
 }
+
+pub external fn open(file: BitString) -> Result(FileDescriptor, FileError) =
+  "mist_ffi" "file_open"

@@ -1,7 +1,16 @@
+import gleam/bit_builder.{BitBuilder}
+import gleam/bit_string
+import gleam/http/request.{Request}
+import gleam/http/response.{Response}
+import gleam/iterator.{Iterator}
+import gleam/result
 import glisten
 import glisten/acceptor
 import glisten/handler.{LoopFn} as glisten_handler
-import mist/handler.{State}
+import mist/handler.{HandlerResponse, Response as MistResponse, State, Upgrade}
+import mist/http.{BitBuilderBody, Body, Chunked, FileBody}
+import mist/file.{FileError}
+import mist/websocket.{WebsocketHandler}
 
 /// Runs an HTTP Request->Response server at the given port, with your defined
 /// handler. This will automatically read the full body contents up to the
@@ -39,8 +48,9 @@ pub fn run_service_ssl(
 }
 
 /// Slightly more flexible alternative to `run_service`. This allows hooking
-/// into the `mist/http.{handler_func}` method. Note that the request body
-/// will not be automatically read. You will need to call `http.read_body`.
+/// into the `mist.handler_func` method. Note that the request body
+/// will not be automatically read. You will need to call `mist.read_body`.
+/// Ensure that this is only called _once_ per request.
 pub fn serve(
   port port: Int,
   handler handler: LoopFn(State),
@@ -65,4 +75,81 @@ pub fn serve_ssl(
     keyfile: keyfile,
     with_pool: _,
   )
+}
+
+/// Handles converting the mist `Response` type into a gleam HTTP Response. Use
+/// this when calling `mist.serve` to start your application.
+pub fn handler_func(
+  handler: handler.HandlerFunc,
+) -> glisten_handler.LoopFn(handler.State) {
+  handler.with_func(handler)
+}
+
+/// When using `mist.serve`, the body is not automatically read. You can
+/// inspect content headers to determine whether to read the body or not.
+/// This function will pull the content from the sender. It gives back a
+/// `Request(BitString)` containing the body. This return value should be
+/// treated as replacing the initial request. Do not attempt to call this
+/// method multiple times on the same request.
+pub fn read_body(
+  req: Request(Body),
+) -> Result(Request(BitString), http.DecodeError) {
+  http.read_body(req)
+}
+
+/// A websocket handler is created using the `websocket.with_handler`
+/// method. This function enables the mist HTTP layer to build the properly
+/// formatted websocket upgrade response.
+pub fn upgrade(websocket_handler: WebsocketHandler) -> HandlerResponse {
+  Upgrade(websocket_handler)
+}
+
+/// `mist.serve` expects the mist Response type, rather than the `gleam/http`
+/// Response. When returning a response with no body, this will convert the
+/// type. Note that any previously set response body will be removed before
+/// sending.
+pub fn empty_response(resp: Response(a)) -> HandlerResponse {
+  resp
+  |> response.set_body(BitBuilderBody(bit_builder.new()))
+  |> MistResponse
+}
+
+/// The mist runtime only supports sending BitBuilder types, or files (see
+/// below). This method will erase any pre-existing response body.
+pub fn bit_builder_response(
+  resp: Response(a),
+  data: BitBuilder,
+) -> HandlerResponse {
+  resp
+  |> response.set_body(BitBuilderBody(data))
+  |> MistResponse
+}
+
+/// This is a more generally optimized method for returning files to a client.
+/// It's a light wrapper around Erlang's `file:sendfile/5` method. The error
+/// can be matched on with `mist/file.{FileError}` if custom behavior is desired
+/// for various cases. The size of the file will be added to the
+/// `content-length` header field.
+pub fn file_response(
+  resp: Response(a),
+  path: String,
+  content_type: String,
+) -> Result(HandlerResponse, FileError) {
+  let file_path = bit_string.from_string(path)
+  let size = file.size(file_path)
+  use fd <- result.map(file.open(file_path))
+  resp
+  |> response.set_body(FileBody(fd, content_type, 0, size))
+  |> MistResponse
+}
+
+/// You can send chunks of responses from an iterator. The iterator must
+/// complete.
+pub fn chunked_response(
+  resp: Response(a),
+  iter: Iterator(BitBuilder),
+) -> HandlerResponse {
+  resp
+  |> response.set_body(Chunked(iter))
+  |> MistResponse
 }

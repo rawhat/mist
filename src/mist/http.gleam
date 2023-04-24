@@ -58,7 +58,7 @@ external fn decode_packet(
   packet: BitString,
   options: List(a),
 ) -> Result(DecodedPacket, DecodeError) =
-  "http_ffi" "decode_packet"
+  "mist_ffi" "decode_packet"
 
 pub fn from_header(value: BitString) -> String {
   let assert Ok(value) = bit_string.to_string(value)
@@ -129,10 +129,10 @@ external fn binary_match(
   source: BitString,
   pattern: BitString,
 ) -> Result(#(Int, Int), Nil) =
-  "http_ffi" "binary_match"
+  "mist_ffi" "binary_match"
 
 external fn string_to_int(string: Charlist, base: Int) -> Result(Int, Nil) =
-  "http_ffi" "string_to_int"
+  "mist_ffi" "string_to_int"
 
 const crnl = <<13:int, 10:int>>
 

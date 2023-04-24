@@ -42,61 +42,58 @@ pub fn main() {
 Maybe you also want to work with websockets.  Maybe those should only be
 upgradable at a certain endpoint.  For that, you can use `handler.with_func`.
 The websocket methods help you build a handler with connect/disconnect handlers.
-You can use these to, for example, track connected clients.  For example:
+You can use these to track connected clients, for example.
 
 ```gleam
-import mist
 import gleam/bit_builder
 import gleam/erlang/process
 import gleam/http.{Get, Post} as gleam_http
 import gleam/http/request
 import gleam/http/response
 import gleam/result
-import mist/handler.{Response, Upgrade}
-import mist/http.{BitBuilderBody}
+import mist
 import mist/websocket
 
 pub fn main() {
   let assert Ok(_) =
     mist.serve(
       8080,
-      handler.with_func(fn(req) {
+      mist.handler_func(fn(req) {
         case req.method, request.path_segments(req) {
           Get, ["echo", "test"] ->
             websocket.echo_handler
             |> websocket.with_handler
-            |> Upgrade
+            // Here you can gain access to the `Subject` to send message to
+            // with:
+            // |> websocket.on_init(fn(subj) { ... })
+            // |> websocket.on_close(fn(subj) { ... })
+            |> mist.upgrade
           Post, ["echo", "body"] ->
             req
-            |> http.read_body
+            |> mist.read_body
             |> result.map(fn(req) {
               response.new(200)
-              |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(
-                req.body,
-              )))
               |> response.prepend_header(
                 "content-type",
                 request.get_header(req, "content-type")
                 |> result.unwrap("application/octet-stream"),
               )
+              |> mist.bit_builder_response(bit_builder.from_bit_string(req.body))
             })
             |> result.unwrap(
               response.new(400)
-              |> response.set_body(BitBuilderBody(bit_builder.new())),
+              |> empty_response,
             )
-            |> Response
           Get, ["home"] ->
             response.new(200)
-            |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<
+            |> mist.bit_builder_response(bit_builder.from_bit_string(<<
               "sup home boy":utf8,
-            >>)))
-            |> Response
+            >>))
           _, _ ->
             response.new(200)
-            |> response.set_body(BitBuilderBody(bit_builder.from_bit_string(<<
+            |> mist.bit_builder_response(bit_builder.from_bit_string(<<
               "Hello, world!":utf8,
-            >>)))
-            |> Response
+            >>))
         }
       }),
     )
@@ -141,7 +138,7 @@ pub fn main() {
       port: 8080,
       certfile: "...",
       keyfile: "...",
-      handler.with_func(fn(req) {
+      mist.handler_func(fn(req) {
         todo
       }
     )
@@ -154,22 +151,21 @@ method under the hood.
 
 ```gleam
 import gleam/bit_builder
-import gleam/bit_string
 import gleam/erlang/process
 import gleam/http/request.{Request}
 import gleam/http/response
-import gleam/int
 import gleam/string
 import mist
-import mist/file
-import mist/handler.{Response}
-import mist/http.{BitBuilderBody, Body, FileBody}
 
 pub fn main() {
+  let asset_root = "..."
   let assert Ok(_) =
     mist.serve(
       8080,
-      handler.with_func(fn(req: Request(Body)) {
+      mist.handler_func(fn(req: Request(Body)) {
+        let not_found =
+          response.new(404)
+          |> mist.empty_response
         case request.path_segments(req) {
           ["static", ..path] -> {
             // verify, validate, etc
@@ -177,17 +173,11 @@ pub fn main() {
               path
               |> string.join("/")
               |> string.append("/", _)
-              |> bit_string.from_string
-            let size = file.size(file_path)
-            let assert Ok(fd) = file.open(file_path)
             response.new(200)
-            |> response.set_body(FileBody(fd, int.to_string(size), 0, size))
-            |> Response
+            |> mist.file_response(asset_root <> file_path)
+            |> result.unwrap(not_found)
           }
-          _ ->
-            response.new(404)
-            |> response.set_body(BitBuilderBody(bit_builder.new()))
-            |> Response
+          _ -> not_found
         }
       }),
     )
@@ -195,10 +185,10 @@ pub fn main() {
 }
 ```
 
-You can return chunked responses using the `mist/http.{Chunked}` response body
-type. This takes an `Iterator(BitBuilder)` and handles sending the initial
+You can return chunked responses using the `mist.{chunked_response}` method.
+This takes an `Iterator(BitBuilder)` and handles sending the initial
 response, and subsequent chunks in the proper format as they are emitted from
-the iterator.
+the iterator. The iterator must be finite.
 
 If you need something a little more complex or custom, you can always use the
 helpers exported by the various `glisten`/`mist` modules.
