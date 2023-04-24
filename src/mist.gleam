@@ -7,10 +7,12 @@ import gleam/result
 import glisten
 import glisten/acceptor
 import glisten/handler.{LoopFn} as glisten_handler
-import mist/handler.{HandlerResponse, Response as MistResponse, State, Upgrade}
-import mist/http.{BitBuilderBody, Body, Chunked, FileBody}
-import mist/file.{FileError}
-import mist/websocket.{WebsocketHandler}
+import mist/internal/handler.{
+  HandlerResponse, Response as MistResponse, State, Upgrade,
+}
+import mist/internal/http.{BitBuilderBody, Body, Chunked, FileBody}
+import mist/internal/file.{FileError}
+import mist/internal/websocket.{WebsocketHandler}
 
 /// Runs an HTTP Request->Response server at the given port, with your defined
 /// handler. This will automatically read the full body contents up to the

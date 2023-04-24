@@ -13,14 +13,14 @@ import gleam/result
 import glisten/handler.{Close, LoopFn, LoopState}
 import glisten/socket.{Socket}
 import glisten/socket/transport.{Transport}
-import mist/encoder
-import mist/file
-import mist/http.{
+import mist/internal/encoder
+import mist/internal/file
+import mist/internal/http.{
   BitBuilderBody, Body, Chunked, DecodeError, DiscardPacket, FileBody,
   HttpResponseBody,
 }
-import mist/logger
-import mist/websocket
+import mist/internal/logger
+import mist/internal/websocket
 
 pub type Handler =
   fn(request.Request(BitString)) -> response.Response(BitBuilder)

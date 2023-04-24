@@ -8,8 +8,8 @@ import gleam/set
 import gleeunit/should
 import glisten/acceptor.{AcceptorMessage}
 import glisten/tcp
-import mist/handler.{Handler}
-import mist/http.{Chunked} as mhttp
+import mist/internal/handler.{Handler}
+import mist/internal/http.{Chunked} as mhttp
 import gleam/bit_string
 import gleam/string
 import gleam/iterator

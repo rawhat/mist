@@ -17,9 +17,9 @@ import gleam/string
 import gleam/uri
 import glisten/socket.{Socket}
 import glisten/socket/transport.{Transport}
-import mist/encoder
-import mist/file
-import mist/websocket
+import mist/internal/encoder
+import mist/internal/file
+import mist/internal/websocket
 
 pub type PacketType {
   Http
