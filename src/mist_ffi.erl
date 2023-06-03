@@ -34,8 +34,8 @@ string_to_int(String, Base) ->
 
 file_open(Path) ->
   case file:open(Path, [raw]) of
-    {ok, fd} ->
-      {ok, fd};
+    {ok, Fd} ->
+      {ok, Fd};
     {error, enoent} ->
       {error, no_entry};
     {error, eacces} ->
