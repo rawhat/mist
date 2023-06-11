@@ -13,24 +13,33 @@ import mist/internal/http.{Chunked} as mhttp
 import gleam/bit_string
 import gleam/string
 import gleam/iterator
+import gleam/option
+import gleam/int
 
 pub fn echo_handler() -> Handler {
   fn(req: request.Request(BitString)) {
+    let body =
+      req.query
+      |> option.map(bit_string.from_string)
+      |> option.unwrap(req.body)
+      |> bit_builder.from_bit_string
+    let length =
+      body
+      |> bit_builder.byte_size
+      |> int.to_string
     let headers =
       list.filter(
         req.headers,
         fn(p) {
           case p {
             #("transfer-encoding", "chunked") -> False
+            #("content-length", _) -> False
             _ -> True
           }
         },
       )
-    Response(
-      status: 200,
-      headers: headers,
-      body: bit_builder.from_bit_string(req.body),
-    )
+      |> list.prepend(#("content-length", length))
+    Response(status: 200, headers: headers, body: body)
   }
 }
 

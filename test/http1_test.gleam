@@ -6,6 +6,7 @@ import gleam/http/response.{Response}
 import gleam/hackney
 import gleam/string
 import gleam/uri
+import gleam/option.{Some}
 import gleeunit/should
 import scaffold.{
   bitstring_response_should_equal, echo_handler, make_request, open_server,
@@ -35,6 +36,8 @@ pub fn set_up_echo_server_test_() {
       it_rejects_large_requests,
       it_supports_chunked_encoding,
       it_supports_query_parameters,
+      it_handles_query_parameters_with_question_mark,
+      it_doesnt_mangle_query,
       it_supports_expect_continue_header,
     ],
   )
@@ -170,7 +173,44 @@ pub fn it_supports_query_parameters() {
 
   let assert Ok(resp) = hackney.send(req)
 
-  let expected = get_default_response()
+  let expected =
+    get_default_response()
+    |> response.set_header("content-length", "61")
+    |> response.set_body(bit_builder.from_bit_string(<<
+      "something=123&another=true&a-complicated-one=is%20the%20thing":utf8,
+    >>))
+
+  string_response_should_equal(resp, expected)
+}
+
+pub fn it_handles_query_parameters_with_question_mark() {
+  let req =
+    make_request("/", "hello, world!")
+    |> request.set_method(http.Get)
+    |> request.set_query([#("?", "123")])
+
+  let assert Ok(resp) = hackney.send(req)
+
+  let expected =
+    get_default_response()
+    |> response.set_header("content-length", "5")
+    |> response.set_body(bit_builder.from_bit_string(<<"?=123":utf8>>))
+
+  string_response_should_equal(resp, expected)
+}
+
+pub fn it_doesnt_mangle_query() {
+  let req =
+    make_request("/", "hello, world!")
+    |> request.set_method(http.Get)
+  let req = request.Request(..req, query: Some("test"))
+
+  let assert Ok(resp) = hackney.send(req)
+
+  let expected =
+    get_default_response()
+    |> response.set_header("content-length", "4")
+    |> response.set_body(bit_builder.from_bit_string(<<"test":utf8>>))
 
   string_response_should_equal(resp, expected)
 }
