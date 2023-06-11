@@ -224,16 +224,11 @@ pub fn parse_request(
         |> bit_string.to_string
         |> result.replace_error(InvalidPath),
       )
-      let #(path, query) = case string.split(path, "?") {
-        [path] -> #(path, [])
-        [path, query_string] -> {
-          let query =
-            query_string
-            |> uri.parse_query
-            |> result.unwrap([])
-          #(path, query)
-        }
-      }
+      use parsed <- result.then(
+        uri.parse(path)
+        |> result.replace_error(InvalidPath),
+      )
+      let #(path, query) = #(parsed.path, parsed.query)
       let req =
         request.new()
         |> request.set_scheme(case transport {
@@ -243,8 +238,7 @@ pub fn parse_request(
         |> request.set_body(Unread(rest, socket))
         |> request.set_method(method)
         |> request.set_path(path)
-        |> request.set_query(query)
-      Ok(request.Request(..req, headers: map.to_list(headers)))
+      Ok(request.Request(..req, query: query, headers: map.to_list(headers)))
     }
     _ -> Error(DiscardPacket)
   }
