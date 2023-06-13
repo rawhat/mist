@@ -249,6 +249,12 @@ pub opaque type Body {
   Read(data: BitString)
 }
 
+/// This function exists purely for unit testing handlers. It allows you to
+/// create a `Request(Body)` which is required by `handler_func`.
+pub fn static_body(data: BitString) -> Body {
+  Read(data)
+}
+
 pub fn read_body(req: Request(Body)) -> Result(Request(BitString), DecodeError) {
   let transport = case req.scheme {
     http.Https -> transport.ssl()
