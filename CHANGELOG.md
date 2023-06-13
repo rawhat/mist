@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Correctly handle query strings (@Johann150)
+- Add constructor for opaque `Body` type for testing handlers
+- Handle WebSocket `ping` frames and reply correctly
+
 ## v0.11.0
 
 - Big public API refactoring and docs clean-up
