@@ -3,6 +3,7 @@ import gleam/bit_string
 import gleam/erlang/process.{Subject}
 import gleam/list
 import gleam/option.{Option}
+import gleam/result
 import gleam/string
 import glisten/handler.{HandlerMessage}
 import glisten/socket.{Socket}
@@ -60,46 +61,49 @@ pub fn frame_from_message(
   let assert <<_fin:1, rest:bit_string>> = message
   let assert <<_reserved:3, rest:bit_string>> = rest
   let assert <<opcode:int-size(4), rest:bit_string>> = rest
-  case opcode {
-    1 | 2 -> {
-      // mask
-      let assert <<1:1, rest:bit_string>> = rest
-      let assert <<payload_length:int-size(7), rest:bit_string>> = rest
-      let #(payload_length, rest) = case payload_length {
-        126 -> {
-          let assert <<length:int-size(16), rest:bit_string>> = rest
-          #(length, rest)
-        }
-        127 -> {
-          let assert <<length:int-size(64), rest:bit_string>> = rest
-          #(length, rest)
-        }
-        _ -> #(payload_length, rest)
-      }
-      let assert <<
-        mask1:bit_string-size(8),
-        mask2:bit_string-size(8),
-        mask3:bit_string-size(8),
-        mask4:bit_string-size(8),
-        rest:bit_string,
-      >> = rest
-      let data = case payload_length - bit_string.byte_size(rest) {
-        0 -> unmask_data(rest, [mask1, mask2, mask3, mask4], 0, <<>>)
-        need -> {
-          let assert Ok(needed) = transport.receive(socket, need)
-          rest
-          |> bit_string.append(needed)
-          |> unmask_data([mask1, mask2, mask3, mask4], 0, <<>>)
-        }
-      }
-      case opcode {
-        1 -> TextFrame(payload_length, data)
-        2 -> BinaryFrame(payload_length, data)
-      }
-      |> Ok
+  // mask
+  let assert <<1:1, rest:bit_string>> = rest
+  let assert <<payload_length:int-size(7), rest:bit_string>> = rest
+  let #(payload_length, rest) = case payload_length {
+    126 -> {
+      let assert <<length:int-size(16), rest:bit_string>> = rest
+      #(length, rest)
     }
-    8 -> Ok(CloseFrame(payload_length: 0, payload: <<>>))
+    127 -> {
+      let assert <<length:int-size(64), rest:bit_string>> = rest
+      #(length, rest)
+    }
+    _ -> #(payload_length, rest)
   }
+  let assert <<
+    mask1:bit_string-size(8),
+    mask2:bit_string-size(8),
+    mask3:bit_string-size(8),
+    mask4:bit_string-size(8),
+    rest:bit_string,
+  >> = rest
+  case payload_length - bit_string.byte_size(rest) {
+    0 -> Ok(unmask_data(rest, [mask1, mask2, mask3, mask4], 0, <<>>))
+    need -> {
+      need
+      |> transport.receive(socket, _)
+      |> result.replace_error(Nil)
+      |> result.map(fn(needed) {
+        rest
+        |> bit_string.append(needed)
+        |> unmask_data([mask1, mask2, mask3, mask4], 0, <<>>)
+      })
+    }
+  }
+  |> result.map(fn(data) {
+    case opcode {
+      1 -> TextFrame(payload_length, data)
+      2 -> BinaryFrame(payload_length, data)
+      8 -> CloseFrame(payload_length, data)
+      9 -> PingFrame(payload_length, data)
+      10 -> PongFrame(payload_length, data)
+    }
+  })
 }
 
 pub fn frame_to_bit_builder(frame: Frame) -> BitBuilder {
@@ -111,7 +115,7 @@ pub fn frame_to_bit_builder(frame: Frame) -> BitBuilder {
       make_frame(2, payload_length, payload)
     PongFrame(payload_length, payload) ->
       make_frame(10, payload_length, payload)
-    PingFrame(..) -> bit_builder.from_bit_string(<<>>)
+    PingFrame(payload_length, payload) -> make_frame(9, payload_length, payload)
   }
 }
 

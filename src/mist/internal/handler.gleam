@@ -115,11 +115,11 @@ fn handle_websocket_message(
   msg: BitString,
 ) -> actor.Next(LoopState(State)) {
   case websocket.frame_from_message(state.socket, state.transport, msg) {
-    Ok(websocket.PingFrame(_, _)) -> {
+    Ok(websocket.PingFrame(length, payload)) -> {
       let assert Ok(_) =
         state.transport.send(
           state.socket,
-          websocket.frame_to_bit_builder(websocket.PongFrame(0, <<>>)),
+          websocket.frame_to_bit_builder(websocket.PongFrame(length, payload)),
         )
       actor.Continue(state)
     }
