@@ -5,6 +5,7 @@
 - Correctly handle query strings (@Johann150)
 - Add constructor for opaque `Body` type for testing handlers
 - Handle WebSocket `ping` frames and reply correctly
+- Fix incorrect pattern match in `file_open` (@avdgaag)
 
 ## v0.11.0
 
