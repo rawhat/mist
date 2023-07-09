@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.12.0
 
 - Correctly handle query strings (@Johann150)
 - Add constructor for opaque `Body` type for testing handlers
