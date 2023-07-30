@@ -7,7 +7,6 @@ import gleam/http/request.{Request}
 import gleam/http/response.{Response}
 import gleam/http
 import gleam/int
-import gleam/iterator.{Iterator}
 import gleam/list
 import gleam/map.{Map}
 import gleam/option.{Option}
@@ -15,11 +14,19 @@ import gleam/pair
 import gleam/result
 import gleam/string
 import gleam/uri
+import glisten/handler.{ClientIp}
 import glisten/socket.{Socket}
 import glisten/socket/transport.{Transport}
 import mist/internal/encoder
-import mist/internal/file
-import mist/internal/websocket
+
+pub type Connection {
+  Connection(
+    body: Body,
+    socket: Socket,
+    transport: Transport,
+    client_ip: ClientIp,
+  )
+}
 
 pub type PacketType {
   Http
@@ -53,12 +60,12 @@ pub type DecodeError {
   DiscardPacket
 }
 
-external fn decode_packet(
-  packet_type: PacketType,
-  packet: BitString,
-  options: List(a),
-) -> Result(DecodedPacket, DecodeError) =
-  "mist_ffi" "decode_packet"
+@external(erlang, "mist_ffi", "decode_packet")
+fn decode_packet(
+  packet_type packet_type: PacketType,
+  packet packet: BitString,
+  options options: List(a),
+) -> Result(DecodedPacket, DecodeError)
 
 pub fn from_header(value: BitString) -> String {
   let assert Ok(value) = bit_string.to_string(value)
@@ -125,14 +132,14 @@ pub fn read_data(
   }
 }
 
-external fn binary_match(
-  source: BitString,
-  pattern: BitString,
-) -> Result(#(Int, Int), Nil) =
-  "mist_ffi" "binary_match"
+@external(erlang, "mist_ffi", "binary_match")
+fn binary_match(
+  source source: BitString,
+  pattern pattern: BitString,
+) -> Result(#(Int, Int), Nil)
 
-external fn string_to_int(string: Charlist, base: Int) -> Result(Int, Nil) =
-  "mist_ffi" "string_to_int"
+@external(erlang, "mist_ffi", "string_to_int")
+fn string_to_int(string string: Charlist, base base: Int) -> Result(Int, Nil)
 
 const crnl = <<13:int, 10:int>>
 
@@ -183,16 +190,15 @@ fn read_chunk(
           }
       }
     }
-    <<>>, _ -> {
+    <<>> as data, _ | data, Error(Nil) -> {
       use next <- result.then(read_data(
         socket,
         transport,
-        Buffer(0, buffer.data),
+        Buffer(0, data),
         InvalidBody,
       ))
       read_chunk(socket, transport, Buffer(0, next), body)
     }
-    _, Error(Nil) -> Error(InvalidBody)
   }
 }
 
@@ -201,7 +207,8 @@ pub fn parse_request(
   bs: BitString,
   socket: Socket,
   transport: Transport,
-) -> Result(request.Request(Body), DecodeError) {
+  client_ip: ClientIp,
+) -> Result(request.Request(Connection), DecodeError) {
   case decode_packet(HttpBin, bs, []) {
     Ok(BinaryData(HttpRequest(http_method, AbsPath(path), _version), rest)) -> {
       use method <- result.then(
@@ -235,7 +242,12 @@ pub fn parse_request(
           transport.Ssl(..) -> http.Https
           transport.Tcp(..) -> http.Http
         })
-        |> request.set_body(Unread(rest, socket))
+        |> request.set_body(Connection(
+          body: Unread(rest, socket),
+          socket: socket,
+          transport: transport,
+          client_ip: client_ip,
+        ))
         |> request.set_method(method)
         |> request.set_path(path)
       Ok(request.Request(..req, query: query, headers: map.to_list(headers)))
@@ -255,13 +267,26 @@ pub fn static_body(data: BitString) -> Body {
   Read(data)
 }
 
-pub fn read_body(req: Request(Body)) -> Result(Request(BitString), DecodeError) {
+pub fn read_body(
+  req: Request(Connection),
+) -> Result(Request(BitString), DecodeError) {
   let transport = case req.scheme {
     http.Https -> transport.ssl()
     http.Http -> transport.tcp()
   }
-  case request.get_header(req, "transfer-encoding"), req.body {
+  case request.get_header(req, "transfer-encoding"), req.body.body {
     Ok("chunked"), Unread(rest, socket) -> {
+      let _continue = case is_continue(req) {
+        True -> {
+          let assert Ok(Nil) =
+            response.new(100)
+            |> response.set_body(bit_builder.new())
+            |> encoder.to_bit_builder
+            |> transport.send(socket, _)
+          Nil
+        }
+        False -> Nil
+      }
       use chunk <- result.then(read_chunk(
         socket,
         transport,
@@ -304,20 +329,28 @@ pub fn read_body(req: Request(Body)) -> Result(Request(BitString), DecodeError) 
   }
 }
 
-pub type HttpResponseBody {
-  BitBuilderBody(BitBuilder)
-  Chunked(Iterator(BitBuilder))
-  FileBody(
-    file_descriptor: file.FileDescriptor,
-    content_type: String,
-    offset: Int,
-    length: Int,
-  )
+const websocket_key = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+pub type ShaHash {
+  Sha
+}
+
+@external(erlang, "crypto", "hash")
+pub fn crypto_hash(hash hash: ShaHash, data data: String) -> String
+
+@external(erlang, "base64", "encode")
+pub fn base64_encode(data data: String) -> String
+
+fn parse_websocket_key(key: String) -> String {
+  key
+  |> string.append(websocket_key)
+  |> crypto_hash(Sha, _)
+  |> base64_encode
 }
 
 pub fn upgrade_socket(
-  req: Request(Body),
-) -> Result(Response(BitBuilder), Request(Body)) {
+  req: Request(Connection),
+) -> Result(Response(BitBuilder), Request(Connection)) {
   use _upgrade <- result.then(
     request.get_header(req, "upgrade")
     |> result.replace_error(req),
@@ -331,7 +364,7 @@ pub fn upgrade_socket(
     |> result.replace_error(req),
   )
 
-  let accept_key = websocket.parse_key(key)
+  let accept_key = parse_websocket_key(key)
 
   response.new(101)
   |> response.set_body(bit_builder.new())
@@ -345,7 +378,7 @@ pub fn upgrade_socket(
 pub fn upgrade(
   socket: Socket,
   transport: Transport,
-  req: Request(Body),
+  req: Request(Connection),
 ) -> Result(Nil, Nil) {
   use resp <- result.then(
     upgrade_socket(req)
@@ -384,7 +417,7 @@ pub fn add_default_headers(resp: Response(BitBuilder)) -> Response(BitBuilder) {
   Response(..resp, headers: headers)
 }
 
-fn is_continue(req: Request(Body)) -> Bool {
+fn is_continue(req: Request(Connection)) -> Bool {
   req.headers
   |> list.find(fn(tup) {
     pair.first(tup) == "expect" && pair.second(tup) == "100-continue"

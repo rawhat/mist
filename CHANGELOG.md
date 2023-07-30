@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Big API refactor
+- Add `client_ip` to `Connection` construct
+- Fix reading chunked encoding
+
 ## v0.12.0
 
 - Correctly handle query strings (@Johann150)

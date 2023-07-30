@@ -1,36 +1,40 @@
 import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
-import gleam/erlang/process.{Subject}
+import gleam/dynamic
+import gleam/erlang.{rescue}
+import gleam/erlang/atom
+import gleam/erlang/process.{Selector, Subject}
 import gleam/list
-import gleam/option.{Option}
+import gleam/option.{Option, Some}
+import gleam/otp/actor
 import gleam/result
-import gleam/string
-import glisten/handler.{HandlerMessage}
 import glisten/socket.{Socket}
+import glisten/socket/options
 import glisten/socket/transport.{Transport}
+import mist/internal/logger
 
-pub type Message {
-  BinaryMessage(data: BitString)
-  TextMessage(data: String)
-}
-
-pub type Handler =
-  fn(Message, Subject(HandlerMessage)) -> Result(Nil, Nil)
-
-// TODO:  there are other message types, AND ALSO will need to buffer across
-// multiple frames, potentially
-pub type Frame {
-  // TODO:  should this include data?
-  CloseFrame(payload_length: Int, payload: BitString)
+pub type DataFrame {
   TextFrame(payload_length: Int, payload: BitString)
   BinaryFrame(payload_length: Int, payload: BitString)
+}
+
+pub type ControlFrame {
+  // TODO:  should this include data?
+  CloseFrame(payload_length: Int, payload: BitString)
   // We don't care about basicaly everything else for now
   PingFrame(payload_length: Int, payload: BitString)
   PongFrame(payload_length: Int, payload: BitString)
 }
 
-external fn crypto_exor(a: BitString, b: BitString) -> BitString =
-  "crypto" "exor"
+// TODO:  there are other message types, AND ALSO will need to buffer across
+// multiple frames, potentially
+pub type Frame {
+  Data(DataFrame)
+  Control(ControlFrame)
+}
+
+@external(erlang, "crypto", "exor")
+fn crypto_exor(a a: BitString, b b: BitString) -> BitString
 
 fn unmask_data(
   data: BitString,
@@ -97,25 +101,27 @@ pub fn frame_from_message(
   }
   |> result.map(fn(data) {
     case opcode {
-      1 -> TextFrame(payload_length, data)
-      2 -> BinaryFrame(payload_length, data)
-      8 -> CloseFrame(payload_length, data)
-      9 -> PingFrame(payload_length, data)
-      10 -> PongFrame(payload_length, data)
+      1 -> Data(TextFrame(payload_length, data))
+      2 -> Data(BinaryFrame(payload_length, data))
+      8 -> Control(CloseFrame(payload_length, data))
+      9 -> Control(PingFrame(payload_length, data))
+      10 -> Control(PongFrame(payload_length, data))
     }
   })
 }
 
 pub fn frame_to_bit_builder(frame: Frame) -> BitBuilder {
   case frame {
-    TextFrame(payload_length, payload) -> make_frame(1, payload_length, payload)
-    CloseFrame(payload_length, payload) ->
+    Data(TextFrame(payload_length, payload)) ->
+      make_frame(1, payload_length, payload)
+    Control(CloseFrame(payload_length, payload)) ->
       make_frame(8, payload_length, payload)
-    BinaryFrame(payload_length, payload) ->
+    Data(BinaryFrame(payload_length, payload)) ->
       make_frame(2, payload_length, payload)
-    PongFrame(payload_length, payload) ->
+    Control(PongFrame(payload_length, payload)) ->
       make_frame(10, payload_length, payload)
-    PingFrame(payload_length, payload) -> make_frame(9, payload_length, payload)
+    Control(PingFrame(payload_length, payload)) ->
+      make_frame(9, payload_length, payload)
   }
 }
 
@@ -132,40 +138,138 @@ fn make_frame(opcode: Int, length: Int, payload: BitString) -> BitBuilder {
 
 pub fn to_text_frame(data: BitString) -> BitBuilder {
   let size = bit_string.byte_size(data)
-  frame_to_bit_builder(TextFrame(size, data))
+  frame_to_bit_builder(Data(TextFrame(size, data)))
 }
 
 pub fn to_binary_frame(data: BitString) -> BitBuilder {
   let size = bit_string.byte_size(data)
-  frame_to_bit_builder(BinaryFrame(size, data))
+  frame_to_bit_builder(Data(BinaryFrame(size, data)))
 }
 
-const websocket_key = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-
-pub type ShaHash {
-  Sha
+pub type ValidMessage(user_message) {
+  Internal(Frame)
+  SocketClosed
+  User(user_message)
 }
 
-pub external fn crypto_hash(hash: ShaHash, data: String) -> String =
-  "crypto" "hash"
-
-pub external fn base64_encode(data: String) -> String =
-  "base64" "encode"
-
-pub fn parse_key(key: String) -> String {
-  key
-  |> string.append(websocket_key)
-  |> crypto_hash(Sha, _)
-  |> base64_encode
+pub type WebsocketMessage(user_message) {
+  Valid(ValidMessage(user_message))
+  Invalid
 }
 
-pub type EventHandler =
-  fn(Subject(HandlerMessage)) -> Nil
+pub type WebsocketConnection {
+  WebsocketConnection(socket: Socket, transport: Transport)
+}
 
-pub type WebsocketHandler {
-  WebsocketHandler(
-    on_close: Option(EventHandler),
-    on_init: Option(EventHandler),
-    handler: Handler,
-  )
+pub type Handler(state, message) =
+  fn(state, WebsocketConnection, ValidMessage(message)) -> actor.Next(state)
+
+pub fn initialize_connection(
+  initial_state: state,
+  user_selector: Option(Selector(user_message)),
+  handler: Handler(state, user_message),
+  socket: Socket,
+  transport: Transport,
+) -> Result(Subject(WebsocketMessage(user_message)), Nil) {
+  let connection = WebsocketConnection(socket: socket, transport: transport)
+  // TODO:  Will likely need to monitor this somehow... maybe have a
+  // `selecting_forever`
+  actor.start_spec(actor.Spec(
+    init: fn() {
+      // TODO: this is pulled straight from glisten, prob should share it
+      let selector =
+        process.new_selector()
+        |> process.selecting_record3(
+          atom.create_from_string("tcp"),
+          fn(_sock, data) {
+            data
+            |> dynamic.bit_string
+            |> result.replace_error(Nil)
+            |> result.then(frame_from_message(socket, transport, _))
+            |> result.map(Internal)
+            |> result.map(Valid)
+            |> result.unwrap(Invalid)
+          },
+        )
+        |> process.selecting_record3(
+          atom.create_from_string("ssl"),
+          fn(_sock, data) {
+            data
+            |> dynamic.bit_string
+            |> result.replace_error(Nil)
+            |> result.then(frame_from_message(socket, transport, _))
+            |> result.map(Internal)
+            |> result.map(Valid)
+            |> result.unwrap(Invalid)
+          },
+        )
+        |> process.selecting_record2(
+          atom.create_from_string("ssl_closed"),
+          fn(_nil) { Valid(SocketClosed) },
+        )
+        |> process.selecting_record2(
+          atom.create_from_string("tcp_closed"),
+          fn(_nil) { Valid(SocketClosed) },
+        )
+        |> fn(selector) {
+          case user_selector {
+            Some(user_selector) ->
+              user_selector
+              |> process.map_selector(User)
+              |> process.map_selector(Valid)
+              |> process.merge_selector(selector)
+            _ -> selector
+          }
+        }
+
+      actor.Ready(initial_state, selector)
+    },
+    init_timeout: 500,
+    loop: fn(msg, state) {
+      case msg {
+        Valid(Internal(Control(CloseFrame(..)) as frame)) -> {
+          let assert Ok(_) =
+            connection.transport.send(
+              connection.socket,
+              frame_to_bit_builder(frame),
+            )
+          actor.Stop(process.Normal)
+        }
+        Valid(Internal(Control(PingFrame(length, payload)))) -> {
+          connection.transport.send(
+            connection.socket,
+            frame_to_bit_builder(Control(PongFrame(length, payload))),
+          )
+          |> result.map(fn(_nil) { actor.Continue(state) })
+          |> result.unwrap(actor.Stop(process.Abnormal(
+            "Failed to send pong frame",
+          )))
+        }
+        Invalid -> {
+          logger.error(#("Received a malformed Websocket frame"))
+          actor.Continue(state)
+        }
+        Valid(msg) -> {
+          rescue(fn() { handler(state, connection, msg) })
+          |> result.lazy_unwrap(fn() {
+            logger.error("Caught error in websocket handler")
+            actor.Stop(process.Abnormal("Websocket terminated"))
+          })
+        }
+      }
+    },
+  ))
+  |> result.replace_error(Nil)
+  |> result.map(fn(subj) {
+    let websocket_pid = process.subject_owner(subj)
+    let assert Ok(_) =
+      connection.transport.controlling_process(connection.socket, websocket_pid)
+    let assert Ok(_) =
+      connection.transport.set_opts(
+        connection.socket,
+        [options.ActiveMode(options.Active)],
+      )
+    subj
+  })
+  |> result.replace_error(Nil)
 }

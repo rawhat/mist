@@ -8,8 +8,8 @@ import gleam/set
 import gleeunit/should
 import glisten/acceptor.{AcceptorMessage}
 import glisten/tcp
-import mist/internal/handler.{Handler}
-import mist/internal/http.{Chunked} as mhttp
+import mist/internal/handler.{Chunked, Handler}
+import mist/internal/http as mhttp
 import gleam/bit_string
 import gleam/string
 import gleam/iterator
@@ -49,7 +49,7 @@ pub fn chunked_echo_server(
 ) -> Subject(AcceptorMessage) {
   let assert Ok(listener) = tcp.listen(port, [])
   let pool =
-    fn(req: request.Request(mhttp.Body)) {
+    fn(req: request.Request(mhttp.Connection)) {
       let assert Ok(req) = mhttp.read_body(req)
       let assert Ok(body) = bit_string.to_string(req.body)
       let chunks =
@@ -64,7 +64,6 @@ pub fn chunked_echo_server(
         })
       response.new(200)
       |> response.set_body(Chunked(chunks))
-      |> handler.Response
     }
     |> handler.with_func
     |> acceptor.new_pool_with_data(handler.new_state())
@@ -145,8 +144,12 @@ type IoFormat {
   User
 }
 
-external fn io_fwrite(format: IoFormat, output_format: String, data: any) -> Nil =
-  "io" "fwrite"
+@external(erlang, "io", "fwrite")
+fn io_fwrite(
+  format format: IoFormat,
+  output_format output_format: String,
+  data data: any,
+) -> Nil
 
 pub fn io_fwrite_user(data: anything) {
   io_fwrite(User, "~tp\n", [data])

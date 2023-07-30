@@ -14,189 +14,141 @@ and its documentation can be found at <https://hexdocs.pm/mist>.
 
 ## Usage
 
-Right now there are a few options.  Let's say you want a "simple" HTTP server
-that you can customize to your heart's content.  In that case, you want:
+The main entrypoints for your application are `mist.start_http` and
+`mist.start_https`. The argument to these functions is generated from the
+opaque `Builder` type. It can be constructed with the `mist.new` function, and
+fed updated configuration options with the associated methods (demonstrated
+in the examples below).
 
 ```gleam
 import gleam/bit_builder
+import gleam/bit_string
 import gleam/erlang/process
-import gleam/http/response
-import mist
-
-pub fn main() {
-  let assert Ok(_) =
-    mist.run_service(
-      8080,
-      fn(_req) {
-        response.new(200)
-        |> response.set_body(bit_builder.from_string("hello, world!"))
-      },
-      max_body_limit: 4_000_000
-    )
-  process.sleep_forever()
-}
-```
-
-Maybe you also want to work with websockets.  Maybe those should only be
-upgradable at a certain endpoint.  For that, you can use `mist.handler_func`.
-The websocket methods help you build a handler with connect/disconnect handlers.
-You can use these to track connected clients, for example.
-
-```gleam
-import gleam/bit_builder
-import gleam/erlang/process
-import gleam/http.{Get, Post}
 import gleam/http/request.{Request}
-import gleam/http/response
+import gleam/http/response.{Response}
+import gleam/iterator
+import gleam/otp/actor
 import gleam/result
-import mist
-import mist/websocket
+import gleam/string
+import mist/file
+import mist.{Connection, ResponseData}
 
 pub fn main() {
-  let assert Ok(_) =
-    mist.serve(
-      8080,
-      mist.handler_func(fn(req) {
-        case req.method, request.path_segments(req) {
-          Get, ["echo", "test"] -> websocket_echo()
-          Post, ["echo", "body"] -> echo_body(req)
-          Get, ["home"] ->
-            response.new(200)
-            |> mist.bit_builder_response(
-              bit_builder.from_string("sup home boy")
-            )
-          _, _ ->
-            response.new(200)
-            |> mist.bit_builder_response(
-              bit_builder.from_string("Hello, world!")
-            )
-        }
-      }),
-    )
+  // This would be the selector for the hypothetic pubsub system messages
+  let selector = process.new_selector()
+  let state = Nil
+
+  let not_found =
+    response.new(404)
+    |> response.set_body(mist.Bytes(bit_builder.new()))
+
+  fn(req: Request(Connection)) -> Response(ResponseData) {
+    case request.path_segments(req) {
+      ["ws"] ->
+        mist.websocket(req)
+        |> mist.with_state(state)
+        |> mist.selecting(selector)
+        |> mist.on_message(handle_ws_message)
+        |> mist.upgrade
+      ["echo"] -> echo_body(req)
+      ["chunk"] -> serve_chunk(req)
+      ["file", ..rest] -> serve_file(req, rest)
+      ["form"] -> handle_form(req)
+
+      _ -> not_found
+    }
+  }
+  |> mist.new
+  |> mist.port(8080)
+  |> mist.start_http
+
   process.sleep_forever()
 }
 
-fn websocket_echo() {
-  websocket.echo_handler
-  |> websocket.with_handler
-  // Here you can gain access to the `Subject` to send message to
-  // with:
-  // |> websocket.on_init(fn(subj) { ... })
-  // |> websocket.on_close(fn(subj) { ... })
-  |> mist.upgrade
+pub type MyMessage {
+  Broadcast(String)
 }
 
-fn echo_body(req: Request(mist.Body)) {
-  req
-  |> mist.read_body
+fn handle_ws_message(state, conn, message) {
+  case message {
+    mist.Text(<<"ping":utf8>>) -> {
+      let assert Ok(_) = mist.send_text_frame(conn, <<"pong":utf8>>)
+      actor.Continue(state)
+    }
+    mist.Text(_) | mist.Binary(_) -> {
+      actor.Continue(state)
+    }
+    mist.Custom(Broadcast(text)) -> {
+      let assert Ok(_) = mist.send_text_frame(conn, <<text:utf8>>)
+      actor.Continue(state)
+    }
+    mist.Closed | mist.Shutdown -> actor.Stop(process.Normal)
+  }
+}
+
+fn echo_body(request: Request(Connection)) -> Response(ResponseData) {
+  let content_type =
+    request
+    |> request.get_header("content-type")
+    |> result.unwrap("text/plain")
+
+  mist.read_body(request, 1024 * 1024 * 10)
   |> result.map(fn(req) {
     response.new(200)
-    |> response.prepend_header(
-      "content-type",
-      request.get_header(req, "content-type")
-      |> result.unwrap("application/octet-stream"),
-    )
-    |> mist.bit_builder_response(bit_builder.from_bit_string(req.body))
+    |> response.set_body(mist.Bytes(bit_builder.from_bit_string(req.body)))
+    |> response.set_header("content-type", content_type)
   })
-  |> result.unwrap(
+  |> result.lazy_unwrap(fn() {
     response.new(400)
-    |> mist.empty_response,
-  )
+    |> response.set_body(mist.Bytes(bit_builder.new()))
+  })
+}
+
+fn serve_chunk(_request: Request(Connection)) -> Response(ResponseData) {
+  let iter =
+    ["one", "two", "three"]
+    |> iterator.from_list
+    |> iterator.map(bit_builder.from_string)
+
+  response.new(200)
+  |> response.set_body(mist.Chunked(iter))
+  |> response.set_header("content-type", "text/plain")
+}
+
+fn serve_file(
+  _req: Request(Connection),
+  path: List(String),
+) -> Response(ResponseData) {
+  let not_found =
+    response.new(404)
+    |> response.set_body(mist.Bytes(bit_builder.new()))
+
+  let file_path =
+    path
+    |> string.join("/")
+    |> bit_string.from_string
+
+  // Omitting validation for brevity
+  let file_descriptor = file.open(file_path)
+  let file_size = file.size(file_path)
+
+  case file_descriptor {
+    Ok(file) -> {
+      let content_type = guess_content_type(file_path)
+      response.new(200)
+      |> response.set_body(mist.File(file, content_type, 0, file_size))
+    }
+    _ -> not_found
+  }
+}
+
+fn handle_form(req: Request(Connection)) -> Response(ResponseData) {
+  let _req = mist.read_body(req, 1024 * 1024 * 30)
+  response.new(200)
+  |> response.set_body(mist.Bytes(bit_builder.new()))
+}
+
+fn guess_content_type(_path: BitString) -> String {
+  "application/octet-stream"
 }
 ```
-
-You might also want to use SSL.  You can do that with the following options.
-
-With `run_service_ssl`:
-
-```gleam
-import gleam/bit_builder
-import gleam/erlang/process
-import gleam/http/response
-import mist
-
-pub fn main() {
-  let assert Ok(_) =
-    mist.run_service_ssl(
-      port: 8080,
-      certfile: "/path/to/server.crt",
-      keyfile: "/path/to/server.key",
-      handler: fn(_req) {
-        response.new(200)
-        |> response.set_body(bit_builder.from_bit_string(<<
-          "hello, world!":utf8,
-        >>))
-      },
-      max_body_limit: 4_000_000
-    )
-  process.sleep_forever()
-}
-```
-
-With `serve_ssl`:
-
-```gleam
-pub fn main() {
-  let assert Ok(_) =
-    mist.serve_ssl(
-      port: 8080,
-      certfile: "...",
-      keyfile: "...",
-      mist.handler_func(fn(req) {
-        todo
-      }
-    )
-  // ...
-}
-```
-
-There is support for sending files as well. This uses the `file:sendfile` erlang
-method under the hood.
-
-```gleam
-import gleam/bit_builder
-import gleam/erlang/process
-import gleam/http/request.{Request}
-import gleam/http/response
-import gleam/string
-import mist
-
-pub fn main() {
-  let asset_root = "..."
-  let assert Ok(_) =
-    mist.serve(
-      8080,
-      mist.handler_func(fn(req: Request(Body)) {
-        let not_found =
-          response.new(404)
-          |> mist.empty_response
-        case request.path_segments(req) {
-          ["static", ..path] -> {
-            // verify, validate, etc
-            let file_path =
-              path
-              |> string.join("/")
-              |> string.append("/", _)
-            response.new(200)
-            |> mist.file_response(asset_root <> file_path)
-            |> result.unwrap(not_found)
-          }
-          _ -> not_found
-        }
-      }),
-    )
-  process.sleep_forever()
-}
-```
-
-You can return chunked responses using the `mist.{chunked_response}` method.
-This takes an `Iterator(BitBuilder)` and handles sending the initial
-response, and subsequent chunks in the proper format as they are emitted from
-the iterator. The iterator must be finite.
-
-If you need something a little more complex or custom, you can always use the
-helpers exported by the various `glisten`/`mist` modules.
-
-## Benchmarks
-
-These are currently located [here](https://github.com/rawhat/http-benchmarks)

@@ -126,13 +126,13 @@ pub fn it_rejects_large_requests() {
   string_response_should_equal(resp, expected)
 }
 
-external fn stream_request(
-  method: http.Method,
-  path: String,
-  headers: List(#(String, String)),
-  body: BitString,
-) -> Result(#(Int, List(#(String, String)), BitString), Nil) =
-  "hackney_ffi" "stream_request"
+@external(erlang, "hackney_ffi", "stream_request")
+fn stream_request(
+  method method: http.Method,
+  path path: String,
+  headers headers: List(#(String, String)),
+  body body: BitString,
+) -> Result(#(Int, List(#(String, String)), BitString), Nil)
 
 pub fn it_supports_chunked_encoding() {
   let req =

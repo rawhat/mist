@@ -1,7 +1,7 @@
 import gleam/erlang/charlist.{Charlist}
 
-external fn log_error(format: Charlist, data: any) -> Nil =
-  "logger" "error"
+@external(erlang, "logger", "error")
+fn log_error(format format: Charlist, data data: any) -> Nil
 
 pub fn error(data: any) -> Nil {
   log_error(charlist.from_string("~tp"), [data])
