@@ -1,20 +1,11 @@
-import gleam/erlang/atom.{Atom}
-import glisten/socket.{Socket}
+import mist/internal/file.{FileDescriptor}
 
-pub type FileDescriptor
-
+/// Get the file size from a path. Returns `0` if the path
+/// does not exist.
 @external(erlang, "filelib", "file_size")
-pub fn size(path path: BitString) -> Int
+pub fn size(path: BitString) -> Int
 
-@external(erlang, "file", "sendfile")
-pub fn sendfile(
-  file_descriptor file_descriptor: FileDescriptor,
-  socket socket: Socket,
-  offset offset: Int,
-  bytes bytes: Int,
-  options options: List(a),
-) -> Result(Int, Atom)
-
+/// Errors returned from attempting to open a file.
 pub type FileError {
   IsDir
   NoAccess
@@ -22,5 +13,7 @@ pub type FileError {
   UnknownFileError
 }
 
+/// Attemps to open a file at the given path. Returns a `FileDescriptor`
+/// to use with the `mist.File` response type.
 @external(erlang, "mist_ffi", "file_open")
 pub fn open(file: BitString) -> Result(FileDescriptor, FileError)

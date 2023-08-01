@@ -13,7 +13,7 @@ import glisten/handler.{Close, LoopFn, LoopState}
 import glisten/socket.{Socket}
 import glisten/socket/transport.{Transport}
 import mist/internal/encoder
-import mist/file
+import mist/internal/file
 import mist/internal/http.{Connection, DecodeError, DiscardPacket}
 import mist/internal/logger
 

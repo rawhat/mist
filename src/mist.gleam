@@ -1,4 +1,5 @@
 import gleam/bit_builder.{BitBuilder}
+import gleam/bit_string
 import gleam/erlang/process.{ProcessDown, Selector}
 import gleam/function
 import gleam/http/request.{Request}
@@ -13,8 +14,8 @@ import glisten
 import glisten/acceptor
 import glisten/socket
 import glisten/socket/transport
-import mist/file
 import mist/internal/buffer.{Buffer}
+import mist/internal/file
 import mist/internal/handler.{
   Bytes as InternalBytes, Chunked as InternalChunked, File as InternalFile,
   ResponseData as InternalResponseData, Websocket as InternalWebsocket,
@@ -85,6 +86,9 @@ pub fn read_body(
   }
 }
 
+/// The values returning from streaming the request body. The `Chunk`
+/// variant gives back some data and the next token. `Done` signifies
+/// that we have completed reading the body.
 pub type Chunk {
   Chunk(data: BitString, consume: fn(Int) -> Result(Chunk, ReadError))
   Done
@@ -200,37 +204,13 @@ fn fetch_chunks_until(
       }
     }
   }
-  // http.Chunk(data, next_buffer) -> {
-  //   let updated_state =
-  //     ChunkState(
-  //       data_buffer: buffer.append(state.data_buffer, data),
-  //       chunk_buffer: next_buffer,
-  //       done: False,
-  //     )
-  //   fetch_chunks_until(socket, transport, updated_state, byte_size)
-  // }
-  // Error(_) -> {
-  //   http.read_data(
-  //     socket,
-  //     transport,
-  //     state.chunk_buffer,
-  //     http.InvalidBody,
-  //   )
-  //   |> result.replace_error(MalformedBody)
-  //   |> result.then(fn(new_data) {
-  //     io.debug(#("got some new data!", bit_string.byte_size(new_data)))
-  //     let updated_state =
-  //       ChunkState(
-  //         ..state,
-  //         chunk_buffer: buffer.append(state.chunk_buffer, new_data),
-  //       )
-  //     fetch_chunks_until(socket, transport, updated_state, byte_size)
-  //   })
-  // }
 }
 
-import gleam/bit_string
-
+/// Rather than explicitly reading either the whole body (optionally up to
+/// `N` bytes), this function allows you to consume a stream of the request
+/// body. Any errors reading the body will propagate out, or `Chunk`s will be
+/// emitted. This provides a `consume` method to attempt to grab the next
+/// `size` chunk from the socket.
 pub fn stream(
   req: Request(Connection),
 ) -> Result(fn(Int) -> Result(Chunk, ReadError), ReadError) {

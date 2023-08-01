@@ -34,7 +34,7 @@ import mist/file
 import mist.{Connection, ResponseData}
 
 pub fn main() {
-  // This would be the selector for the hypothetic pubsub system messages
+  // These values are for the Websocket process initialized below
   let selector = process.new_selector()
   let state = Nil
 
@@ -150,5 +150,64 @@ fn handle_form(req: Request(Connection)) -> Response(ResponseData) {
 
 fn guess_content_type(_path: BitString) -> String {
   "application/octet-stream"
+}
+```
+
+## Streaming request body
+
+```
+NOTE:  This is a new feature, and I may have made some mistakes.  Please let me
+know if you run into anything :)
+```
+
+When handling file uploads or `multipart/form-data`, you probably don't want to
+load the whole file into memory. Previously, the only options in `mist` were to
+accept bodies up to `N` bytes, or read the entire body.
+
+Now, there is a `mist.stream` function which takes a `Request(Connection)` that
+gives you back a function to start reading chunks. This function will return:
+
+```gleam
+pub type Chunk {
+  Chunk(data: BitString, consume: fn(Int) -> Chunk)
+  Done
+}
+```
+
+NOTE: You must only call this once on the `Request(Connection)`. Since it's
+reading data from the socket, this is a mutable action. The name `consume` was
+chosen to hopefully make that more clear.
+
+### Example
+
+```gleam
+// Replacing the named function in the application example above
+fn handle_form(req: Request(Connection)) -> Response(ResponseData) {
+  let assert Ok(consume) = mist.stream(req)
+  // NOTE:  This is a little misleading, since `Iterator`s can be replayed.
+  // However, this will only be running this once.
+  let content =
+    iterator.unfold(
+      consume,
+      fn(consume) {
+        // Reads up to 1024 bytes from the request
+        let res = consume(1024)
+        case res {
+          // The error will not be bubbled up to the iterator here. If either
+          // we've read all the body, or we see an error, the iterator finishes
+          Ok(mist.Done) | Error(_) -> iterator.Done
+          // We read some data. It may be less than the specific amount above if
+          // we have consumed all of the body. You'll still need to call it
+          // again to ensure, since with `chunked` encoding, we need to check
+          // for the last chunk.
+          Ok(mist.Chunk(data, consume)) -> {
+            iterator.Next(bit_builder.from_bit_string(data), consume)
+          }
+        }
+      },
+    )
+  // For fun, respond with `chunked` encoding of the same iterator
+  response.new(200)
+  |> response.set_body(mist.Chunked(content))
 }
 ```
