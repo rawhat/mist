@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.13.0
 
 - Big API refactor
 - Add `client_ip` to `Connection` construct
