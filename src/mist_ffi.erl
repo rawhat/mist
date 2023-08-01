@@ -28,7 +28,7 @@ string_to_int(String, Base) ->
   try
     {ok, erlang:list_to_integer(String, Base)}
   catch
-    badarg ->
+    error:badarg ->
       {error, nil}
   end.
 

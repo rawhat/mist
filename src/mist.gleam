@@ -12,7 +12,9 @@ import gleam/result
 import glisten
 import glisten/acceptor
 import glisten/socket
+import glisten/socket/transport
 import mist/file
+import mist/internal/buffer.{Buffer}
 import mist/internal/handler.{
   Bytes as InternalBytes, Chunked as InternalChunked, File as InternalFile,
   ResponseData as InternalResponseData, Websocket as InternalWebsocket,
@@ -79,6 +81,191 @@ pub fn read_body(
       _ -> {
         Error(ExcessBody)
       }
+    }
+  }
+}
+
+pub type Chunk {
+  Chunk(data: BitString, consume: fn(Int) -> Result(Chunk, ReadError))
+  Done
+}
+
+fn do_stream(
+  req: Request(Connection),
+  buffer: Buffer,
+) -> fn(Int) -> Result(Chunk, ReadError) {
+  fn(size) {
+    let socket = req.body.socket
+    let transport = req.body.transport
+    let byte_size = bit_string.byte_size(buffer.data)
+
+    case buffer.remaining, byte_size {
+      0, 0 -> Ok(Done)
+
+      0, _buffer_size -> {
+        let #(data, rest) = buffer.slice(buffer, size)
+        Ok(Chunk(data, do_stream(req, buffer.new(rest))))
+      }
+
+      _, buffer_size if buffer_size >= size -> {
+        let #(data, rest) = buffer.slice(buffer, size)
+        let new_buffer = Buffer(..buffer, data: rest)
+        Ok(Chunk(data, do_stream(req, new_buffer)))
+      }
+
+      _, _buffer_size -> {
+        http.read_data(socket, transport, buffer.empty(), http.InvalidBody)
+        |> result.replace_error(MalformedBody)
+        |> result.map(fn(data) {
+          let fetched_data = bit_string.byte_size(data)
+          let new_buffer =
+            Buffer(
+              data: bit_string.append(buffer.data, data),
+              remaining: int.max(0, buffer.remaining - fetched_data),
+            )
+          let #(new_data, rest) = buffer.slice(new_buffer, size)
+          Chunk(new_data, do_stream(req, Buffer(..new_buffer, data: rest)))
+        })
+      }
+    }
+  }
+}
+
+type ChunkState {
+  ChunkState(data_buffer: Buffer, chunk_buffer: Buffer, done: Bool)
+}
+
+fn do_stream_chunked(
+  req: Request(Connection),
+  state: ChunkState,
+) -> fn(Int) -> Result(Chunk, ReadError) {
+  let socket = req.body.socket
+  let transport = req.body.transport
+
+  fn(size) {
+    case fetch_chunks_until(socket, transport, state, size) {
+      Ok(#(data, ChunkState(done: True, ..))) -> {
+        Ok(Chunk(data, fn(_size) { Ok(Done) }))
+      }
+      Ok(#(data, state)) -> {
+        Ok(Chunk(data, do_stream_chunked(req, state)))
+      }
+      Error(_) -> Error(MalformedBody)
+    }
+  }
+}
+
+fn fetch_chunks_until(
+  socket: socket.Socket,
+  transport: transport.Transport,
+  state: ChunkState,
+  byte_size: Int,
+) -> Result(#(BitString, ChunkState), ReadError) {
+  let data_size = bit_string.byte_size(state.data_buffer.data)
+  case state.done, data_size {
+    _, size if size >= byte_size -> {
+      let #(value, rest) = buffer.slice(state.data_buffer, byte_size)
+      Ok(#(value, ChunkState(..state, data_buffer: buffer.new(rest))))
+    }
+
+    True, _ -> {
+      Ok(#(state.data_buffer.data, ChunkState(..state, done: True)))
+    }
+
+    False, _ -> {
+      case http.parse_chunk(state.chunk_buffer.data) {
+        http.Complete -> {
+          let updated_state =
+            ChunkState(..state, chunk_buffer: buffer.empty(), done: True)
+          fetch_chunks_until(socket, transport, updated_state, byte_size)
+        }
+        http.Chunk(<<>>, next_buffer) -> {
+          http.read_data(socket, transport, next_buffer, http.InvalidBody)
+          |> result.replace_error(MalformedBody)
+          |> result.then(fn(new_data) {
+            let updated_state =
+              ChunkState(..state, chunk_buffer: buffer.new(new_data))
+            fetch_chunks_until(socket, transport, updated_state, byte_size)
+          })
+        }
+        http.Chunk(data, next_buffer) -> {
+          let updated_state =
+            ChunkState(
+              ..state,
+              data_buffer: buffer.append(state.data_buffer, data),
+              chunk_buffer: next_buffer,
+            )
+          fetch_chunks_until(socket, transport, updated_state, byte_size)
+        }
+      }
+    }
+  }
+  // http.Chunk(data, next_buffer) -> {
+  //   let updated_state =
+  //     ChunkState(
+  //       data_buffer: buffer.append(state.data_buffer, data),
+  //       chunk_buffer: next_buffer,
+  //       done: False,
+  //     )
+  //   fetch_chunks_until(socket, transport, updated_state, byte_size)
+  // }
+  // Error(_) -> {
+  //   http.read_data(
+  //     socket,
+  //     transport,
+  //     state.chunk_buffer,
+  //     http.InvalidBody,
+  //   )
+  //   |> result.replace_error(MalformedBody)
+  //   |> result.then(fn(new_data) {
+  //     io.debug(#("got some new data!", bit_string.byte_size(new_data)))
+  //     let updated_state =
+  //       ChunkState(
+  //         ..state,
+  //         chunk_buffer: buffer.append(state.chunk_buffer, new_data),
+  //       )
+  //     fetch_chunks_until(socket, transport, updated_state, byte_size)
+  //   })
+  // }
+}
+
+import gleam/bit_string
+
+pub fn stream(
+  req: Request(Connection),
+) -> Result(fn(Int) -> Result(Chunk, ReadError), ReadError) {
+  let continue =
+    req
+    |> http.handle_continue
+    |> result.replace_error(MalformedBody)
+
+  use _nil <- result.map(continue)
+
+  let is_chunked = case request.get_header(req, "transfer-encoding") {
+    Ok("chunked") -> True
+    _ -> False
+  }
+
+  let assert http.Initial(data) = req.body.body
+
+  case is_chunked {
+    True -> {
+      let state = ChunkState(buffer.new(<<>>), buffer.new(data), False)
+      do_stream_chunked(req, state)
+    }
+    False -> {
+      let content_length =
+        req
+        |> request.get_header("content-length")
+        |> result.then(int.parse)
+        |> result.unwrap(0)
+
+      let initial_size = bit_string.byte_size(data)
+
+      let buffer =
+        Buffer(data: data, remaining: int.max(0, content_length - initial_size))
+
+      do_stream(req, buffer)
     }
   }
 }

@@ -17,6 +17,7 @@ import gleam/uri
 import glisten/handler.{ClientIp}
 import glisten/socket.{Socket}
 import glisten/socket/transport.{Transport}
+import mist/internal/buffer.{Buffer}
 import mist/internal/encoder
 
 pub type Connection {
@@ -60,21 +61,10 @@ pub type DecodeError {
   DiscardPacket
 }
 
-@external(erlang, "mist_ffi", "decode_packet")
-fn decode_packet(
-  packet_type packet_type: PacketType,
-  packet packet: BitString,
-  options options: List(a),
-) -> Result(DecodedPacket, DecodeError)
-
 pub fn from_header(value: BitString) -> String {
   let assert Ok(value) = bit_string.to_string(value)
 
   string.lowercase(value)
-}
-
-pub type Buffer {
-  Buffer(remaining: Int, data: BitString)
 }
 
 pub fn parse_headers(
@@ -122,7 +112,7 @@ pub fn read_data(
   )
   let next_buffer =
     Buffer(
-      remaining: buffer.remaining - to_read,
+      remaining: int.max(0, buffer.remaining - to_read),
       data: <<buffer.data:bit_string, data:bit_string>>,
     )
 
@@ -132,17 +122,48 @@ pub fn read_data(
   }
 }
 
-@external(erlang, "mist_ffi", "binary_match")
-fn binary_match(
-  source source: BitString,
-  pattern pattern: BitString,
-) -> Result(#(Int, Int), Nil)
-
-@external(erlang, "mist_ffi", "string_to_int")
-fn string_to_int(string string: Charlist, base base: Int) -> Result(Int, Nil)
-
 const crnl = <<13:int, 10:int>>
 
+pub type Chunk {
+  Chunk(data: BitString, buffer: Buffer)
+  Complete
+}
+
+pub fn parse_chunk(string: BitString) -> Chunk {
+  case binary_split(string, <<"\r\n":utf8>>) {
+    [<<"0":utf8>>, _] -> Complete
+    [chunk_size, rest] -> {
+      let assert Ok(chunk_size) = bit_string.to_string(chunk_size)
+      case int.base_parse(chunk_size, 16) {
+        Ok(size) -> {
+          let size = size * 8
+          case rest {
+            <<
+              next_chunk:bit_string-size(size),
+              13:int,
+              10:int,
+              rest:bit_string,
+            >> -> {
+              Chunk(data: next_chunk, buffer: buffer.new(rest))
+            }
+            _ -> {
+              Chunk(data: <<>>, buffer: buffer.new(string))
+            }
+          }
+        }
+        Error(_) -> {
+          Chunk(data: <<>>, buffer: buffer.new(string))
+        }
+      }
+    }
+
+    _ -> {
+      Chunk(data: <<>>, buffer: buffer.new(string))
+    }
+  }
+}
+
+// TODO:  use `parse_chunk` for this
 fn read_chunk(
   socket: Socket,
   transport: Transport,
@@ -243,7 +264,7 @@ pub fn parse_request(
           transport.Tcp(..) -> http.Http
         })
         |> request.set_body(Connection(
-          body: Unread(rest, socket),
+          body: Initial(rest),
           socket: socket,
           transport: transport,
           client_ip: client_ip,
@@ -256,15 +277,8 @@ pub fn parse_request(
   }
 }
 
-pub opaque type Body {
-  Unread(rest: BitString, socket: Socket)
-  Read(data: BitString)
-}
-
-/// This function exists purely for unit testing handlers. It allows you to
-/// create a `Request(Body)` which is required by `handler_func`.
-pub fn static_body(data: BitString) -> Body {
-  Read(data)
+pub type Body {
+  Initial(BitString)
 }
 
 pub fn read_body(
@@ -275,38 +289,19 @@ pub fn read_body(
     http.Http -> transport.tcp()
   }
   case request.get_header(req, "transfer-encoding"), req.body.body {
-    Ok("chunked"), Unread(rest, socket) -> {
-      let _continue = case is_continue(req) {
-        True -> {
-          let assert Ok(Nil) =
-            response.new(100)
-            |> response.set_body(bit_builder.new())
-            |> encoder.to_bit_builder
-            |> transport.send(socket, _)
-          Nil
-        }
-        False -> Nil
-      }
+    Ok("chunked"), Initial(rest) -> {
+      use _nil <- result.then(handle_continue(req))
+
       use chunk <- result.then(read_chunk(
-        socket,
+        req.body.socket,
         transport,
         Buffer(remaining: 0, data: rest),
         bit_builder.new(),
       ))
       Ok(request.set_body(req, bit_builder.to_bit_string(chunk)))
     }
-    _, Unread(rest, socket) -> {
-      let _continue = case is_continue(req) {
-        True -> {
-          let assert Ok(Nil) =
-            response.new(100)
-            |> response.set_body(bit_builder.new())
-            |> encoder.to_bit_builder
-            |> transport.send(socket, _)
-          Nil
-        }
-        False -> Nil
-      }
+    _, Initial(rest) -> {
+      use _nil <- result.then(handle_continue(req))
       let body_size =
         req.headers
         |> list.find(fn(tup) { pair.first(tup) == "content-length" })
@@ -320,13 +315,23 @@ pub fn read_body(
         // is this pipelining? check for GET?
         _n, 0 -> Ok(rest)
         _size, _rem ->
-          read_data(socket, transport, Buffer(remaining, rest), InvalidBody)
+          read_data(
+            req.body.socket,
+            transport,
+            Buffer(remaining, rest),
+            InvalidBody,
+          )
       }
       |> result.map(request.set_body(req, _))
       |> result.replace_error(InvalidBody)
     }
-    _, Read(_data) -> Error(InvalidBody)
   }
+}
+
+pub type BodySlice {
+  Chunked(data: BitString, buffer: Buffer)
+  Default(data: BitString)
+  Done
 }
 
 const websocket_key = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -334,12 +339,6 @@ const websocket_key = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 pub type ShaHash {
   Sha
 }
-
-@external(erlang, "crypto", "hash")
-pub fn crypto_hash(hash hash: ShaHash, data data: String) -> String
-
-@external(erlang, "base64", "encode")
-pub fn base64_encode(data data: String) -> String
 
 fn parse_websocket_key(key: String) -> String {
   key
@@ -424,3 +423,41 @@ fn is_continue(req: Request(Connection)) -> Bool {
   })
   |> result.is_ok
 }
+
+pub fn handle_continue(req: Request(Connection)) -> Result(Nil, DecodeError) {
+  case is_continue(req) {
+    True -> {
+      response.new(100)
+      |> response.set_body(bit_builder.new())
+      |> encoder.to_bit_builder
+      |> req.body.transport.send(req.body.socket, _)
+      |> result.replace_error(MalformedRequest)
+    }
+    False -> Ok(Nil)
+  }
+}
+
+@external(erlang, "mist_ffi", "decode_packet")
+fn decode_packet(
+  packet_type packet_type: PacketType,
+  packet packet: BitString,
+  options options: List(a),
+) -> Result(DecodedPacket, DecodeError)
+
+@external(erlang, "crypto", "hash")
+pub fn crypto_hash(hash hash: ShaHash, data data: String) -> String
+
+@external(erlang, "base64", "encode")
+pub fn base64_encode(data data: String) -> String
+
+@external(erlang, "mist_ffi", "binary_match")
+fn binary_match(
+  source source: BitString,
+  pattern pattern: BitString,
+) -> Result(#(Int, Int), Nil)
+
+@external(erlang, "mist_ffi", "string_to_int")
+fn string_to_int(string string: Charlist, base base: Int) -> Result(Int, Nil)
+
+@external(erlang, "binary", "split")
+fn binary_split(source: BitString, pattern: BitString) -> List(BitString)
