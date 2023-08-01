@@ -5,6 +5,7 @@
 - Big API refactor
 - Add `client_ip` to `Connection` construct
 - Fix reading chunked encoding
+- Add method for streaming request body
 
 ## v0.12.0
 
