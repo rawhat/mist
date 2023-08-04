@@ -21,12 +21,7 @@ pub type ResponseData {
   Websocket(Selector(ProcessDown))
   Bytes(BitBuilder)
   Chunked(Iterator(BitBuilder))
-  File(
-    descriptor: file.FileDescriptor,
-    content_type: String,
-    offset: Int,
-    length: Int,
-  )
+  File(descriptor: file.FileDescriptor, offset: Int, length: Int)
 }
 
 pub type Handler =
@@ -159,9 +154,6 @@ fn handle_bit_builder_body(
   |> result.unwrap_both
 }
 
-@external(erlang, "erlang", "integer_to_list")
-fn integer_to_list(int int: Int, base base: Int) -> String
-
 fn int_to_hex(int: Int) -> String {
   integer_to_list(int, 16)
 }
@@ -202,17 +194,19 @@ fn handle_file_body(
   resp: response.Response(ResponseData),
   state: LoopState(State),
 ) -> actor.Next(LoopState(State)) {
-  let assert File(file_descriptor, content_type, offset, length) = resp.body
+  let assert File(file_descriptor, offset, length) = resp.body
   resp
   |> response.prepend_header("content-length", int.to_string(length - offset))
-  |> response.prepend_header("content-type", content_type)
   |> response.set_body(bit_builder.new())
   |> fn(r: response.Response(BitBuilder)) {
     encoder.response_builder(resp.status, r.headers)
   }
   |> state.transport.send(state.socket, _)
-  |> result.map(fn(_) {
+  |> result.replace_error(Nil)
+  |> result.then(fn(_) {
     file.sendfile(file_descriptor, state.socket, offset, length, [])
+    |> result.map_error(fn(err) { logger.error(#("Failed to send file", err)) })
+    |> result.replace_error(Nil)
   })
   |> result.replace(actor.Continue(state))
   // TODO:  not normal
@@ -260,3 +254,6 @@ pub fn with(handler: Handler, max_body_limit: Int) -> LoopFn(State) {
     |> response.map(Bytes)
   })
 }
+
+@external(erlang, "erlang", "integer_to_list")
+fn integer_to_list(int int: Int, base base: Int) -> String

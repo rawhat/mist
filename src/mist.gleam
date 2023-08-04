@@ -39,18 +39,54 @@ pub type Connection =
 /// socket to websockets, but should not be used directly. See the
 /// `mist.upgrade` function for usage. `Chunked` will use
 /// `Transfer-Encoding: chunked` to send an iterator in chunks. `File` will use
-/// Erlang's `sendfile` to more efficiently return a file to the client. See the
-/// `mist.file` module for some helper functions.
+/// Erlang's `sendfile` to more efficiently return a file to the client.
 pub type ResponseData {
   Websocket(Selector(ProcessDown))
   Bytes(BitBuilder)
   Chunked(Iterator(BitBuilder))
-  File(
-    descriptor: file.FileDescriptor,
-    content_type: String,
-    offset: Int,
-    length: Int,
-  )
+  /// See `mist.send_file` to use this response type.
+  File(descriptor: file.FileDescriptor, offset: Int, length: Int)
+}
+
+/// Potential errors when opening a file to send. This list is
+/// currently not exhaustive with POSIX errors.
+pub type FileError {
+  IsDir
+  NoAccess
+  NoEntry
+  UnknownFileError
+}
+
+fn convert_file_errors(err: file.FileError) -> FileError {
+  case err {
+    file.IsDir -> IsDir
+    file.NoAccess -> NoAccess
+    file.NoEntry -> NoEntry
+    file.UnknownFileError -> UnknownFileError
+  }
+}
+
+/// To respond with a file using Erlang's `sendfile`, use this function
+/// with the specified offset and limit (optional). It will attempt to open the
+/// file for reading, get its file size, and then send the file.  If the read
+/// errors, this will return the relevant `FileError`. Generally, this will be
+/// more memory efficient than manually doing this process with `mist.Bytes`.
+pub fn send_file(
+  path: String,
+  offset offset: Int,
+  limit limit: Option(Int),
+) -> Result(ResponseData, FileError) {
+  path
+  |> bit_string.from_string
+  |> file.stat
+  |> result.map_error(convert_file_errors)
+  |> result.map(fn(stat) {
+    File(
+      descriptor: stat.descriptor,
+      offset: offset,
+      length: option.unwrap(limit, stat.file_size),
+    )
+  })
 }
 
 /// The possible errors from reading the request body. If the size is larger
@@ -308,8 +344,7 @@ fn convert_body_types(
   let new_body = case resp.body {
     Websocket(selector) -> InternalWebsocket(selector)
     Bytes(data) -> InternalBytes(data)
-    File(descriptor, content_type, offset, length) ->
-      InternalFile(descriptor, content_type, offset, length)
+    File(descriptor, offset, length) -> InternalFile(descriptor, offset, length)
     Chunked(iter) -> InternalChunked(iter)
   }
   response.set_body(resp, new_body)

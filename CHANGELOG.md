@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Improve file sending ergonomics
+
 ## v0.13.0
 
 - Big API refactor
