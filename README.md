@@ -119,27 +119,20 @@ fn serve_file(
   _req: Request(Connection),
   path: List(String),
 ) -> Response(ResponseData) {
-  let not_found =
-    response.new(404)
-    |> response.set_body(mist.Bytes(bit_builder.new()))
-
-  let file_path =
-    path
-    |> string.join("/")
-    |> bit_string.from_string
+  let file_path = string.join(path, "/")
 
   // Omitting validation for brevity
-  let file_descriptor = file.open(file_path)
-  let file_size = file.size(file_path)
-
-  case file_descriptor {
-    Ok(file) -> {
-      let content_type = guess_content_type(file_path)
-      response.new(200)
-      |> response.set_body(mist.File(file, content_type, 0, file_size))
-    }
-    _ -> not_found
-  }
+  mist.send_file(file_path, offset: 0, limit: None)
+  |> result.map(fn(file) {
+    let content_type = guess_content_type(file_path)
+    response.new(200)
+    |> response.prepend_header("content-type", content_type)
+    |> response.set_body(file)
+  })
+  |> result.lazy_unwrap(fn() {
+    response.new(404)
+    |> response.set_body(mist.Bytes(bit_builder.new()))
+  })
 }
 
 fn handle_form(req: Request(Connection)) -> Response(ResponseData) {
