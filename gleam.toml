@@ -12,7 +12,7 @@ gleam_stdlib = "~> 0.34"
 gleam_erlang = "~> 0.23"
 gleam_http = "~> 3.5"
 gleam_otp = "~> 0.8"
-glisten = "~> 0.9"
+glisten = { path = "../glisten" }
 
 [dev-dependencies]
 gleeunit = "~> 1.0"

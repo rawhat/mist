@@ -6,9 +6,11 @@ decode_packet(Type, Packet, Opts) ->
   case erlang:decode_packet(Type, Packet, Opts) of
     {ok, http_eoh, Rest} ->
       {ok, {end_of_headers, Rest}};
+    {ok, {http_request, <<"PRI">>, '*', {2, 0}}, Rest} ->
+      {ok, {http2_upgrade, Rest}};
     {ok, Binary, Rest} ->
       {ok, {binary_data, Binary, Rest}};
-    {more, Length} when Length =:= undefined ->
+    {more, undefined} ->
       {ok, {more_data, none}};
     {more, Length} ->
       {ok, {more_data, {some, Length}}};

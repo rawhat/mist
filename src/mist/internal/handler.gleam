@@ -18,6 +18,7 @@ import mist/internal/file
 import mist/internal/http.{
   type Connection, type DecodeError, Connection, DiscardPacket, Initial,
 }
+import mist/internal/http2/frame
 import mist/internal/logger
 
 pub type ResponseData {
@@ -38,12 +39,19 @@ pub type HandlerError {
 const stop_normal = actor.Stop(process.Normal)
 
 pub type State {
-  State(idle_timer: Option(process.Timer))
+  Http1(idle_timer: Option(process.Timer))
+  Http2
 }
 
+// Http(idle_timer: Option(process.Timer))
+// Http2
+
 pub fn new_state() -> State {
-  State(None)
+  Http1(None)
 }
+
+import gleam/bit_string
+import gleam/io
 
 /// This is a more flexible handler. It will allow you to upgrade a connection
 /// to a websocket connection, or deal with a regular HTTP req->resp workflow.
@@ -58,56 +66,58 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
         transport: conn.transport,
         client_ip: conn.client_ip,
       )
-    {
-      let _ = case state.idle_timer {
-        Some(t) -> process.cancel_timer(t)
-        _ -> process.TimerNotFound
+
+    case state {
+      Http1(idle_timer) -> {
+        {
+          let _ = case idle_timer {
+            Some(t) -> process.cancel_timer(t)
+            _ -> process.TimerNotFound
+          }
+          msg
+          |> http.parse_request(conn)
+          |> result.map_error(fn(err) {
+            case err {
+              DiscardPacket -> Nil
+              _ -> {
+                logger.error(err)
+                let _ = conn.transport.close(conn.socket)
+                Nil
+              }
+            }
+          })
+          |> result.replace_error(stop_normal)
+          |> result.map(fn(req) {
+            case req {
+              http.Http1Request(req) -> {
+                handle_http1(req, handler, conn, sender)
+              }
+              http.Upgrade(data) -> {
+                io.debug(#("data", frame.decode(data)))
+                let assert Ok(more) = conn.transport.receive(conn.socket, 0)
+                io.debug(#("more is", more))
+                io.debug(#(
+                  "with everything",
+                  frame.decode(<<data:bits, more:bits>>),
+                ))
+                let assert Ok(even_more) =
+                  conn.transport.receive(conn.socket, 0)
+                io.debug(#("even more is", even_more))
+                io.debug(#(
+                  "with even more",
+                  frame.decode(<<data:bits, more:bits, even_more:bits>>),
+                ))
+                todo
+              }
+            }
+          })
+        }
+        |> result.unwrap_both
       }
-      msg
-      |> http.parse_request(conn)
-      |> result.map_error(fn(err) {
-        case err {
-          DiscardPacket -> Nil
-          _ -> {
-            logger.error(err)
-            let _ = conn.transport.close(conn.socket)
-            Nil
-          }
-        }
-      })
-      |> result.replace_error(stop_normal)
-      |> result.then(fn(req) {
-        rescue(fn() { handler(req) })
-        |> result.map(fn(resp) { #(req, resp) })
-        |> result.map_error(log_and_error(_, conn.socket, conn.transport))
-      })
-      |> result.map(fn(req_resp) {
-        let #(_req, response) = req_resp
-        case response {
-          response.Response(body: Bytes(body), ..) as resp ->
-            handle_bytes_builder_body(resp, body, conn)
-            |> result.map(fn(_res) { close_or_set_timer(resp, conn, sender) })
-            |> result.replace_error(stop_normal)
-            |> result.unwrap_both
-          response.Response(body: Chunked(body), ..) as resp -> {
-            handle_chunked_body(resp, body, conn)
-            |> result.map(fn(_res) { close_or_set_timer(resp, conn, sender) })
-            |> result.replace_error(stop_normal)
-            |> result.unwrap_both
-          }
-          response.Response(body: File(..), ..) as resp ->
-            handle_file_body(resp, conn)
-            |> result.map(fn(_res) { close_or_set_timer(resp, conn, sender) })
-            |> result.replace_error(stop_normal)
-            |> result.unwrap_both
-          response.Response(body: Websocket(selector), ..) -> {
-            let _resp = process.select_forever(selector)
-            actor.Stop(process.Normal)
-          }
-        }
-      })
+      Http2 -> {
+        todo
+      }
     }
-    |> result.unwrap_both
   }
 }
 
@@ -133,6 +143,35 @@ fn log_and_error(
   }
 }
 
+fn handle_http1(
+  req: Request(Connection),
+  handler: Handler,
+  conn: Connection,
+  sender: Subject(handler.Message(user_message)),
+) -> actor.Next(Message(user_message), State) {
+  rescue(fn() { handler(req) })
+  |> result.map_error(log_and_error(_, conn.socket, conn.transport))
+  |> result.map(fn(resp) {
+    case resp {
+      response.Response(body: Websocket(selector), ..) -> {
+        let _resp = process.select_forever(selector)
+        actor.Stop(process.Normal)
+      }
+      response.Response(body: body, ..) as resp -> {
+        case body {
+          Bytes(body) -> handle_bytes_builder_body(resp, body, conn)
+          Chunked(body) -> handle_chunked_body(resp, body, conn)
+          File(..) -> handle_file_body(resp, body, conn)
+        }
+        |> result.map(fn(_res) { close_or_set_timer(resp, conn, sender) })
+        |> result.replace_error(stop_normal)
+        |> result.unwrap_both
+      }
+    }
+  })
+  |> result.unwrap_both
+}
+
 fn close_or_set_timer(
   resp: response.Response(ResponseData),
   conn: Connection,
@@ -148,7 +187,7 @@ fn close_or_set_timer(
     _ -> {
       // TODO:  this should be a configuration
       let timer = process.send_after(sender, 10_000, Internal(Close))
-      actor.continue(State(idle_timer: Some(timer)))
+      actor.continue(Http1(idle_timer: Some(timer)))
     }
   }
 }
@@ -199,9 +238,10 @@ fn handle_chunked_body(
 
 fn handle_file_body(
   resp: response.Response(ResponseData),
+  body: ResponseData,
   conn: Connection,
 ) -> Result(Nil, SocketReason) {
-  let assert File(file_descriptor, offset, length) = resp.body
+  let assert File(file_descriptor, offset, length) = body
   resp
   |> response.prepend_header("content-length", int.to_string(length - offset))
   |> response.set_body(bytes_builder.new())
