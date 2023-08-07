@@ -48,6 +48,7 @@ pub type DecodedPacket {
   BinaryData(HttpPacket, BitArray)
   EndOfHeaders(BitArray)
   MoreData(Option(Int))
+  Http2Upgrade(BitArray)
 }
 
 pub type DecodeError {
@@ -218,11 +219,18 @@ fn read_chunk(
   }
 }
 
+pub type ParsedRequest {
+  Http1Request(request.Request(Connection))
+  Upgrade(BitArray)
+}
+
+import gleam/io
+
 /// Turns the TCP message into an HTTP request
 pub fn parse_request(
   bs: BitArray,
   conn: Connection,
-) -> Result(request.Request(Connection), DecodeError) {
+) -> Result(ParsedRequest, DecodeError) {
   case decode_packet(HttpBin, bs, []) {
     Ok(BinaryData(HttpRequest(http_method, AbsPath(path), _version), rest)) -> {
       use method <- result.then(
@@ -259,7 +267,24 @@ pub fn parse_request(
         |> request.set_body(Connection(..conn, body: Initial(rest)))
         |> request.set_method(method)
         |> request.set_path(path)
-      Ok(request.Request(..req, query: query, headers: map.to_list(headers)))
+      Ok(Http1Request(
+        request.Request(..req, query: query, headers: map.to_list(headers)),
+      ))
+    }
+    // "\r\nSM\r\n\r\n"
+    Ok(Http2Upgrade(<<
+      13:int,
+      10:int,
+      83:int,
+      77:int,
+      13:int,
+      10:int,
+      13:int,
+      10:int,
+      data:bits,
+    >>)) -> {
+      io.debug(#("we got some data", data))
+      Ok(Upgrade(data))
     }
     _ -> Error(DiscardPacket)
   }
