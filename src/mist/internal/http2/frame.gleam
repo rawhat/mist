@@ -1,3 +1,4 @@
+import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
 import gleam/io
 import gleam/option.{type Option, None, Some}
@@ -100,8 +101,7 @@ pub type ConnectionError {
   Unsupported(Int)
 }
 
-pub fn decode(frame: BitArray) -> Result(Frame, ConnectionError) {
-  io.debug(#("decoding", frame))
+pub fn decode(frame: BitArray) -> Result(#(Frame, BitArray), ConnectionError) {
   case frame {
     <<length:int-size(24), 0:int-size(8), rest:bits>> ->
       parse_data(length, rest)
@@ -126,49 +126,40 @@ pub fn decode(frame: BitArray) -> Result(Frame, ConnectionError) {
   }
 }
 
-fn parse_data(length: Int, rest: BitArray) -> Result(Frame, ConnectionError) {
-  io.println("parsing data")
+fn parse_data(
+  length: Int,
+  rest: BitArray,
+) -> Result(#(Frame, BitArray), ConnectionError) {
   case rest {
     <<
       _unused:int-size(4),
-      0:int-size(1),
+      padding:int-size(1),
       _unused:int-size(2),
       end_stream:int-size(1),
       _reserved:int-size(1),
       identifier:int-size(31),
-      data:bytes-size(length),
+      pad_length:int-size(padding)-unit(8),
+      data:binary-size(length),
+      _padding:binary-size(pad_length)-unit(8),
+      rest:bit_string,
     >> if identifier != 0 -> {
-      Ok(Data(
-        data: data,
-        end_stream: end_stream
-        == 1,
-        identifier: stream_identifier(identifier),
-      ))
-    }
-    <<
-      _unused:int-size(4),
-      1:int-size(1),
-      _unused:int-size(2),
-      end_stream:int-size(1),
-      _reserved:int-size(1),
-      identifier:int-size(31),
-      pad_length:int-size(8),
-      data:bytes-size(length),
-      _padding:bytes-size(pad_length),
-    >> if identifier != 0 && pad_length < length -> {
-      Ok(Data(
-        data: data,
-        end_stream: end_stream
-        == 1,
-        identifier: stream_identifier(identifier),
+      Ok(#(
+        Data(
+          data: data,
+          end_stream: end_stream == 1,
+          identifier: stream_identifier(identifier),
+        ),
+        rest,
       ))
     }
     _ -> Error(ProtocolError)
   }
 }
 
-fn parse_header(length: Int, rest: BitArray) -> Result(Frame, ConnectionError) {
-  io.println("parsing header")
+fn parse_header(
+  length: Int,
+  rest: BitArray,
+) -> Result(#(Frame, BitArray), ConnectionError) {
   case rest {
     <<
       _unused:int-size(2),
@@ -184,37 +175,39 @@ fn parse_header(length: Int, rest: BitArray) -> Result(Frame, ConnectionError) {
       exclusive:int-size(priority),
       stream_dependency:int-size(priority)-unit(31),
       weight:int-size(priority)-unit(8),
-      data:bytes-size(length),
-      _padding:bytes-size(pad_length),
+      data:binary-size(length),
+      _padding:binary-size(pad_length),
+      rest:bit_string,
     >> if identifier != 0 && pad_length < length -> {
-      Ok(
+      Ok(#(
         Header(
           data: case end_headers {
             1 -> Complete(data)
             0 -> Continued(data)
           },
-          end_stream: end_stream
-          == 1,
+          end_stream: end_stream == 1,
           identifier: stream_identifier(identifier),
           priority: case priority == 1 {
             True ->
               Some(HeaderPriority(
-                exclusive: exclusive
-                == 1,
+                exclusive: exclusive == 1,
                 stream_dependency: stream_identifier(stream_dependency),
                 weight: weight,
               ))
             False -> None
           },
         ),
-      )
+        rest,
+      ))
     }
     _ -> Error(ProtocolError)
   }
 }
 
-fn parse_priority(length: Int, rest: BitArray) -> Result(Frame, ConnectionError) {
-  io.println("parsing priority")
+fn parse_priority(
+  length: Int,
+  rest: BitArray,
+) -> Result(#(Frame, BitArray), ConnectionError) {
   case length, rest {
     5, <<
       _unused:int-size(8),
@@ -223,13 +216,16 @@ fn parse_priority(length: Int, rest: BitArray) -> Result(Frame, ConnectionError)
       exclusive:int-size(1),
       dependency:int-size(31),
       weight:int-size(8),
+      rest:bit_string,
     >> if identifier != 0 -> {
-      Ok(Priority(
-        exclusive: exclusive
-        == 1,
-        identifier: stream_identifier(identifier),
-        stream_dependency: stream_identifier(dependency),
-        weight: weight,
+      Ok(#(
+        Priority(
+          exclusive: exclusive == 1,
+          identifier: stream_identifier(identifier),
+          stream_dependency: stream_identifier(dependency),
+          weight: weight,
+        ),
+        rest,
       ))
     }
     5, _ -> Error(ProtocolError)
@@ -240,18 +236,21 @@ fn parse_priority(length: Int, rest: BitArray) -> Result(Frame, ConnectionError)
 fn parse_termination(
   length: Int,
   rest: BitArray,
-) -> Result(Frame, ConnectionError) {
-  io.println("parsing rst")
+) -> Result(#(Frame, BitArray), ConnectionError) {
   case length, rest {
     4, <<
       _unused:int-size(8),
       _reserved:int-size(1),
       identifier:int-size(31),
       error:int-size(32),
+      rest:bit_string,
     >> if identifier != 0 -> {
-      Ok(Termination(
-        error: get_error(error),
-        identifier: stream_identifier(identifier),
+      Ok(#(
+        Termination(
+          error: get_error(error),
+          identifier: stream_identifier(identifier),
+        ),
+        rest,
       ))
     }
     4, _ -> Error(ProtocolError)
@@ -259,36 +258,21 @@ fn parse_termination(
   }
 }
 
-fn parse_settings(length: Int, rest: BitArray) -> Result(Frame, ConnectionError) {
-  let assert <<
-    _unused:int-size(7),
-    ack:int-size(1),
-    _reserved:int-size(1),
-    identifier:int-size(31),
-    rest:bits,
-  >> = rest
-  io.debug(#(
-    "ack?",
-    ack,
-    "identifier?",
-    identifier,
-    "rest",
-    rest,
-    "length",
-    length,
-  ))
+fn parse_settings(
+  length: Int,
+  rest: BitArray,
+) -> Result(#(Frame, BitArray), ConnectionError) {
   case length % 6, rest {
     0, <<
       _unused:int-size(7),
       ack:int-size(1),
       _reserved:int-size(1),
-      0:int-size(31),
-      settings:bytes-size(length),
-      _rest:bits,
-    >> -> {
-      io.println("hi mom")
+      identifier:int-size(31),
+      settings:binary-size(length),
+      rest:bit_string,
+    >> if identifier == 0 -> {
       use settings <- result.try(get_settings(settings, []))
-      Ok(Settings(ack: ack == 1, settings: settings))
+      Ok(#(Settings(ack: ack == 1, settings: settings), rest))
     }
 
     0, _ -> Error(ProtocolError)
@@ -299,8 +283,7 @@ fn parse_settings(length: Int, rest: BitArray) -> Result(Frame, ConnectionError)
 fn parse_push_promise(
   length: Int,
   rest: BitArray,
-) -> Result(Frame, ConnectionError) {
-  io.println("parsing push promise")
+) -> Result(#(Frame, BitArray), ConnectionError) {
   case rest {
     <<
       _unused:int-size(4),
@@ -312,55 +295,68 @@ fn parse_push_promise(
       pad_length:int-size(padded)-unit(8),
       _reserved:int-size(1),
       promised_identifier:int-size(31),
-      data:bytes-size(length),
-      _padding:bytes-size(pad_length),
+      data:binary-size(length),
+      _padding:binary-size(pad_length),
+      rest:bit_string,
     >> if identifier != 0 -> {
-      Ok(PushPromise(
-        data: case end_headers == 1 {
-          True -> Complete(data)
-          False -> Continued(data)
-        },
-        identifier: stream_identifier(identifier),
-        promised_stream_id: stream_identifier(promised_identifier),
+      Ok(#(
+        PushPromise(
+          data: case end_headers == 1 {
+            True -> Complete(data)
+            False -> Continued(data)
+          },
+          identifier: stream_identifier(identifier),
+          promised_stream_id: stream_identifier(promised_identifier),
+        ),
+        rest,
       ))
     }
     _ -> Error(ProtocolError)
   }
 }
 
-fn parse_ping(length: Int, rest: BitArray) -> Result(Frame, ConnectionError) {
-  io.println("parsing ping")
+fn parse_ping(
+  length: Int,
+  rest: BitArray,
+) -> Result(#(Frame, BitArray), ConnectionError) {
   case length, rest {
     8, <<
       _unused:int-size(7),
       ack:int-size(1),
       _reserved:int-size(1),
-      0:int-size(31),
-      data:bits-size(64),
-    >> -> {
-      Ok(Ping(ack: ack == 1, data: data))
+      identifier:int-size(31),
+      data:bit_string-size(64),
+      rest:bit_string,
+    >> if identifier == 0 -> {
+      Ok(#(Ping(ack: ack == 1, data: data), rest))
     }
     8, _ -> Error(ProtocolError)
     _, _ -> Error(FrameSizeError)
   }
 }
 
-fn parse_go_away(length: Int, rest: BitArray) -> Result(Frame, ConnectionError) {
-  io.println("parsing go away")
+fn parse_go_away(
+  length: Int,
+  rest: BitArray,
+) -> Result(#(Frame, BitArray), ConnectionError) {
   case rest {
     <<
       _unused:int-size(8),
       _reserved:int-size(1),
-      0:int-size(31),
+      identifier:int-size(31),
       _reserved:int-size(1),
       last_stream_id:int-size(31),
       error:int-size(32),
-      data:bytes-size(length),
-    >> -> {
-      Ok(GoAway(
-        data: data,
-        error: get_error(error),
-        last_stream_id: stream_identifier(last_stream_id),
+      data:binary-size(length),
+      rest:bit_string,
+    >> if identifier == 0 -> {
+      Ok(#(
+        GoAway(
+          data: data,
+          error: get_error(error),
+          last_stream_id: stream_identifier(last_stream_id),
+        ),
+        rest,
       ))
     }
     _ -> Error(ProtocolError)
@@ -370,8 +366,7 @@ fn parse_go_away(length: Int, rest: BitArray) -> Result(Frame, ConnectionError) 
 fn parse_window_update(
   length: Int,
   rest: BitArray,
-) -> Result(Frame, ConnectionError) {
-  io.println("parsing window update")
+) -> Result(#(Frame, BitArray), ConnectionError) {
   case length, rest {
     4, <<
       _unused:int-size(8),
@@ -379,10 +374,14 @@ fn parse_window_update(
       identifier:int-size(31),
       _reserved:int-size(1),
       window_size:int-size(31),
+      rest:bit_string,
     >> if window_size != 0 -> {
-      Ok(WindowUpdate(
-        amount: window_size,
-        identifier: stream_identifier(identifier),
+      Ok(#(
+        WindowUpdate(
+          amount: window_size,
+          identifier: stream_identifier(identifier),
+        ),
+        rest,
       ))
     }
     4, _ -> Error(FrameSizeError)
@@ -393,8 +392,7 @@ fn parse_window_update(
 fn parse_continuation(
   length: Int,
   rest: BitArray,
-) -> Result(Frame, ConnectionError) {
-  io.println("parsing continuation")
+) -> Result(#(Frame, BitArray), ConnectionError) {
   case rest {
     <<
       _unused:int-size(5),
@@ -402,20 +400,24 @@ fn parse_continuation(
       _unused:int-size(2),
       _reserved:int-size(1),
       identifier:int-size(31),
-      data:bytes-size(length),
+      data:binary-size(length),
+      rest:bit_string,
     >> if identifier != 0 -> {
-      Ok(Continuation(
-        data: case end_headers == 1 {
-          True -> Complete(data)
-          False -> Continued(data)
-        },
-        identifier: stream_identifier(identifier),
+      Ok(#(
+        Continuation(
+          data: case end_headers == 1 {
+            True -> Complete(data)
+            False -> Continued(data)
+          },
+          identifier: stream_identifier(identifier),
+        ),
+        rest,
       ))
     }
   }
 }
 
-pub fn encode(frame: Frame) -> BitArray {
+pub fn encode(frame: Frame) -> BitBuilder {
   todo
 }
 
