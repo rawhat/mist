@@ -5,20 +5,20 @@ import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
 import gleam/http/request.{type Request}
 import gleam/http/response
 import gleam/int
-import gleam/iterator.{type Iterator}
-import gleam/option.{type Option, None, Some}
+import gleam/iterator.{Iterator}
+import gleam/list
+import gleam/option.{None, Option, Some}
 import gleam/otp/actor
 import gleam/result
-import glisten/handler.{Close, Internal}
-import glisten/socket.{type Socket, type SocketReason, Badarg}
-import glisten/socket/transport.{type Transport}
-import glisten.{type Loop, type Message, Packet}
+import glisten/handler.{Close, HandlerMessage, LoopFn, LoopState}
+import glisten/socket.{Socket}
+import glisten/socket/transport.{Transport}
+import mist/internal/buffer.{Buffer}
 import mist/internal/encoder
 import mist/internal/file
-import mist/internal/http.{
-  type Connection, type DecodeError, Connection, DiscardPacket, Initial,
-}
-import mist/internal/http2/frame
+import mist/internal/http.{Connection, DecodeError, DiscardPacket}
+import mist/internal/http2/frame.{Settings}
+import mist/internal/http2
 import mist/internal/logger
 
 pub type ResponseData {
@@ -38,9 +38,20 @@ pub type HandlerError {
 
 const stop_normal = actor.Stop(process.Normal)
 
+pub type Http2Settings {
+  Http2Settings(
+    header_table_size: Int,
+    server_push: frame.PushState,
+    max_concurrent_streams: Int,
+    initial_window_size: Int,
+    max_frame_size: Int,
+    max_header_list_size: Option(Int),
+  )
+}
+
 pub type State {
   Http1(idle_timer: Option(process.Timer))
-  Http2
+  Http2(frame_buffer: Buffer, settings: Http2Settings)
 }
 
 // Http(idle_timer: Option(process.Timer))
@@ -93,28 +104,101 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
                 handle_http1(req, handler, conn, sender)
               }
               http.Upgrade(data) -> {
-                io.debug(#("data", frame.decode(data)))
-                let assert Ok(more) = conn.transport.receive(conn.socket, 0)
-                io.debug(#("more is", more))
-                io.debug(#(
-                  "with everything",
-                  frame.decode(<<data:bits, more:bits>>),
-                ))
-                let assert Ok(even_more) =
-                  conn.transport.receive(conn.socket, 0)
-                io.debug(#("even more is", even_more))
-                io.debug(#(
-                  "with even more",
-                  frame.decode(<<data:bits, more:bits, even_more:bits>>),
-                ))
-                todo
+                let initial_settings =
+                  Http2Settings(
+                    header_table_size: 4096,
+                    server_push: frame.Enabled,
+                    max_concurrent_streams: 100,
+                    initial_window_size: 65_535,
+                    max_frame_size: 16_384,
+                    max_header_list_size: None,
+                  )
+                let settings_frame =
+                  frame.Settings(ack: False, settings: [
+                    frame.HeaderTableSize(initial_settings.header_table_size),
+                    frame.ServerPush(initial_settings.server_push),
+                    frame.MaxConcurrentStreams(
+                      initial_settings.max_concurrent_streams,
+                    ),
+                    frame.InitialWindowSize(initial_settings.initial_window_size,
+                    ),
+                    frame.MaxFrameSize(initial_settings.max_frame_size),
+                  ])
+                let assert Ok(_nil) =
+                  settings_frame
+                  |> frame.encode
+                  |> transport.send(socket, _)
+
+                frame.decode(data)
+                |> result.map_error(fn(_err) {
+                  actor.Stop(process.Abnormal("Missing first frame"))
+                })
+                |> result.then(fn(pair) {
+                  let assert #(frame, rest) = pair
+                  case frame {
+                    Settings(settings: settings, ..) -> {
+                      let http2_settings =
+                        initial_settings
+                        |> list.fold(
+                          settings,
+                          _,
+                          fn(settings, setting) {
+                            case setting {
+                              frame.HeaderTableSize(size) ->
+                                Http2Settings(
+                                  ..settings,
+                                  header_table_size: size,
+                                )
+                              frame.ServerPush(push) ->
+                                Http2Settings(..settings, server_push: push)
+                              frame.MaxConcurrentStreams(max) ->
+                                Http2Settings(
+                                  ..settings,
+                                  max_concurrent_streams: max,
+                                )
+                              frame.InitialWindowSize(size) ->
+                                Http2Settings(
+                                  ..settings,
+                                  initial_window_size: size,
+                                )
+                              frame.MaxFrameSize(size) ->
+                                Http2Settings(..settings, max_frame_size: size)
+                              frame.MaxHeaderListSize(size) ->
+                                Http2Settings(
+                                  ..settings,
+                                  max_header_list_size: Some(size),
+                                )
+                            }
+                          },
+                        )
+                      Ok(actor.Continue(
+                        LoopState(
+                          ..socket_state,
+                          data: Http2(
+                            frame_buffer: buffer.new(rest),
+                            settings: http2_settings,
+                          ),
+                        ),
+                      ))
+                    }
+                    _ -> {
+                      let assert Ok(_) = transport.close(socket)
+                      Error(
+                        actor.Stop(process.Abnormal(
+                          "SETTINGS frame must be sent first",
+                        )),
+                      )
+                    }
+                  }
+                })
+                |> result.unwrap_both
               }
             }
           })
         }
         |> result.unwrap_both
       }
-      Http2 -> {
+      Http2(..) -> {
         todo
       }
     }
