@@ -301,7 +301,7 @@ pub fn new(handler: fn(Request(in)) -> Response(out)) -> Builder(in, out) {
     port: 4000,
     handler: handler,
     after_start: fn(port) {
-      let message = "Listening on localhost:" <> int.to_string(port)
+      let message = "Listening on http://localhost:" <> int.to_string(port)
       io.println(message)
     },
   )
