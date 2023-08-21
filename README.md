@@ -30,7 +30,6 @@ import gleam/iterator
 import gleam/otp/actor
 import gleam/result
 import gleam/string
-import mist/file
 import mist.{Connection, ResponseData}
 
 pub fn main() {
