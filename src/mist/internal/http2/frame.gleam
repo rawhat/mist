@@ -58,11 +58,7 @@ pub type Frame {
 
   Termination(error: ConnectionError, identifier: StreamIdentifier(Frame))
 
-  Settings(
-    ack: Bool,
-    // These are explicitly not sorted to match the order in the RFC
-    settings: List(Setting),
-  )
+  Settings(ack: Bool, settings: List(Setting))
 
   PushPromise(
     data: Data,
@@ -417,8 +413,130 @@ fn parse_continuation(
   }
 }
 
-pub fn encode(frame: Frame) -> BitBuilder {
-  todo
+pub fn encode(frame: Frame) -> BitString {
+  case frame {
+    Data(data, end_stream, StreamIdentifier(identifier)) -> {
+      let length = bit_string.byte_size(data)
+      let end = from_bool(end_stream)
+      <<
+        length:int-size(24),
+        0:int-size(8),
+        0:int-size(4),
+        0:int-size(1),
+        0:int-size(2),
+        end:int-size(1),
+        0:int-size(1),
+        identifier:int-size(31),
+        data:bit_string,
+      >>
+    }
+    Header(data, end_stream, StreamIdentifier(identifier), priority) -> {
+      let #(end_header, data) = encode_data(data)
+      let length = bit_string.byte_size(data)
+      let end = from_bool(end_stream)
+      let priority_flags = encode_priority(priority)
+      let has_priority = from_bool(option.is_some(priority))
+      <<
+        length:int-size(24),
+        1:int-size(8),
+        0:int-size(2),
+        has_priority:int-size(1),
+        0:int-size(1),
+        0:int-size(1),
+        end_header:int-size(1),
+        0:int-size(1),
+        end:int-size(1),
+        0:int-size(1),
+        identifier:int-size(31),
+        priority_flags:bit_string,
+        data:bit_string,
+      >>
+    }
+    Priority(
+      exclusive,
+      StreamIdentifier(identifier),
+      StreamIdentifier(dependency),
+      weight,
+    ) -> {
+      let exclusive = from_bool(exclusive)
+      <<
+        5:int-size(24),
+        2:int-size(2),
+        0:int-size(8),
+        0:int-size(1),
+        identifier:int-size(31),
+        exclusive:int-size(1),
+        dependency:int-size(31),
+        weight:int-size(8),
+      >>
+    }
+    Termination(error, StreamIdentifier(identifier)) -> {
+      let error_code = encode_error(error)
+      <<
+        4:int-size(24),
+        3:int-size(8),
+        0:int-size(8),
+        0:int-size(1),
+        identifier:int-size(31),
+        error_code:int-size(32),
+      >>
+    }
+    Settings(ack, settings) -> {
+      let ack = from_bool(ack)
+      let settings = encode_settings(settings)
+      let length = bit_string.byte_size(settings)
+      <<
+        length:int-size(24),
+        4:int-size(8),
+        0:int-size(7),
+        ack:int-size(1),
+        0:int-size(1),
+        0:int-size(31),
+        settings:bit_string,
+      >>
+    }
+    PushPromise(
+      data,
+      StreamIdentifier(identifier),
+      StreamIdentifier(promised_identifier),
+    ) -> {
+      let #(end_headers, data) = encode_data(data)
+      <<
+        0:int-size(24),
+        5:int-size(8),
+        0:int-size(4),
+        0:int-size(0),
+        end_headers:int-size(1),
+        0:int-size(2),
+        0:int-size(1),
+        identifier:int-size(31),
+        0:int-size(1),
+        promised_identifier:int-size(31),
+        data:bit_string,
+      >>
+    }
+    Ping(ack, data) -> {
+      let ack = from_bool(ack)
+      <<
+        0:int-size(24),
+        6:int-size(8),
+        0:int-size(7),
+        ack:int-size(1),
+        0:int-size(1),
+        0:int-size(31),
+        data:bit_string,
+      >>
+    }
+    GoAway(..) -> {
+      todo
+    }
+    WindowUpdate(..) -> {
+      todo
+    }
+    Continuation(..) -> {
+      todo
+    }
+  }
 }
 
 fn get_error(value: Int) -> ConnectionError {
@@ -480,4 +598,53 @@ fn get_setting(identifier: Int, value: Int) -> Result(Setting, ConnectionError) 
     }
     6 -> Ok(MaxHeaderListSize(value))
   }
+}
+
+fn from_bool(bool: Bool) -> Int {
+  case bool {
+    True -> 1
+    False -> 0
+  }
+}
+
+fn encode_priority(priority: Option(HeaderPriority)) -> BitString {
+  case priority {
+    Some(HeaderPriority(exclusive, StreamIdentifier(dependency), weight)) -> {
+      let exclusive = from_bool(exclusive)
+      <<exclusive:int-size(1), dependency:int-size(31), weight:int-size(8)>>
+    }
+    None -> <<>>
+  }
+}
+
+fn encode_data(data: Data) -> #(Int, BitString) {
+  case data {
+    Complete(data) -> #(1, data)
+    Continued(data) -> #(0, data)
+  }
+}
+
+fn encode_error(error: ConnectionError) -> Int {
+  case error {
+    NoError -> 0
+    ProtocolError -> 1
+    InternalError -> 2
+    FlowControlError -> 3
+    SettingsTimeout -> 4
+    StreamClosed -> 5
+    FrameSizeError -> 6
+    RefusedStream -> 7
+    Cancel -> 8
+    CompressionError -> 9
+    ConnectError -> 10
+    EnhanceYourCalm -> 11
+    InadequateSecurity -> 12
+    Http11Required -> 13
+    // TODO
+    Unsupported(..) -> 69
+  }
+}
+
+fn encode_settings(settings: List(Setting)) -> BitString {
+  todo
 }
