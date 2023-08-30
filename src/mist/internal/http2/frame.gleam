@@ -1,7 +1,6 @@
-import gleam/bit_builder.{BitBuilder}
 import gleam/bit_string
-import gleam/io
-import gleam/option.{type Option, None, Some}
+import gleam/list
+import gleam/option.{None, Option, Some}
 import gleam/result
 
 pub opaque type StreamIdentifier(phantom) {
@@ -527,14 +526,37 @@ pub fn encode(frame: Frame) -> BitString {
         data:bit_string,
       >>
     }
-    GoAway(..) -> {
-      todo
+    GoAway(data, error, StreamIdentifier(last_stream_id)) -> {
+      let error = encode_error(error)
+      <<
+        0:int-size(8),
+        0:int-size(1),
+        0:int-size(31),
+        0:int-size(1),
+        last_stream_id:int-size(31),
+        error:int-size(32),
+        data:bit_string,
+      >>
     }
-    WindowUpdate(..) -> {
-      todo
+    WindowUpdate(amount, StreamIdentifier(identifier)) -> {
+      <<
+        0:int-size(8),
+        0:int-size(1),
+        identifier:int-size(31),
+        0:int-size(1),
+        amount:int-size(31),
+      >>
     }
-    Continuation(..) -> {
-      todo
+    Continuation(data, StreamIdentifier(identifier)) -> {
+      let #(end_headers, data) = encode_data(data)
+      <<
+        0:int-size(5),
+        end_headers:int-size(1),
+        0:int-size(2),
+        0:int-size(1),
+        identifier:int-size(31),
+        data:bit_string,
+      >>
     }
   }
 }
@@ -646,5 +668,26 @@ fn encode_error(error: ConnectionError) -> Int {
 }
 
 fn encode_settings(settings: List(Setting)) -> BitString {
-  todo
+  list.fold(
+    settings,
+    <<>>,
+    fn(acc, setting) {
+      case setting {
+        HeaderTableSize(value) ->
+          bit_string.append(acc, <<1:int-size(16), value:int-size(32)>>)
+        ServerPush(Enabled) ->
+          bit_string.append(acc, <<2:int-size(16), 1:int-size(32)>>)
+        ServerPush(Disabled) ->
+          bit_string.append(acc, <<2:int-size(16), 0:int-size(32)>>)
+        MaxConcurrentStreams(value) ->
+          bit_string.append(acc, <<3:int-size(16), value:int-size(32)>>)
+        InitialWindowSize(value) ->
+          bit_string.append(acc, <<4:int-size(16), value:int-size(32)>>)
+        MaxFrameSize(value) ->
+          bit_string.append(acc, <<5:int-size(16), value:int-size(32)>>)
+        MaxHeaderListSize(value) ->
+          bit_string.append(acc, <<6:int-size(16), value:int-size(32)>>)
+      }
+    },
+  )
 }

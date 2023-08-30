@@ -127,6 +127,7 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
                 let assert Ok(_nil) =
                   settings_frame
                   |> frame.encode
+                  |> bit_builder.from_bit_string
                   |> transport.send(socket, _)
 
                 frame.decode(data)
