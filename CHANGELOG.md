@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.13.2
+
+- Upgrade `glisten` and `gleam_otp` versions
+
 ## v0.13.1
 
 - Improve file sending ergonomics
