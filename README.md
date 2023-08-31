@@ -25,8 +25,9 @@ import gleam/bit_builder
 import gleam/erlang/process
 import gleam/http/request.{Request}
 import gleam/http/response.{Response}
+import gleam/io
 import gleam/iterator
-import gleam/option.{None}
+import gleam/option.{None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
@@ -41,25 +42,27 @@ pub fn main() {
     response.new(404)
     |> response.set_body(mist.Bytes(bit_builder.new()))
 
-  fn(req: Request(Connection)) -> Response(ResponseData) {
-    case request.path_segments(req) {
-      ["ws"] ->
-        mist.websocket(req)
-        |> mist.with_state(state)
-        |> mist.selecting(selector)
-        |> mist.on_message(handle_ws_message)
-        |> mist.upgrade
-      ["echo"] -> echo_body(req)
-      ["chunk"] -> serve_chunk(req)
-      ["file", ..rest] -> serve_file(req, rest)
-      ["form"] -> handle_form(req)
+  let assert Ok(_) =
+    fn(req: Request(Connection)) -> Response(ResponseData) {
+      case request.path_segments(req) {
+        ["ws"] ->
+          mist.websocket(
+            request: req,
+            on_init: fn() { #(state, Some(selector)) },
+            on_close: fn() { io.println("goodbye!") },
+            handler: handle_ws_message,
+          )
+        ["echo"] -> echo_body(req)
+        ["chunk"] -> serve_chunk(req)
+        ["file", ..rest] -> serve_file(req, rest)
+        ["form"] -> handle_form(req)
 
-      _ -> not_found
+        _ -> not_found
+      }
     }
-  }
-  |> mist.new
-  |> mist.port(8080)
-  |> mist.start_http
+    |> mist.new
+    |> mist.port(3000)
+    |> mist.start_http
 
   process.sleep_forever()
 }
