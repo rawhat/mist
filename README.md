@@ -22,11 +22,11 @@ in the examples below).
 
 ```gleam
 import gleam/bit_builder
-import gleam/bit_string
 import gleam/erlang/process
 import gleam/http/request.{Request}
 import gleam/http/response.{Response}
 import gleam/iterator
+import gleam/option.{None}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
@@ -72,14 +72,14 @@ fn handle_ws_message(state, conn, message) {
   case message {
     mist.Text(<<"ping":utf8>>) -> {
       let assert Ok(_) = mist.send_text_frame(conn, <<"pong":utf8>>)
-      actor.Continue(state)
+      actor.continue(state)
     }
     mist.Text(_) | mist.Binary(_) -> {
-      actor.Continue(state)
+      actor.continue(state)
     }
     mist.Custom(Broadcast(text)) -> {
       let assert Ok(_) = mist.send_text_frame(conn, <<text:utf8>>)
-      actor.Continue(state)
+      actor.continue(state)
     }
     mist.Closed | mist.Shutdown -> actor.Stop(process.Normal)
   }
@@ -140,7 +140,7 @@ fn handle_form(req: Request(Connection)) -> Response(ResponseData) {
   |> response.set_body(mist.Bytes(bit_builder.new()))
 }
 
-fn guess_content_type(_path: BitString) -> String {
+fn guess_content_type(_path: String) -> String {
   "application/octet-stream"
 }
 ```
