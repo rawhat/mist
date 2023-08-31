@@ -166,8 +166,8 @@ pub type Handler(state, message) =
     actor.Next(message, state)
 
 pub fn initialize_connection(
-  initial_state: state,
-  user_selector: Option(Selector(user_message)),
+  on_init: fn() -> #(state, Option(Selector(user_message))),
+  on_close: fn() -> Nil,
   handler: Handler(state, user_message),
   socket: Socket,
   transport: Transport,
@@ -177,6 +177,7 @@ pub fn initialize_connection(
   // `selecting_forever`
   actor.start_spec(actor.Spec(
     init: fn() {
+      let #(initial_state, user_selector) = on_init()
       // TODO: this is pulled straight from glisten, prob should share it
       let selector =
         process.new_selector()
@@ -234,6 +235,7 @@ pub fn initialize_connection(
               connection.socket,
               frame_to_bit_builder(frame),
             )
+          on_close()
           actor.Stop(process.Normal)
         }
         Valid(Internal(Control(PingFrame(length, payload)))) -> {
@@ -242,9 +244,10 @@ pub fn initialize_connection(
             frame_to_bit_builder(Control(PongFrame(length, payload))),
           )
           |> result.map(fn(_nil) { actor.continue(state) })
-          |> result.unwrap(actor.Stop(process.Abnormal(
-            "Failed to send pong frame",
-          )))
+          |> result.lazy_unwrap(fn() {
+            on_close()
+            actor.Stop(process.Abnormal("Failed to send pong frame"))
+          })
         }
         Invalid -> {
           logger.error(#("Received a malformed Websocket frame"))
@@ -262,12 +265,14 @@ pub fn initialize_connection(
                 |> actor.Continue(state, _)
               }
               actor.Stop(reason) -> {
+                on_close()
                 actor.Stop(reason)
               }
             }
           })
           |> result.lazy_unwrap(fn() {
             logger.error("Caught error in websocket handler")
+            on_close()
             actor.Stop(process.Abnormal("Websocket terminated"))
           })
         }

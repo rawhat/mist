@@ -7,7 +7,7 @@ import gleam/http/response.{Response}
 import gleam/int
 import gleam/io
 import gleam/iterator.{Iterator}
-import gleam/option.{None, Option, Some}
+import gleam/option.{Option}
 import gleam/otp/actor
 import gleam/result
 import glisten
@@ -408,58 +408,54 @@ fn internal_to_public_ws_message(
   }
 }
 
-pub opaque type WebsocketBuilder(state, message) {
-  WebsocketBuilder(
-    request: Request(Connection),
-    state: state,
-    handler: fn(state, WebsocketConnection, ValidMessage(message)) ->
-      actor.Next(message, state),
-    selector: Option(process.Selector(message)),
-  )
-}
-
-/// Initializes a builder for upgrading a connection to Websockets. The
-/// default handler will shut down the process on receipt of a message.
-/// The default state is empty, and no external messages can be received.
-pub fn websocket(request: Request(Connection)) -> WebsocketBuilder(Nil, any) {
-  WebsocketBuilder(
-    request: request,
-    state: Nil,
-    handler: fn(_, _, _) { actor.Stop(process.Normal) },
-    selector: None,
-  )
-}
-
-/// Provide an external selector for user-specified messages that the websocket
-/// process may receive. These will be provided in the `Custom` type.
-pub fn selecting(
-  builder: WebsocketBuilder(state, message),
-  selector: process.Selector(message),
-) -> WebsocketBuilder(state, message) {
-  WebsocketBuilder(..builder, selector: Some(selector))
-}
-
-/// Adds some initial state to the websocket handler.
-pub fn with_state(
-  builder: WebsocketBuilder(state, message),
-  state: state,
-) -> WebsocketBuilder(state, message) {
-  WebsocketBuilder(..builder, state: state)
-}
-
-/// Provides a function to call for each `WebsocketMessage` received by the
-/// process.
-pub fn on_message(
-  builder: WebsocketBuilder(state, message),
-  handler: fn(state, WebsocketConnection, WebsocketMessage(message)) ->
+/// Upgrade a request to handle websockets. If the request is
+/// malformed, or the websocket process fails to initialize, an empty
+/// 400 response will be sent to the client.
+///
+/// The `on_init` method will be called when the actual WebSocket process
+/// is started, and the return value is the initial state and an optional
+/// selector for receiving user messages.
+///
+/// The `on_close` method is called when the WebSocket process shuts down
+/// for any reason, valid or otherwise.
+pub fn websocket(
+  request request: Request(Connection),
+  handler handler: fn(state, WebsocketConnection, WebsocketMessage(message)) ->
     actor.Next(message, state),
-) -> WebsocketBuilder(state, message) {
+  on_init on_init: fn() -> #(state, Option(process.Selector(message))),
+  on_close on_close: fn() -> Nil,
+) -> Response(ResponseData) {
   let handler = fn(state, connection, message) {
     message
     |> internal_to_public_ws_message
     |> handler(state, connection, _)
   }
-  WebsocketBuilder(builder.request, builder.state, handler, builder.selector)
+  let socket = request.body.socket
+  let transport = request.body.transport
+  request
+  |> http.upgrade(socket, transport, _)
+  |> result.then(fn(_nil) {
+    websocket.initialize_connection(
+      on_init,
+      on_close,
+      handler,
+      socket,
+      transport,
+    )
+  })
+  |> result.map(fn(subj) {
+    let ws_process = process.subject_owner(subj)
+    let monitor = process.monitor_process(ws_process)
+    let selector =
+      process.new_selector()
+      |> process.selecting_process_down(monitor, function.identity)
+    response.new(200)
+    |> response.set_body(Websocket(selector))
+  })
+  |> result.lazy_unwrap(fn() {
+    response.new(400)
+    |> response.set_body(Bytes(bit_builder.new()))
+  })
 }
 
 /// Sends a binary frame across the websocket.
@@ -480,38 +476,4 @@ pub fn send_text_frame(
   frame
   |> websocket.to_text_frame
   |> connection.transport.send(connection.socket, _)
-}
-
-/// Upgrade a request to handle websockets. If the request is
-/// malformed, or the websocket process fails to initialize, an empty
-/// 400 response will be sent to the client.
-pub fn upgrade(
-  builder: WebsocketBuilder(state, message),
-) -> Response(ResponseData) {
-  let socket = builder.request.body.socket
-  let transport = builder.request.body.transport
-  builder.request
-  |> http.upgrade(socket, transport, _)
-  |> result.then(fn(_nil) {
-    websocket.initialize_connection(
-      builder.state,
-      builder.selector,
-      builder.handler,
-      socket,
-      transport,
-    )
-  })
-  |> result.map(fn(subj) {
-    let ws_process = process.subject_owner(subj)
-    let monitor = process.monitor_process(ws_process)
-    let selector =
-      process.new_selector()
-      |> process.selecting_process_down(monitor, function.identity)
-    response.new(200)
-    |> response.set_body(Websocket(selector))
-  })
-  |> result.lazy_unwrap(fn() {
-    response.new(400)
-    |> response.set_body(Bytes(bit_builder.new()))
-  })
 }

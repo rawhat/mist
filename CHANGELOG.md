@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Remove WebSocket builder in favor of plain function
+- Adds `on_init` and `on_close` to WebSocket upgrade function
+
 ## v0.13.2
 
 - Upgrade `glisten` and `gleam_otp` versions
