@@ -413,7 +413,7 @@ pub opaque type WebsocketBuilder(state, message) {
     request: Request(Connection),
     state: state,
     handler: fn(state, WebsocketConnection, ValidMessage(message)) ->
-      actor.Next(state),
+      actor.Next(message, state),
     selector: Option(process.Selector(message)),
   )
 }
@@ -452,7 +452,7 @@ pub fn with_state(
 pub fn on_message(
   builder: WebsocketBuilder(state, message),
   handler: fn(state, WebsocketConnection, WebsocketMessage(message)) ->
-    actor.Next(state),
+    actor.Next(message, state),
 ) -> WebsocketBuilder(state, message) {
   let handler = fn(state, connection, message) {
     message

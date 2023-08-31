@@ -162,7 +162,8 @@ pub type WebsocketConnection {
 }
 
 pub type Handler(state, message) =
-  fn(state, WebsocketConnection, ValidMessage(message)) -> actor.Next(state)
+  fn(state, WebsocketConnection, ValidMessage(message)) ->
+    actor.Next(message, state)
 
 pub fn initialize_connection(
   initial_state: state,
@@ -240,17 +241,31 @@ pub fn initialize_connection(
             connection.socket,
             frame_to_bit_builder(Control(PongFrame(length, payload))),
           )
-          |> result.map(fn(_nil) { actor.Continue(state) })
+          |> result.map(fn(_nil) { actor.continue(state) })
           |> result.unwrap(actor.Stop(process.Abnormal(
             "Failed to send pong frame",
           )))
         }
         Invalid -> {
           logger.error(#("Received a malformed Websocket frame"))
-          actor.Continue(state)
+          actor.continue(state)
         }
         Valid(msg) -> {
           rescue(fn() { handler(state, connection, msg) })
+          |> result.map(fn(cont) {
+            case cont {
+              actor.Continue(state, selector) -> {
+                selector
+                |> option.map(process.map_selector(_, fn(msg) {
+                  Valid(User(msg))
+                }))
+                |> actor.Continue(state, _)
+              }
+              actor.Stop(reason) -> {
+                actor.Stop(reason)
+              }
+            }
+          })
           |> result.lazy_unwrap(fn() {
             logger.error("Caught error in websocket handler")
             actor.Stop(process.Abnormal("Websocket terminated"))
