@@ -9,7 +9,7 @@ import gleam/iterator.{Iterator}
 import gleam/option.{None, Option, Some}
 import gleam/otp/actor
 import gleam/result
-import glisten/handler.{Close, LoopFn, LoopState}
+import glisten/handler.{Close, HandlerMessage, LoopFn, LoopState}
 import glisten/socket.{Socket}
 import glisten/socket/transport.{Transport}
 import mist/internal/encoder
@@ -47,7 +47,7 @@ pub fn new_state() -> State {
 
 /// This is a more flexible handler. It will allow you to upgrade a connection
 /// to a websocket connection, or deal with a regular HTTP req->resp workflow.
-pub fn with_func(handler: HandlerFunc) -> LoopFn(State) {
+pub fn with_func(handler: HandlerFunc) -> LoopFn(HandlerMessage, State) {
   handler.func(fn(msg, socket_state: LoopState(State)) {
     let LoopState(
       socket: socket,
@@ -107,7 +107,7 @@ fn log_and_error(
   error: erlang.Crash,
   socket: Socket,
   transport: Transport,
-) -> actor.Next(LoopState(State)) {
+) -> actor.Next(HandlerMessage, LoopState(State)) {
   case error {
     Exited(msg) | Thrown(msg) | Errored(msg) -> {
       logger.error(error)
@@ -129,7 +129,7 @@ fn handle_bit_builder_body(
   resp: response.Response(ResponseData),
   body: BitBuilder,
   state: LoopState(State),
-) -> actor.Next(LoopState(State)) {
+) -> actor.Next(HandlerMessage, LoopState(State)) {
   resp
   |> response.set_body(body)
   |> http.add_default_headers
@@ -146,7 +146,7 @@ fn handle_bit_builder_body(
       _ -> {
         // TODO:  this should be a configuration
         let timer = process.send_after(state.sender, 10_000, Close)
-        actor.Continue(LoopState(..state, data: State(idle_timer: Some(timer))))
+        actor.continue(LoopState(..state, data: State(idle_timer: Some(timer))))
       }
     }
   })
@@ -162,7 +162,7 @@ fn handle_chunked_body(
   resp: response.Response(ResponseData),
   body: Iterator(BitBuilder),
   state: LoopState(State),
-) -> actor.Next(LoopState(State)) {
+) -> actor.Next(HandlerMessage, LoopState(State)) {
   let headers = [#("transfer-encoding", "chunked"), ..resp.headers]
   let initial_payload = encoder.response_builder(resp.status, headers)
 
@@ -186,14 +186,14 @@ fn handle_chunked_body(
       },
     )
   })
-  |> result.replace(actor.Continue(state))
+  |> result.replace(actor.continue(state))
   |> result.unwrap(stop_normal)
 }
 
 fn handle_file_body(
   resp: response.Response(ResponseData),
   state: LoopState(State),
-) -> actor.Next(LoopState(State)) {
+) -> actor.Next(HandlerMessage, LoopState(State)) {
   let assert File(file_descriptor, offset, length) = resp.body
   resp
   |> response.prepend_header("content-length", int.to_string(length - offset))
@@ -208,14 +208,17 @@ fn handle_file_body(
     |> result.map_error(fn(err) { logger.error(#("Failed to send file", err)) })
     |> result.replace_error(Nil)
   })
-  |> result.replace(actor.Continue(state))
+  |> result.replace(actor.continue(state))
   // TODO:  not normal
   |> result.replace_error(stop_normal)
   |> result.unwrap_both
 }
 
 /// Creates a standard HTTP handler service to pass to `mist.serve`
-pub fn with(handler: Handler, max_body_limit: Int) -> LoopFn(State) {
+pub fn with(
+  handler: Handler,
+  max_body_limit: Int,
+) -> LoopFn(HandlerMessage, State) {
   let bad_request =
     response.new(400)
     |> response.set_body(bit_builder.new())
