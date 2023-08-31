@@ -45,7 +45,7 @@ pub fn set_up_echo_server_test_() {
 
 fn get_default_response() -> Response(BitBuilder) {
   response.new(200)
-  |> response.prepend_header("user-agent", "hackney/1.18.1")
+  |> response.prepend_header("user-agent", "hackney/1.18.2")
   |> response.prepend_header("host", "localhost:8888")
   |> response.prepend_header("content-type", "application/octet-stream")
   |> response.prepend_header("content-length", "13")
@@ -152,7 +152,7 @@ pub fn it_supports_chunked_encoding() {
 
   let expected =
     response.new(200)
-    |> response.prepend_header("user-agent", "hackney/1.18.1")
+    |> response.prepend_header("user-agent", "hackney/1.18.2")
     |> response.prepend_header("host", "localhost:8888")
     |> response.prepend_header("connection", "keep-alive")
     |> response.prepend_header("content-length", "10000")
@@ -230,7 +230,7 @@ pub fn it_supports_expect_continue_header() {
 
   let expected =
     response.new(200)
-    |> response.prepend_header("user-agent", "hackney/1.18.1")
+    |> response.prepend_header("user-agent", "hackney/1.18.2")
     |> response.prepend_header("host", "localhost:8888")
     |> response.prepend_header("connection", "keep-alive")
     |> response.prepend_header("content-type", "application/octet-stream")
