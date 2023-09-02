@@ -18,6 +18,7 @@ import mist/internal/encoder
 import mist/internal/file
 import mist/internal/http.{Connection, DecodeError, DiscardPacket}
 import mist/internal/http2/frame.{Settings}
+import mist/internal/http2/stream
 import mist/internal/http2
 import mist/internal/logger
 
@@ -172,7 +173,7 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
                             }
                           },
                         )
-                      Ok(actor.Continue(
+                      Ok(actor.continue(
                         LoopState(
                           ..socket_state,
                           data: Http2(
@@ -199,8 +200,57 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
         }
         |> result.unwrap_both
       }
-      Http2(..) -> {
-        todo
+      Http2(frame_buffer, settings) -> {
+        let new_buffer = buffer.append(frame_buffer, msg)
+        case frame.decode(new_buffer.data) {
+          Ok(#(frame.WindowUpdate(amount, identifier), rest)) -> {
+            case frame.get_stream_identifier(identifier) {
+              0 -> {
+                io.println("setting window size!")
+                actor.continue(
+                  LoopState(
+                    ..socket_state,
+                    data: Http2(
+                      frame_buffer: buffer.new(rest),
+                      settings: Http2Settings(
+                        ..settings,
+                        initial_window_size: amount,
+                      ),
+                    ),
+                  ),
+                )
+              }
+              n -> {
+                todo
+              }
+            }
+          }
+          Ok(#(frame.Header(data, end_stream, identifier, priority), rest)) -> {
+            let assert Ok(new_stream) =
+              stream.new(identifier, settings.initial_window_size)
+            let assert frame.Complete(data) = data
+            process.send(new_stream, stream.PartialHeaders(data))
+            todo
+          }
+          Ok(data) -> {
+            io.debug(#("we got a frame!!111oneone", data))
+            todo
+          }
+          Error(frame.NoError) -> {
+            actor.continue(
+              LoopState(
+                ..socket_state,
+                data: Http2(frame_buffer: new_buffer, settings: settings),
+              ),
+            )
+          }
+          Error(connection_error) -> {
+            // TODO:
+            //  - send GOAWAY with last good stream ID
+            //  - close the connection
+            todo
+          }
+        }
       }
     }
   }
