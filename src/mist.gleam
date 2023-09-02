@@ -487,3 +487,19 @@ pub fn send_text_frame(
   |> websocket.to_text_frame
   |> connection.transport.send(connection.socket, _)
 }
+
+pub fn main() {
+  let assert Ok(_server) =
+    fn(_req) {
+      response.new(200)
+      |> response.set_body(Bytes(bit_builder.from_string("hello, world!")))
+    }
+    |> new
+    |> port(1234)
+    |> start_https(
+      certfile: "/home/alex/gleams/mist/domain.crt",
+      keyfile: "/home/alex/gleams/mist/domain.key",
+    )
+
+  process.sleep_forever()
+}

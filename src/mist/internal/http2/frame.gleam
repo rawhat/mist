@@ -11,6 +11,11 @@ pub fn stream_identifier(value: Int) -> StreamIdentifier(Frame) {
   StreamIdentifier(value)
 }
 
+pub fn get_stream_identifier(identifier: StreamIdentifier(phantom)) -> Int {
+  let assert StreamIdentifier(value) = identifier
+  value
+}
+
 pub type HeaderPriority {
   HeaderPriority(
     exclusive: Bool,
