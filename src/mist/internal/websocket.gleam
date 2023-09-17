@@ -230,11 +230,10 @@ pub fn initialize_connection(
     loop: fn(msg, state) {
       case msg {
         Valid(Internal(Control(CloseFrame(..)) as frame)) -> {
-          let assert Ok(_) =
-            connection.transport.send(
-              connection.socket,
-              frame_to_bit_builder(frame),
-            )
+          connection.transport.send(
+            connection.socket,
+            frame_to_bit_builder(frame),
+          )
           on_close()
           actor.Stop(process.Normal)
         }
