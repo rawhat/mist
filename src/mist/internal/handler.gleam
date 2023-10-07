@@ -5,32 +5,25 @@ import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
 import gleam/http/request.{type Request}
 import gleam/http/response
 import gleam/int
-import gleam/iterator.{Iterator}
+import gleam/iterator.{type Iterator}
 import gleam/list
-import gleam/option.{None, Option, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
-import glisten/handler.{Close, HandlerMessage, LoopFn, LoopState}
-import glisten/socket.{Socket}
-import glisten/socket/transport.{Transport}
-import mist/internal/buffer.{Buffer}
+import glisten.{type Loop, type Message, Packet}
+import glisten/handler.{Close, Internal, LoopState}
+import glisten/socket.{type Socket, type SocketReason, Badarg}
+import glisten/socket/transport.{type Transport}
+import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/encoder
 import mist/internal/file
-import mist/internal/http.{Connection, DecodeError, DiscardPacket}
+import mist/internal/http.{
+  type Connection, type DecodeError, type Handler, type ResponseData, Bytes,
+  Chunked, Connection, DiscardPacket, File, Initial, Websocket,
+}
 import mist/internal/http2/frame.{Settings}
 import mist/internal/http2/stream
-import mist/internal/http2
 import mist/internal/logger
-
-pub type ResponseData {
-  Websocket(Selector(ProcessDown))
-  Bytes(BytesBuilder)
-  Chunked(Iterator(BytesBuilder))
-  File(descriptor: file.FileDescriptor, offset: Int, length: Int)
-}
-
-pub type Handler =
-  fn(Request(Connection)) -> response.Response(ResponseData)
 
 pub type HandlerError {
   InvalidRequest(DecodeError)
@@ -62,7 +55,6 @@ pub fn new_state() -> State {
   Http1(None)
 }
 
-import gleam/bit_string
 import gleam/io
 
 /// This is a more flexible handler. It will allow you to upgrade a connection
@@ -128,8 +120,8 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
                 let assert Ok(_nil) =
                   settings_frame
                   |> frame.encode
-                  |> bit_builder.from_bit_string
-                  |> transport.send(socket, _)
+                  |> bytes_builder.from_bit_array
+                  |> conn.transport.send(conn.socket, _)
 
                 frame.decode(data)
                 |> result.map_error(fn(_err) {
@@ -173,18 +165,15 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
                             }
                           },
                         )
-                      Ok(actor.continue(
-                        LoopState(
-                          ..socket_state,
-                          data: Http2(
-                            frame_buffer: buffer.new(rest),
-                            settings: http2_settings,
-                          ),
-                        ),
-                      ))
+                      Ok(
+                        actor.continue(Http2(
+                          frame_buffer: buffer.new(rest),
+                          settings: http2_settings,
+                        )),
+                      )
                     }
                     _ -> {
-                      let assert Ok(_) = transport.close(socket)
+                      let assert Ok(_) = conn.transport.close(conn.socket)
                       Error(
                         actor.Stop(process.Abnormal(
                           "SETTINGS frame must be sent first",
@@ -207,42 +196,43 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
             case frame.get_stream_identifier(identifier) {
               0 -> {
                 io.println("setting window size!")
-                actor.continue(
-                  LoopState(
-                    ..socket_state,
-                    data: Http2(
-                      frame_buffer: buffer.new(rest),
-                      settings: Http2Settings(
-                        ..settings,
-                        initial_window_size: amount,
-                      ),
-                    ),
+                actor.continue(Http2(
+                  frame_buffer: buffer.new(rest),
+                  settings: Http2Settings(
+                    ..settings,
+                    initial_window_size: amount,
                   ),
-                )
+                ))
               }
-              n -> {
+              _n -> {
                 todo
               }
             }
           }
           Ok(#(frame.Header(data, end_stream, identifier, priority), rest)) -> {
+            let conn =
+              Connection(
+                body: Initial(<<>>),
+                socket: conn.socket,
+                transport: conn.transport,
+                client_ip: conn.client_ip,
+              )
             let assert Ok(new_stream) =
-              stream.new(identifier, settings.initial_window_size)
+              stream.new(identifier, settings.initial_window_size, handler, conn,
+              )
             let assert frame.Complete(data) = data
-            process.send(new_stream, stream.PartialHeaders(data))
-            todo
+            process.send(new_stream, stream.HeaderChunk(data))
+            actor.continue(Http2(
+              frame_buffer: buffer.new(rest),
+              settings: settings,
+            ))
           }
           Ok(data) -> {
             io.debug(#("we got a frame!!111oneone", data))
             todo
           }
           Error(frame.NoError) -> {
-            actor.continue(
-              LoopState(
-                ..socket_state,
-                data: Http2(frame_buffer: new_buffer, settings: settings),
-              ),
-            )
+            actor.continue(Http2(frame_buffer: new_buffer, settings: settings))
           }
           Error(connection_error) -> {
             // TODO:

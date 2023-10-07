@@ -16,12 +16,13 @@ import glisten/socket
 import glisten/socket/transport
 import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/file
-import mist/internal/handler.{
+import mist/internal/handler
+import mist/internal/http.{
+  type Connection as InternalConnection,
   type ResponseData as InternalResponseData, Bytes as InternalBytes,
   Chunked as InternalChunked, File as InternalFile,
   Websocket as InternalWebsocket,
 }
-import mist/internal/http.{type Connection as InternalConnection}
 import mist/internal/websocket.{
   type HandlerMessage, type WebsocketConnection as InternalWebsocketConnection,
   BinaryFrame, Data, Internal, TextFrame, User,
@@ -492,7 +493,7 @@ pub fn main() {
   let assert Ok(_server) =
     fn(_req) {
       response.new(200)
-      |> response.set_body(Bytes(bit_builder.from_string("hello, world!")))
+      |> response.set_body(Bytes(bytes_builder.from_string("hello, world!")))
     }
     |> new
     |> port(1234)
