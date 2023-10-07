@@ -1,14 +1,16 @@
-import gleam/bytes_builder.{type BytesBuilder}
 import gleam/bit_array
+import gleam/bytes_builder.{type BytesBuilder}
+import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist.{type Charlist}
+import gleam/erlang/process.{type ProcessDown, type Selector}
+import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response, Response}
-import gleam/http
 import gleam/int
+import gleam/iterator.{type Iterator}
 import gleam/list
-import gleam/map.{type Map}
 import gleam/option.{type Option}
 import gleam/pair
 import gleam/result
@@ -19,6 +21,14 @@ import glisten/socket.{type Socket}
 import glisten/socket/transport.{type Transport}
 import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/encoder
+import mist/internal/file
+
+pub type ResponseData {
+  Websocket(Selector(ProcessDown))
+  Bytes(BytesBuilder)
+  Chunked(Iterator(BytesBuilder))
+  File(descriptor: file.FileDescriptor, offset: Int, length: Int)
+}
 
 pub type Connection {
   Connection(
@@ -28,6 +38,9 @@ pub type Connection {
     client_ip: ClientIp,
   )
 }
+
+pub type Handler =
+  fn(Request(Connection)) -> response.Response(ResponseData)
 
 pub type PacketType {
   Http
@@ -72,14 +85,14 @@ pub fn parse_headers(
   bs: BitArray,
   socket: Socket,
   transport: Transport,
-  headers: Map(String, String),
-) -> Result(#(Map(String, String), BitArray), DecodeError) {
+  headers: Dict(String, String),
+) -> Result(#(Dict(String, String), BitArray), DecodeError) {
   case decode_packet(HttphBin, bs, []) {
     Ok(BinaryData(HttpHeader(_, _field, field, value), rest)) -> {
       let field = from_header(field)
       let assert Ok(value) = bit_array.to_string(value)
       headers
-      |> map.insert(field, value)
+      |> dict.insert(field, value)
       |> parse_headers(rest, socket, transport, _)
     }
     Ok(EndOfHeaders(rest)) -> Ok(#(headers, rest))
@@ -246,7 +259,7 @@ pub fn parse_request(
         rest,
         conn.socket,
         conn.transport,
-        map.new(),
+        dict.new(),
       ))
       use path <- result.then(
         path
@@ -268,7 +281,7 @@ pub fn parse_request(
         |> request.set_method(method)
         |> request.set_path(path)
       Ok(Http1Request(
-        request.Request(..req, query: query, headers: map.to_list(headers)),
+        request.Request(..req, query: query, headers: dict.to_list(headers)),
       ))
     }
     // "\r\nSM\r\n\r\n"
@@ -341,12 +354,6 @@ pub fn read_body(
   }
 }
 
-pub type BodySlice {
-  Chunked(data: BitArray, buffer: Buffer)
-  Default(data: BitArray)
-  Done
-}
-
 const websocket_key = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 pub type ShaHash {
@@ -414,7 +421,7 @@ pub fn add_default_headers(
   let body_size = bytes_builder.byte_size(resp.body)
 
   let headers =
-    map.from_list([
+    dict.from_list([
       #("content-length", int.to_string(body_size)),
       #("connection", "keep-alive"),
     ])
@@ -423,10 +430,10 @@ pub fn add_default_headers(
       _,
       fn(defaults, tup) {
         let #(key, value) = tup
-        map.insert(defaults, key, value)
+        dict.insert(defaults, key, value)
       },
     )
-    |> map.to_list
+    |> dict.to_list
 
   Response(..resp, headers: headers)
 }

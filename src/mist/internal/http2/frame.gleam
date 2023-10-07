@@ -1,6 +1,6 @@
-import gleam/bit_string
+import gleam/bit_array
 import gleam/list
-import gleam/option.{None, Option, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 
 pub opaque type StreamIdentifier(phantom) {
@@ -139,14 +139,15 @@ fn parse_data(
       _reserved:int-size(1),
       identifier:int-size(31),
       pad_length:int-size(padding)-unit(8),
-      data:binary-size(length),
-      _padding:binary-size(pad_length)-unit(8),
-      rest:bit_string,
+      data:bytes-size(length),
+      _padding:bytes-size(pad_length)-unit(8),
+      rest:bits,
     >> if identifier != 0 -> {
       Ok(#(
         Data(
           data: data,
-          end_stream: end_stream == 1,
+          end_stream: end_stream
+          == 1,
           identifier: stream_identifier(identifier),
         ),
         rest,
@@ -175,9 +176,9 @@ fn parse_header(
       exclusive:int-size(priority),
       stream_dependency:int-size(priority)-unit(31),
       weight:int-size(priority)-unit(8),
-      data:binary-size(length),
-      _padding:binary-size(pad_length),
-      rest:bit_string,
+      data:bytes-size(length),
+      _padding:bytes-size(pad_length),
+      rest:bits,
     >> if identifier != 0 && pad_length < length -> {
       Ok(#(
         Header(
@@ -185,12 +186,14 @@ fn parse_header(
             1 -> Complete(data)
             0 -> Continued(data)
           },
-          end_stream: end_stream == 1,
+          end_stream: end_stream
+          == 1,
           identifier: stream_identifier(identifier),
           priority: case priority == 1 {
             True ->
               Some(HeaderPriority(
-                exclusive: exclusive == 1,
+                exclusive: exclusive
+                == 1,
                 stream_dependency: stream_identifier(stream_dependency),
                 weight: weight,
               ))
@@ -216,11 +219,12 @@ fn parse_priority(
       exclusive:int-size(1),
       dependency:int-size(31),
       weight:int-size(8),
-      rest:bit_string,
+      rest:bits,
     >> if identifier != 0 -> {
       Ok(#(
         Priority(
-          exclusive: exclusive == 1,
+          exclusive: exclusive
+          == 1,
           identifier: stream_identifier(identifier),
           stream_dependency: stream_identifier(dependency),
           weight: weight,
@@ -243,7 +247,7 @@ fn parse_termination(
       _reserved:int-size(1),
       identifier:int-size(31),
       error:int-size(32),
-      rest:bit_string,
+      rest:bits,
     >> if identifier != 0 -> {
       Ok(#(
         Termination(
@@ -268,8 +272,8 @@ fn parse_settings(
       ack:int-size(1),
       _reserved:int-size(1),
       identifier:int-size(31),
-      settings:binary-size(length),
-      rest:bit_string,
+      settings:bytes-size(length),
+      rest:bits,
     >> if identifier == 0 -> {
       use settings <- result.try(get_settings(settings, []))
       Ok(#(Settings(ack: ack == 1, settings: settings), rest))
@@ -295,9 +299,9 @@ fn parse_push_promise(
       pad_length:int-size(padded)-unit(8),
       _reserved:int-size(1),
       promised_identifier:int-size(31),
-      data:binary-size(length),
-      _padding:binary-size(pad_length),
-      rest:bit_string,
+      data:bytes-size(length),
+      _padding:bytes-size(pad_length),
+      rest:bits,
     >> if identifier != 0 -> {
       Ok(#(
         PushPromise(
@@ -325,8 +329,8 @@ fn parse_ping(
       ack:int-size(1),
       _reserved:int-size(1),
       identifier:int-size(31),
-      data:bit_string-size(64),
-      rest:bit_string,
+      data:bits-size(64),
+      rest:bits,
     >> if identifier == 0 -> {
       Ok(#(Ping(ack: ack == 1, data: data), rest))
     }
@@ -347,8 +351,8 @@ fn parse_go_away(
       _reserved:int-size(1),
       last_stream_id:int-size(31),
       error:int-size(32),
-      data:binary-size(length),
-      rest:bit_string,
+      data:bytes-size(length),
+      rest:bits,
     >> if identifier == 0 -> {
       Ok(#(
         GoAway(
@@ -374,7 +378,7 @@ fn parse_window_update(
       identifier:int-size(31),
       _reserved:int-size(1),
       window_size:int-size(31),
-      rest:bit_string,
+      rest:bits,
     >> if window_size != 0 -> {
       Ok(#(
         WindowUpdate(
@@ -400,8 +404,8 @@ fn parse_continuation(
       _unused:int-size(2),
       _reserved:int-size(1),
       identifier:int-size(31),
-      data:binary-size(length),
-      rest:bit_string,
+      data:bytes-size(length),
+      rest:bits,
     >> if identifier != 0 -> {
       Ok(#(
         Continuation(
@@ -417,10 +421,10 @@ fn parse_continuation(
   }
 }
 
-pub fn encode(frame: Frame) -> BitString {
+pub fn encode(frame: Frame) -> BitArray {
   case frame {
     Data(data, end_stream, StreamIdentifier(identifier)) -> {
-      let length = bit_string.byte_size(data)
+      let length = bit_array.byte_size(data)
       let end = from_bool(end_stream)
       <<
         length:int-size(24),
@@ -431,12 +435,12 @@ pub fn encode(frame: Frame) -> BitString {
         end:int-size(1),
         0:int-size(1),
         identifier:int-size(31),
-        data:bit_string,
+        data:bits,
       >>
     }
     Header(data, end_stream, StreamIdentifier(identifier), priority) -> {
       let #(end_header, data) = encode_data(data)
-      let length = bit_string.byte_size(data)
+      let length = bit_array.byte_size(data)
       let end = from_bool(end_stream)
       let priority_flags = encode_priority(priority)
       let has_priority = from_bool(option.is_some(priority))
@@ -452,8 +456,8 @@ pub fn encode(frame: Frame) -> BitString {
         end:int-size(1),
         0:int-size(1),
         identifier:int-size(31),
-        priority_flags:bit_string,
-        data:bit_string,
+        priority_flags:bits,
+        data:bits,
       >>
     }
     Priority(
@@ -488,7 +492,7 @@ pub fn encode(frame: Frame) -> BitString {
     Settings(ack, settings) -> {
       let ack = from_bool(ack)
       let settings = encode_settings(settings)
-      let length = bit_string.byte_size(settings)
+      let length = bit_array.byte_size(settings)
       <<
         length:int-size(24),
         4:int-size(8),
@@ -496,7 +500,7 @@ pub fn encode(frame: Frame) -> BitString {
         ack:int-size(1),
         0:int-size(1),
         0:int-size(31),
-        settings:bit_string,
+        settings:bits,
       >>
     }
     PushPromise(
@@ -516,7 +520,7 @@ pub fn encode(frame: Frame) -> BitString {
         identifier:int-size(31),
         0:int-size(1),
         promised_identifier:int-size(31),
-        data:bit_string,
+        data:bits,
       >>
     }
     Ping(ack, data) -> {
@@ -528,7 +532,7 @@ pub fn encode(frame: Frame) -> BitString {
         ack:int-size(1),
         0:int-size(1),
         0:int-size(31),
-        data:bit_string,
+        data:bits,
       >>
     }
     GoAway(data, error, StreamIdentifier(last_stream_id)) -> {
@@ -540,7 +544,7 @@ pub fn encode(frame: Frame) -> BitString {
         0:int-size(1),
         last_stream_id:int-size(31),
         error:int-size(32),
-        data:bit_string,
+        data:bits,
       >>
     }
     WindowUpdate(amount, StreamIdentifier(identifier)) -> {
@@ -560,7 +564,7 @@ pub fn encode(frame: Frame) -> BitString {
         0:int-size(2),
         0:int-size(1),
         identifier:int-size(31),
-        data:bit_string,
+        data:bits,
       >>
     }
   }
@@ -634,7 +638,7 @@ fn from_bool(bool: Bool) -> Int {
   }
 }
 
-fn encode_priority(priority: Option(HeaderPriority)) -> BitString {
+fn encode_priority(priority: Option(HeaderPriority)) -> BitArray {
   case priority {
     Some(HeaderPriority(exclusive, StreamIdentifier(dependency), weight)) -> {
       let exclusive = from_bool(exclusive)
@@ -644,7 +648,7 @@ fn encode_priority(priority: Option(HeaderPriority)) -> BitString {
   }
 }
 
-fn encode_data(data: Data) -> #(Int, BitString) {
+fn encode_data(data: Data) -> #(Int, BitArray) {
   case data {
     Complete(data) -> #(1, data)
     Continued(data) -> #(0, data)
@@ -672,27 +676,23 @@ fn encode_error(error: ConnectionError) -> Int {
   }
 }
 
-fn encode_settings(settings: List(Setting)) -> BitString {
-  list.fold(
-    settings,
-    <<>>,
-    fn(acc, setting) {
-      case setting {
-        HeaderTableSize(value) ->
-          bit_string.append(acc, <<1:int-size(16), value:int-size(32)>>)
-        ServerPush(Enabled) ->
-          bit_string.append(acc, <<2:int-size(16), 1:int-size(32)>>)
-        ServerPush(Disabled) ->
-          bit_string.append(acc, <<2:int-size(16), 0:int-size(32)>>)
-        MaxConcurrentStreams(value) ->
-          bit_string.append(acc, <<3:int-size(16), value:int-size(32)>>)
-        InitialWindowSize(value) ->
-          bit_string.append(acc, <<4:int-size(16), value:int-size(32)>>)
-        MaxFrameSize(value) ->
-          bit_string.append(acc, <<5:int-size(16), value:int-size(32)>>)
-        MaxHeaderListSize(value) ->
-          bit_string.append(acc, <<6:int-size(16), value:int-size(32)>>)
-      }
-    },
-  )
+fn encode_settings(settings: List(Setting)) -> BitArray {
+  list.fold(settings, <<>>, fn(acc, setting) {
+    case setting {
+      HeaderTableSize(value) ->
+        bit_array.append(acc, <<1:int-size(16), value:int-size(32)>>)
+      ServerPush(Enabled) ->
+        bit_array.append(acc, <<2:int-size(16), 1:int-size(32)>>)
+      ServerPush(Disabled) ->
+        bit_array.append(acc, <<2:int-size(16), 0:int-size(32)>>)
+      MaxConcurrentStreams(value) ->
+        bit_array.append(acc, <<3:int-size(16), value:int-size(32)>>)
+      InitialWindowSize(value) ->
+        bit_array.append(acc, <<4:int-size(16), value:int-size(32)>>)
+      MaxFrameSize(value) ->
+        bit_array.append(acc, <<5:int-size(16), value:int-size(32)>>)
+      MaxHeaderListSize(value) ->
+        bit_array.append(acc, <<6:int-size(16), value:int-size(32)>>)
+    }
+  })
 }
