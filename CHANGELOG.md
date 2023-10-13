@@ -5,6 +5,7 @@
 - Remove WebSocket builder in favor of plain function
 - Adds `on_init` and `on_close` to WebSocket upgrade function
 - Fix an issue where websocket crashes on internal control close frame
+- Upgrade to `glisten` v0.9
 
 ## v0.13.2
 
