@@ -1,5 +1,8 @@
 # mist
 
+[![Package Version](https://img.shields.io/hexpm/v/mist)](https://hex.pm/packages/mist)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/mist/)
+
 A glistening Gleam web server.
 
 ## Installation
