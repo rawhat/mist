@@ -9,7 +9,7 @@ import gleam/uri
 import gleam/option.{Some}
 import gleeunit/should
 import scaffold.{
-  bitstring_response_should_equal, echo_handler, make_request, open_server,
+  bitstring_response_should_equal, make_request, open_server,
   string_response_should_equal,
 }
 
@@ -28,7 +28,7 @@ pub type Instantiator {
 pub fn set_up_echo_server_test_() {
   #(
     Setup,
-    fn() { open_server(8888, echo_handler()) },
+    fn() { open_server(8888) },
     [
       it_echoes_with_data,
       it_supports_large_header_fields,
@@ -45,7 +45,7 @@ pub fn set_up_echo_server_test_() {
 
 fn get_default_response() -> Response(BitBuilder) {
   response.new(200)
-  |> response.prepend_header("user-agent", "hackney/1.18.2")
+  |> response.prepend_header("user-agent", "hackney/1.20.1")
   |> response.prepend_header("host", "localhost:8888")
   |> response.prepend_header("content-type", "application/octet-stream")
   |> response.prepend_header("content-length", "13")
@@ -152,7 +152,7 @@ pub fn it_supports_chunked_encoding() {
 
   let expected =
     response.new(200)
-    |> response.prepend_header("user-agent", "hackney/1.18.2")
+    |> response.prepend_header("user-agent", "hackney/1.20.1")
     |> response.prepend_header("host", "localhost:8888")
     |> response.prepend_header("connection", "keep-alive")
     |> response.prepend_header("content-length", "10000")
@@ -230,7 +230,7 @@ pub fn it_supports_expect_continue_header() {
 
   let expected =
     response.new(200)
-    |> response.prepend_header("user-agent", "hackney/1.18.2")
+    |> response.prepend_header("user-agent", "hackney/1.20.1")
     |> response.prepend_header("host", "localhost:8888")
     |> response.prepend_header("connection", "keep-alive")
     |> response.prepend_header("content-type", "application/octet-stream")

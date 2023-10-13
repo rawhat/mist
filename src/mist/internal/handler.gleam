@@ -1,7 +1,7 @@
 import gleam/bit_builder.{BitBuilder}
 import gleam/dynamic
 import gleam/erlang.{Errored, Exited, Thrown, rescue}
-import gleam/erlang/process.{ProcessDown, Selector}
+import gleam/erlang/process.{ProcessDown, Selector, Subject}
 import gleam/http/request.{Request}
 import gleam/http/response
 import gleam/int
@@ -9,12 +9,13 @@ import gleam/iterator.{Iterator}
 import gleam/option.{None, Option, Some}
 import gleam/otp/actor
 import gleam/result
-import glisten/handler.{Close, HandlerMessage, LoopFn, LoopState}
-import glisten/socket.{Socket}
+import glisten/handler.{Close, Internal}
+import glisten/socket.{Badarg, Socket, SocketReason}
 import glisten/socket/transport.{Transport}
+import glisten.{Loop, Message, Packet}
 import mist/internal/encoder
 import mist/internal/file
-import mist/internal/http.{Connection, DecodeError, DiscardPacket}
+import mist/internal/http.{Connection, DecodeError, DiscardPacket, Initial}
 import mist/internal/logger
 
 pub type ResponseData {
@@ -25,9 +26,6 @@ pub type ResponseData {
 }
 
 pub type Handler =
-  fn(request.Request(BitString)) -> response.Response(BitBuilder)
-
-pub type HandlerFunc =
   fn(Request(Connection)) -> response.Response(ResponseData)
 
 pub type HandlerError {
@@ -47,28 +45,30 @@ pub fn new_state() -> State {
 
 /// This is a more flexible handler. It will allow you to upgrade a connection
 /// to a websocket connection, or deal with a regular HTTP req->resp workflow.
-pub fn with_func(handler: HandlerFunc) -> LoopFn(HandlerMessage, State) {
-  handler.func(fn(msg, socket_state: LoopState(State)) {
-    let LoopState(
-      socket: socket,
-      transport: transport,
-      data: state,
-      client_ip: client_ip,
-      ..,
-    ) = socket_state
+pub fn with_func(handler: Handler) -> Loop(user_message, State) {
+  fn(msg, state: State, conn: glisten.Connection(user_message)) {
+    let assert Packet(msg) = msg
+    let sender = conn.subject
+    let conn =
+      Connection(
+        body: Initial(<<>>),
+        socket: conn.socket,
+        transport: conn.transport,
+        client_ip: conn.client_ip,
+      )
     {
       let _ = case state.idle_timer {
         Some(t) -> process.cancel_timer(t)
         _ -> process.TimerNotFound
       }
       msg
-      |> http.parse_request(socket, transport, client_ip)
+      |> http.parse_request(conn)
       |> result.map_error(fn(err) {
         case err {
           DiscardPacket -> Nil
           _ -> {
             logger.error(err)
-            let _ = transport.close(socket)
+            let _ = conn.transport.close(conn.socket)
             Nil
           }
         }
@@ -77,21 +77,27 @@ pub fn with_func(handler: HandlerFunc) -> LoopFn(HandlerMessage, State) {
       |> result.then(fn(req) {
         rescue(fn() { handler(req) })
         |> result.map(fn(resp) { #(req, resp) })
-        |> result.map_error(log_and_error(
-          _,
-          socket_state.socket,
-          socket_state.transport,
-        ))
+        |> result.map_error(log_and_error(_, conn.socket, conn.transport))
       })
       |> result.map(fn(req_resp) {
         let #(_req, response) = req_resp
         case response {
           response.Response(body: Bytes(body), ..) as resp ->
-            handle_bit_builder_body(resp, body, socket_state)
-          response.Response(body: Chunked(body), ..) as resp ->
-            handle_chunked_body(resp, body, socket_state)
+            handle_bit_builder_body(resp, body, conn)
+            |> result.map(fn(_res) { close_or_set_timer(resp, conn, sender) })
+            |> result.replace_error(stop_normal)
+            |> result.unwrap_both
+          response.Response(body: Chunked(body), ..) as resp -> {
+            handle_chunked_body(resp, body, conn)
+            |> result.map(fn(_res) { close_or_set_timer(resp, conn, sender) })
+            |> result.replace_error(stop_normal)
+            |> result.unwrap_both
+          }
           response.Response(body: File(..), ..) as resp ->
-            handle_file_body(resp, socket_state)
+            handle_file_body(resp, conn)
+            |> result.map(fn(_res) { close_or_set_timer(resp, conn, sender) })
+            |> result.replace_error(stop_normal)
+            |> result.unwrap_both
           response.Response(body: Websocket(selector), ..) -> {
             let _resp = process.select_forever(selector)
             actor.Stop(process.Normal)
@@ -100,14 +106,14 @@ pub fn with_func(handler: HandlerFunc) -> LoopFn(HandlerMessage, State) {
       })
     }
     |> result.unwrap_both
-  })
+  }
 }
 
 fn log_and_error(
   error: erlang.Crash,
   socket: Socket,
   transport: Transport,
-) -> actor.Next(HandlerMessage, LoopState(State)) {
+) -> actor.Next(Message(user_message), State) {
   case error {
     Exited(msg) | Thrown(msg) | Errored(msg) -> {
       logger.error(error)
@@ -125,33 +131,36 @@ fn log_and_error(
   }
 }
 
+fn close_or_set_timer(
+  resp: response.Response(ResponseData),
+  conn: Connection,
+  sender: Subject(handler.Message(user_message)),
+) -> actor.Next(Message(user_message), State) {
+  // If the handler explicitly says to close the connection, we should
+  // probably listen to them
+  case response.get_header(resp, "connection") {
+    Ok("close") -> {
+      let _ = conn.transport.close(conn.socket)
+      stop_normal
+    }
+    _ -> {
+      // TODO:  this should be a configuration
+      let timer = process.send_after(sender, 10_000, Internal(Close))
+      actor.continue(State(idle_timer: Some(timer)))
+    }
+  }
+}
+
 fn handle_bit_builder_body(
   resp: response.Response(ResponseData),
   body: BitBuilder,
-  state: LoopState(State),
-) -> actor.Next(HandlerMessage, LoopState(State)) {
+  conn: Connection,
+) -> Result(Nil, SocketReason) {
   resp
   |> response.set_body(body)
   |> http.add_default_headers
   |> encoder.to_bit_builder
-  |> state.transport.send(state.socket, _)
-  |> result.map(fn(_sent) {
-    // If the handler explicitly says to close the connection, we should
-    // probably listen to them
-    case response.get_header(resp, "connection") {
-      Ok("close") -> {
-        let _ = state.transport.close(state.socket)
-        stop_normal
-      }
-      _ -> {
-        // TODO:  this should be a configuration
-        let timer = process.send_after(state.sender, 10_000, Close)
-        actor.continue(LoopState(..state, data: State(idle_timer: Some(timer))))
-      }
-    }
-  })
-  |> result.replace_error(stop_normal)
-  |> result.unwrap_both
+  |> conn.transport.send(conn.socket, _)
 }
 
 fn int_to_hex(int: Int) -> String {
@@ -161,12 +170,12 @@ fn int_to_hex(int: Int) -> String {
 fn handle_chunked_body(
   resp: response.Response(ResponseData),
   body: Iterator(BitBuilder),
-  state: LoopState(State),
-) -> actor.Next(HandlerMessage, LoopState(State)) {
+  conn: Connection,
+) -> Result(Nil, SocketReason) {
   let headers = [#("transfer-encoding", "chunked"), ..resp.headers]
   let initial_payload = encoder.response_builder(resp.status, headers)
 
-  state.transport.send(state.socket, initial_payload)
+  conn.transport.send(conn.socket, initial_payload)
   |> result.then(fn(_ok) {
     body
     |> iterator.append(iterator.from_list([bit_builder.new()]))
@@ -182,18 +191,17 @@ fn handle_chunked_body(
           |> bit_builder.append_builder(chunk)
           |> bit_builder.append_string("\r\n")
 
-        state.transport.send(state.socket, encoded)
+        conn.transport.send(conn.socket, encoded)
       },
     )
   })
-  |> result.replace(actor.continue(state))
-  |> result.unwrap(stop_normal)
+  |> result.replace(Nil)
 }
 
 fn handle_file_body(
   resp: response.Response(ResponseData),
-  state: LoopState(State),
-) -> actor.Next(HandlerMessage, LoopState(State)) {
+  conn: Connection,
+) -> Result(Nil, SocketReason) {
   let assert File(file_descriptor, offset, length) = resp.body
   resp
   |> response.prepend_header("content-length", int.to_string(length - offset))
@@ -201,62 +209,15 @@ fn handle_file_body(
   |> fn(r: response.Response(BitBuilder)) {
     encoder.response_builder(resp.status, r.headers)
   }
-  |> state.transport.send(state.socket, _)
-  |> result.replace_error(Nil)
+  |> conn.transport.send(conn.socket, _)
   |> result.then(fn(_) {
-    file.sendfile(file_descriptor, state.socket, offset, length, [])
+    file.sendfile(file_descriptor, conn.socket, offset, length, [])
     |> result.map_error(fn(err) { logger.error(#("Failed to send file", err)) })
-    |> result.replace_error(Nil)
+    |> result.replace_error(Badarg)
   })
-  |> result.replace(actor.continue(state))
-  // TODO:  not normal
-  |> result.replace_error(stop_normal)
-  |> result.unwrap_both
+  |> result.replace(Nil)
 }
 
 /// Creates a standard HTTP handler service to pass to `mist.serve`
-pub fn with(
-  handler: Handler,
-  max_body_limit: Int,
-) -> LoopFn(HandlerMessage, State) {
-  let bad_request =
-    response.new(400)
-    |> response.set_body(bit_builder.new())
-  with_func(fn(req) {
-    case
-      request.get_header(req, "content-length"),
-      request.get_header(req, "transfer-encoding")
-    {
-      Ok("0"), _ | Error(Nil), Error(Nil) ->
-        req
-        |> request.set_body(<<>>)
-        |> handler
-      _, Ok("chunked") ->
-        req
-        |> http.read_body
-        |> result.map(handler)
-        |> result.unwrap(bad_request)
-      Ok(size), _ ->
-        size
-        |> int.parse
-        |> result.map(fn(size) {
-          case size > max_body_limit {
-            True ->
-              response.new(413)
-              |> response.set_body(bit_builder.new())
-              |> response.prepend_header("connection", "close")
-            False ->
-              req
-              |> http.read_body
-              |> result.map(handler)
-              |> result.unwrap(bad_request)
-          }
-        })
-        |> result.unwrap(bad_request)
-    }
-    |> response.map(Bytes)
-  })
-}
-
 @external(erlang, "erlang", "integer_to_list")
 fn integer_to_list(int int: Int, base base: Int) -> String
