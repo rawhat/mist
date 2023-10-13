@@ -7,11 +7,10 @@ import gleam/http/response.{Response}
 import gleam/int
 import gleam/io
 import gleam/iterator.{Iterator}
-import gleam/option.{Option}
+import gleam/option.{None, Option}
 import gleam/otp/actor
 import gleam/result
 import glisten
-import glisten/acceptor
 import glisten/socket
 import glisten/socket/transport
 import mist/internal/buffer.{Buffer}
@@ -357,8 +356,8 @@ pub fn start_http(
   builder.handler
   |> function.compose(convert_body_types)
   |> handler.with_func
-  |> acceptor.new_pool_with_data(handler.new_state())
-  |> glisten.serve(builder.port, _)
+  |> glisten.handler(fn() { #(handler.new_state(), None) }, _)
+  |> glisten.serve(builder.port)
   |> result.map(fn(nil) {
     builder.after_start(builder.port)
     // TODO:  This should not be `Nil` but instead a subject that can receive
@@ -378,8 +377,8 @@ pub fn start_https(
   builder.handler
   |> function.compose(convert_body_types)
   |> handler.with_func
-  |> acceptor.new_pool_with_data(handler.new_state())
-  |> glisten.serve_ssl(builder.port, certfile, keyfile, _)
+  |> glisten.handler(fn() { #(handler.new_state(), None) }, _)
+  |> glisten.serve_ssl(builder.port, certfile, keyfile)
   |> result.map(fn(nil) {
     builder.after_start(builder.port)
     // TODO:  This should not be `Nil` but instead a subject that can receive

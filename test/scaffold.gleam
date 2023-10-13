@@ -1,23 +1,42 @@
 import gleam/bit_builder.{BitBuilder}
-import gleam/erlang/process.{Subject}
 import gleam/http
 import gleam/http/request
 import gleam/http/response.{Response}
 import gleam/list
 import gleam/set
 import gleeunit/should
-import glisten/acceptor.{AcceptorMessage}
-import glisten/tcp
-import mist/internal/handler.{Chunked, Handler}
 import mist/internal/http as mhttp
+import mist
 import gleam/bit_string
 import gleam/string
 import gleam/iterator
 import gleam/option
 import gleam/int
 
-pub fn echo_handler() -> Handler {
-  fn(req: request.Request(BitString)) {
+pub fn chunked_echo_server(port: Int, chunk_size: Int) {
+  fn(req: request.Request(mhttp.Connection)) {
+    let assert Ok(req) = mhttp.read_body(req)
+    let assert Ok(body) = bit_string.to_string(req.body)
+    let chunks =
+      body
+      |> string.to_graphemes
+      |> iterator.from_list
+      |> iterator.sized_chunk(chunk_size)
+      |> iterator.map(fn(chars) {
+        chars
+        |> string.join("")
+        |> bit_builder.from_string
+      })
+    response.new(200)
+    |> response.set_body(mist.Chunked(chunks))
+  }
+  |> mist.new
+  |> mist.port(port)
+  |> mist.start_http
+}
+
+pub fn open_server(port: Int) {
+  fn(req: request.Request(BitString)) -> response.Response(mist.ResponseData) {
     let body =
       req.query
       |> option.map(bit_string.from_string)
@@ -39,48 +58,17 @@ pub fn echo_handler() -> Handler {
         },
       )
       |> list.prepend(#("content-length", length))
-    Response(status: 200, headers: headers, body: body)
+    Response(status: 200, headers: headers, body: mist.Bytes(body))
   }
-}
-
-pub fn chunked_echo_server(
-  port: Int,
-  chunk_size: Int,
-) -> Subject(AcceptorMessage) {
-  let assert Ok(listener) = tcp.listen(port, [])
-  let pool =
-    fn(req: request.Request(mhttp.Connection)) {
-      let assert Ok(req) = mhttp.read_body(req)
-      let assert Ok(body) = bit_string.to_string(req.body)
-      let chunks =
-        body
-        |> string.to_graphemes
-        |> iterator.from_list
-        |> iterator.sized_chunk(chunk_size)
-        |> iterator.map(fn(chars) {
-          chars
-          |> string.join("")
-          |> bit_builder.from_string
-        })
-      response.new(200)
-      |> response.set_body(Chunked(chunks))
-    }
-    |> handler.with_func
-    |> acceptor.new_pool_with_data(handler.new_state())
-    |> fn(func) { func(listener) }
-  let assert Ok(sender) = acceptor.start(pool)
-  sender
-}
-
-pub fn open_server(port: Int, handler: Handler) -> Subject(AcceptorMessage) {
-  let assert Ok(listener) = tcp.listen(port, [])
-  let pool =
-    handler
-    |> handler.with(4_000_000)
-    |> acceptor.new_pool_with_data(handler.new_state())
-    |> fn(func) { func(listener) }
-  let assert Ok(sender) = acceptor.start(pool)
-  sender
+  |> mist.new
+  |> mist.read_request_body(
+    4_000_000,
+    response.new(413)
+    |> response.set_header("connection", "close")
+    |> response.set_body(mist.Bytes(bit_builder.new())),
+  )
+  |> mist.port(port)
+  |> mist.start_http
 }
 
 fn compare_bitstring_body(actual: BitString, expected: BitBuilder) {

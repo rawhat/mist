@@ -226,9 +226,7 @@ fn read_chunk(
 /// Turns the TCP message into an HTTP request
 pub fn parse_request(
   bs: BitString,
-  socket: Socket,
-  transport: Transport,
-  client_ip: ClientIp,
+  conn: Connection,
 ) -> Result(request.Request(Connection), DecodeError) {
   case decode_packet(HttpBin, bs, []) {
     Ok(BinaryData(HttpRequest(http_method, AbsPath(path), _version), rest)) -> {
@@ -243,8 +241,8 @@ pub fn parse_request(
       )
       use #(headers, rest) <- result.then(parse_headers(
         rest,
-        socket,
-        transport,
+        conn.socket,
+        conn.transport,
         map.new(),
       ))
       use path <- result.then(
@@ -259,16 +257,11 @@ pub fn parse_request(
       let #(path, query) = #(parsed.path, parsed.query)
       let req =
         request.new()
-        |> request.set_scheme(case transport {
+        |> request.set_scheme(case conn.transport {
           transport.Ssl(..) -> http.Https
           transport.Tcp(..) -> http.Http
         })
-        |> request.set_body(Connection(
-          body: Initial(rest),
-          socket: socket,
-          transport: transport,
-          client_ip: client_ip,
-        ))
+        |> request.set_body(Connection(..conn, body: Initial(rest)))
         |> request.set_method(method)
         |> request.set_path(path)
       Ok(request.Request(..req, query: query, headers: map.to_list(headers)))
