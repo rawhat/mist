@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Pass WebSocket state to `on_close` handler
+
+## v0.14.0
+
 - Remove WebSocket builder in favor of plain function
 - Adds `on_init` and `on_close` to WebSocket upgrade function
 - Fix an issue where websocket crashes on internal control close frame
