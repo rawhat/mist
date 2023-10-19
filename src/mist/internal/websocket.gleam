@@ -167,7 +167,7 @@ pub type Handler(state, message) =
 
 pub fn initialize_connection(
   on_init: fn() -> #(state, Option(Selector(user_message))),
-  on_close: fn() -> Nil,
+  on_close: fn(state) -> Nil,
   handler: Handler(state, user_message),
   socket: Socket,
   transport: Transport,
@@ -235,7 +235,7 @@ pub fn initialize_connection(
               connection.socket,
               frame_to_bit_builder(frame),
             )
-          on_close()
+          on_close(state)
           actor.Stop(process.Normal)
         }
         Valid(Internal(Control(PingFrame(length, payload)))) -> {
@@ -245,7 +245,7 @@ pub fn initialize_connection(
           )
           |> result.map(fn(_nil) { actor.continue(state) })
           |> result.lazy_unwrap(fn() {
-            on_close()
+            on_close(state)
             actor.Stop(process.Abnormal("Failed to send pong frame"))
           })
         }
@@ -265,14 +265,14 @@ pub fn initialize_connection(
                 |> actor.Continue(state, _)
               }
               actor.Stop(reason) -> {
-                on_close()
+                on_close(state)
                 actor.Stop(reason)
               }
             }
           })
           |> result.lazy_unwrap(fn() {
             logger.error("Caught error in websocket handler")
-            on_close()
+            on_close(state)
             actor.Stop(process.Abnormal("Websocket terminated"))
           })
         }

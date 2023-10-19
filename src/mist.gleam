@@ -422,7 +422,7 @@ pub fn websocket(
   handler handler: fn(state, WebsocketConnection, WebsocketMessage(message)) ->
     actor.Next(message, state),
   on_init on_init: fn() -> #(state, Option(process.Selector(message))),
-  on_close on_close: fn() -> Nil,
+  on_close on_close: fn(state) -> Nil,
 ) -> Response(ResponseData) {
   let handler = fn(state, connection, message) {
     message
