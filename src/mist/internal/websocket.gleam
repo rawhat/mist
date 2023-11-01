@@ -1,29 +1,29 @@
-import gleam/bit_builder.{BitBuilder}
+import gleam/bit_builder.{type BitBuilder}
 import gleam/bit_string
 import gleam/dynamic
 import gleam/erlang.{rescue}
 import gleam/erlang/atom
-import gleam/erlang/process.{Selector, Subject}
+import gleam/erlang/process.{type Selector, type Subject}
 import gleam/list
-import gleam/option.{Option, Some}
+import gleam/option.{type Option, Some}
 import gleam/otp/actor
 import gleam/result
-import glisten/socket.{Socket}
+import glisten/socket.{type Socket}
 import glisten/socket/options
-import glisten/socket/transport.{Transport}
+import glisten/socket/transport.{type Transport}
 import mist/internal/logger
 
 pub type DataFrame {
-  TextFrame(payload_length: Int, payload: BitString)
-  BinaryFrame(payload_length: Int, payload: BitString)
+  TextFrame(payload_length: Int, payload: BitArray)
+  BinaryFrame(payload_length: Int, payload: BitArray)
 }
 
 pub type ControlFrame {
   // TODO:  should this include data?
-  CloseFrame(payload_length: Int, payload: BitString)
+  CloseFrame(payload_length: Int, payload: BitArray)
   // We don't care about basicaly everything else for now
-  PingFrame(payload_length: Int, payload: BitString)
-  PongFrame(payload_length: Int, payload: BitString)
+  PingFrame(payload_length: Int, payload: BitArray)
+  PongFrame(payload_length: Int, payload: BitArray)
 }
 
 // TODO:  there are other message types, AND ALSO will need to buffer across
@@ -34,25 +34,20 @@ pub type Frame {
 }
 
 @external(erlang, "crypto", "exor")
-fn crypto_exor(a a: BitString, b b: BitString) -> BitString
+fn crypto_exor(a a: BitArray, b b: BitArray) -> BitArray
 
 fn unmask_data(
-  data: BitString,
-  masks: List(BitString),
+  data: BitArray,
+  masks: List(BitArray),
   index: Int,
-  resp: BitString,
-) -> BitString {
+  resp: BitArray,
+) -> BitArray {
   case data {
     <<>> -> resp
-    <<masked:bit_string-size(8), rest:bit_string>> -> {
+    <<masked:bits-size(8), rest:bits>> -> {
       let assert Ok(mask_value) = list.at(masks, index % 4)
       let unmasked = crypto_exor(mask_value, masked)
-      unmask_data(
-        rest,
-        masks,
-        index + 1,
-        <<resp:bit_string, unmasked:bit_string>>,
-      )
+      unmask_data(rest, masks, index + 1, <<resp:bits, unmasked:bits>>)
     }
   }
 }
@@ -60,31 +55,31 @@ fn unmask_data(
 pub fn frame_from_message(
   socket: Socket,
   transport: Transport,
-  message: BitString,
+  message: BitArray,
 ) -> Result(Frame, Nil) {
-  let assert <<_fin:1, rest:bit_string>> = message
-  let assert <<_reserved:3, rest:bit_string>> = rest
-  let assert <<opcode:int-size(4), rest:bit_string>> = rest
+  let assert <<_fin:1, rest:bits>> = message
+  let assert <<_reserved:3, rest:bits>> = rest
+  let assert <<opcode:int-size(4), rest:bits>> = rest
   // mask
-  let assert <<1:1, rest:bit_string>> = rest
-  let assert <<payload_length:int-size(7), rest:bit_string>> = rest
+  let assert <<1:1, rest:bits>> = rest
+  let assert <<payload_length:int-size(7), rest:bits>> = rest
   let #(payload_length, rest) = case payload_length {
     126 -> {
-      let assert <<length:int-size(16), rest:bit_string>> = rest
+      let assert <<length:int-size(16), rest:bits>> = rest
       #(length, rest)
     }
     127 -> {
-      let assert <<length:int-size(64), rest:bit_string>> = rest
+      let assert <<length:int-size(64), rest:bits>> = rest
       #(length, rest)
     }
     _ -> #(payload_length, rest)
   }
   let assert <<
-    mask1:bit_string-size(8),
-    mask2:bit_string-size(8),
-    mask3:bit_string-size(8),
-    mask4:bit_string-size(8),
-    rest:bit_string,
+    mask1:bits-size(8),
+    mask2:bits-size(8),
+    mask3:bits-size(8),
+    mask4:bits-size(8),
+    rest:bits,
   >> = rest
   case payload_length - bit_string.byte_size(rest) {
     0 -> Ok(unmask_data(rest, [mask1, mask2, mask3, mask4], 0, <<>>))
@@ -125,23 +120,23 @@ pub fn frame_to_bit_builder(frame: Frame) -> BitBuilder {
   }
 }
 
-fn make_frame(opcode: Int, length: Int, payload: BitString) -> BitBuilder {
+fn make_frame(opcode: Int, length: Int, payload: BitArray) -> BitBuilder {
   let length_section = case length {
     length if length > 65_535 -> <<127:7, length:int-size(64)>>
     length if length >= 126 -> <<126:7, length:int-size(16)>>
     _length -> <<length:7>>
   }
 
-  <<1:1, 0:3, opcode:4, 0:1, length_section:bit_string, payload:bit_string>>
+  <<1:1, 0:3, opcode:4, 0:1, length_section:bits, payload:bits>>
   |> bit_builder.from_bit_string
 }
 
-pub fn to_text_frame(data: BitString) -> BitBuilder {
+pub fn to_text_frame(data: BitArray) -> BitBuilder {
   let size = bit_string.byte_size(data)
   frame_to_bit_builder(Data(TextFrame(size, data)))
 }
 
-pub fn to_binary_frame(data: BitString) -> BitBuilder {
+pub fn to_binary_frame(data: BitArray) -> BitBuilder {
   let size = bit_string.byte_size(data)
   frame_to_bit_builder(Data(BinaryFrame(size, data)))
 }

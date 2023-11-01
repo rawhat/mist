@@ -1,8 +1,8 @@
-import gleam/bit_builder.{BitBuilder}
+import gleam/bit_builder.{type BitBuilder}
 import gleam/bit_string
 import gleam/http
 import gleam/http/request
-import gleam/http/response.{Response}
+import gleam/http/response.{type Response, Response}
 import gleam/hackney
 import gleam/string
 import gleam/uri
@@ -131,8 +131,8 @@ fn stream_request(
   method method: http.Method,
   path path: String,
   headers headers: List(#(String, String)),
-  body body: BitString,
-) -> Result(#(Int, List(#(String, String)), BitString), Nil)
+  body body: BitArray,
+) -> Result(#(Int, List(#(String, String)), BitArray), Nil)
 
 pub fn it_supports_chunked_encoding() {
   let req =

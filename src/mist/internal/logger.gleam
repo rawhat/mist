@@ -1,4 +1,4 @@
-import gleam/erlang/charlist.{Charlist}
+import gleam/erlang/charlist.{type Charlist}
 
 @external(erlang, "logger", "error")
 fn log_error(format format: Charlist, data data: any) -> Nil

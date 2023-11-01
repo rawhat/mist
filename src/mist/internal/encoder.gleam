@@ -1,6 +1,6 @@
-import gleam/bit_builder.{BitBuilder}
-import gleam/http.{Header}
-import gleam/http/response.{Response}
+import gleam/bit_builder.{type BitBuilder}
+import gleam/http.{type Header}
+import gleam/http/response.{type Response}
 import gleam/int
 import gleam/list
 
@@ -27,7 +27,7 @@ pub fn response_builder(status: Int, headers: List(Header)) -> BitBuilder {
   |> bit_builder.append(<<"\r\n":utf8>>)
 }
 
-pub fn status_to_bit_string(status: Int) -> BitString {
+pub fn status_to_bit_string(status: Int) -> BitArray {
   // Obviously nowhere near exhaustive...
   case status {
     100 -> <<"Continue":utf8>>
