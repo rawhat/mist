@@ -1,28 +1,29 @@
-import gleam/bit_builder.{BitBuilder}
+import gleam/bit_builder.{type BitBuilder}
 import gleam/bit_string
-import gleam/erlang/process.{ProcessDown, Selector}
+import gleam/erlang/process.{type ProcessDown, type Selector}
 import gleam/function
-import gleam/http/request.{Request}
-import gleam/http/response.{Response}
+import gleam/http/request.{type Request}
+import gleam/http/response.{type Response}
 import gleam/int
 import gleam/io
-import gleam/iterator.{Iterator}
-import gleam/option.{None, Option}
+import gleam/iterator.{type Iterator}
+import gleam/option.{type Option, None}
 import gleam/otp/actor
 import gleam/result
 import glisten
 import glisten/socket
 import glisten/socket/transport
-import mist/internal/buffer.{Buffer}
+import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/file
 import mist/internal/handler.{
-  Bytes as InternalBytes, Chunked as InternalChunked, File as InternalFile,
-  ResponseData as InternalResponseData, Websocket as InternalWebsocket,
+  type ResponseData as InternalResponseData, Bytes as InternalBytes,
+  Chunked as InternalChunked, File as InternalFile,
+  Websocket as InternalWebsocket,
 }
-import mist/internal/http.{Connection as InternalConnection}
+import mist/internal/http.{type Connection as InternalConnection}
 import mist/internal/websocket.{
-  BinaryFrame, Data, Internal, SocketClosed, TextFrame, User, ValidMessage,
-  WebsocketConnection,
+  type ValidMessage, type WebsocketConnection, BinaryFrame, Data, Internal,
+  SocketClosed, TextFrame, User,
 }
 
 /// Re-exported type that represents the default `Request` body type. See
@@ -103,7 +104,7 @@ pub type ReadError {
 pub fn read_body(
   req: Request(Connection),
   max_body_limit max_body_limit: Int,
-) -> Result(Request(BitString), ReadError) {
+) -> Result(Request(BitArray), ReadError) {
   req
   |> request.get_header("content-length")
   |> result.then(int.parse)
@@ -125,7 +126,7 @@ pub fn read_body(
 /// variant gives back some data and the next token. `Done` signifies
 /// that we have completed reading the body.
 pub type Chunk {
-  Chunk(data: BitString, consume: fn(Int) -> Result(Chunk, ReadError))
+  Chunk(data: BitArray, consume: fn(Int) -> Result(Chunk, ReadError))
   Done
 }
 
@@ -199,7 +200,7 @@ fn fetch_chunks_until(
   transport: transport.Transport,
   state: ChunkState,
   byte_size: Int,
-) -> Result(#(BitString, ChunkState), ReadError) {
+) -> Result(#(BitArray, ChunkState), ReadError) {
   let data_size = bit_string.byte_size(state.data_buffer.data)
   case state.done, data_size {
     _, size if size >= byte_size -> {
@@ -315,7 +316,7 @@ pub fn port(builder: Builder(in, out), port: Int) -> Builder(in, out) {
 /// to a given size. If the size is too large, or the read fails, the provided
 /// `failure_response` will be sent back as the response.
 pub fn read_request_body(
-  builder: Builder(BitString, out),
+  builder: Builder(BitArray, out),
   bytes_limit bytes_limit: Int,
   failure_response failure_response: Response(out),
 ) -> Builder(Connection, out) {
@@ -389,8 +390,8 @@ pub fn start_https(
 
 /// These are the types of messages that a websocket handler may receive.
 pub type WebsocketMessage(custom) {
-  Text(BitString)
-  Binary(BitString)
+  Text(BitArray)
+  Binary(BitArray)
   Closed
   Shutdown
   Custom(custom)
@@ -460,7 +461,7 @@ pub fn websocket(
 /// Sends a binary frame across the websocket.
 pub fn send_binary_frame(
   connection: WebsocketConnection,
-  frame: BitString,
+  frame: BitArray,
 ) -> Result(Nil, socket.SocketReason) {
   frame
   |> websocket.to_binary_frame
@@ -470,7 +471,7 @@ pub fn send_binary_frame(
 /// Sends a text frame across the websocket.
 pub fn send_text_frame(
   connection: WebsocketConnection,
-  frame: BitString,
+  frame: BitArray,
 ) -> Result(Nil, socket.SocketReason) {
   frame
   |> websocket.to_text_frame

@@ -1,21 +1,23 @@
-import gleam/bit_builder.{BitBuilder}
+import gleam/bit_builder.{type BitBuilder}
 import gleam/dynamic
 import gleam/erlang.{Errored, Exited, Thrown, rescue}
-import gleam/erlang/process.{ProcessDown, Selector, Subject}
-import gleam/http/request.{Request}
+import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
+import gleam/http/request.{type Request}
 import gleam/http/response
 import gleam/int
-import gleam/iterator.{Iterator}
-import gleam/option.{None, Option, Some}
+import gleam/iterator.{type Iterator}
+import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
 import glisten/handler.{Close, Internal}
-import glisten/socket.{Badarg, Socket, SocketReason}
-import glisten/socket/transport.{Transport}
-import glisten.{Loop, Message, Packet}
+import glisten/socket.{type Socket, type SocketReason, Badarg}
+import glisten/socket/transport.{type Transport}
+import glisten.{type Loop, type Message, Packet}
 import mist/internal/encoder
 import mist/internal/file
-import mist/internal/http.{Connection, DecodeError, DiscardPacket, Initial}
+import mist/internal/http.{
+  type Connection, type DecodeError, Connection, DiscardPacket, Initial,
+}
 import mist/internal/logger
 
 pub type ResponseData {

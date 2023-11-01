@@ -1,7 +1,7 @@
-import gleam/bit_builder.{BitBuilder}
+import gleam/bit_builder.{type BitBuilder}
 import gleam/http
 import gleam/http/request
-import gleam/http/response.{Response}
+import gleam/http/response.{type Response, Response}
 import gleam/list
 import gleam/set
 import gleeunit/should
@@ -36,7 +36,7 @@ pub fn chunked_echo_server(port: Int, chunk_size: Int) {
 }
 
 pub fn open_server(port: Int) {
-  fn(req: request.Request(BitString)) -> response.Response(mist.ResponseData) {
+  fn(req: request.Request(BitArray)) -> response.Response(mist.ResponseData) {
     let body =
       req.query
       |> option.map(bit_string.from_string)
@@ -71,7 +71,7 @@ pub fn open_server(port: Int) {
   |> mist.start_http
 }
 
-fn compare_bitstring_body(actual: BitString, expected: BitBuilder) {
+fn compare_bitstring_body(actual: BitArray, expected: BitBuilder) {
   actual
   |> bit_builder.from_bit_string
   |> should.equal(expected)
@@ -112,7 +112,7 @@ pub fn string_response_should_equal(
 }
 
 pub fn bitstring_response_should_equal(
-  actual: Response(BitString),
+  actual: Response(BitArray),
   expected: Response(BitBuilder),
 ) {
   compare_headers_and_status(actual, expected)

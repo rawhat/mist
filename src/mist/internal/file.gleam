@@ -1,6 +1,6 @@
-import gleam/erlang/atom.{Atom}
+import gleam/erlang/atom.{type Atom}
 import gleam/result
-import glisten/socket.{Socket}
+import glisten/socket.{type Socket}
 
 pub type FileDescriptor
 
@@ -15,7 +15,7 @@ pub type File {
   File(descriptor: FileDescriptor, file_size: Int)
 }
 
-pub fn stat(filename: BitString) -> Result(File, FileError) {
+pub fn stat(filename: BitArray) -> Result(File, FileError) {
   filename
   |> open
   |> result.map(fn(fd) {
@@ -34,7 +34,7 @@ pub fn sendfile(
 ) -> Result(Int, Atom)
 
 @external(erlang, "mist_ffi", "file_open")
-fn open(file: BitString) -> Result(FileDescriptor, FileError)
+fn open(file: BitArray) -> Result(FileDescriptor, FileError)
 
 @external(erlang, "filelib", "file_size")
-fn size(path: BitString) -> Int
+fn size(path: BitArray) -> Int

@@ -1,23 +1,23 @@
-import gleam/bit_builder.{BitBuilder}
+import gleam/bit_builder.{type BitBuilder}
 import gleam/bit_string
-import gleam/dynamic.{Dynamic}
-import gleam/erlang/atom.{Atom}
-import gleam/erlang/charlist.{Charlist}
-import gleam/http/request.{Request}
-import gleam/http/response.{Response}
+import gleam/dynamic.{type Dynamic}
+import gleam/erlang/atom.{type Atom}
+import gleam/erlang/charlist.{type Charlist}
+import gleam/http/request.{type Request}
+import gleam/http/response.{type Response, Response}
 import gleam/http
 import gleam/int
 import gleam/list
-import gleam/map.{Map}
-import gleam/option.{Option}
+import gleam/map.{type Map}
+import gleam/option.{type Option}
 import gleam/pair
 import gleam/result
 import gleam/string
 import gleam/uri
-import glisten/handler.{ClientIp}
-import glisten/socket.{Socket}
-import glisten/socket/transport.{Transport}
-import mist/internal/buffer.{Buffer}
+import glisten/handler.{type ClientIp}
+import glisten/socket.{type Socket}
+import glisten/socket/transport.{type Transport}
+import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/encoder
 
 pub type Connection {
@@ -36,17 +36,17 @@ pub type PacketType {
 }
 
 pub type HttpUri {
-  AbsPath(BitString)
+  AbsPath(BitArray)
 }
 
 pub type HttpPacket {
   HttpRequest(Dynamic, HttpUri, #(Int, Int))
-  HttpHeader(Int, Atom, BitString, BitString)
+  HttpHeader(Int, Atom, BitArray, BitArray)
 }
 
 pub type DecodedPacket {
-  BinaryData(HttpPacket, BitString)
-  EndOfHeaders(BitString)
+  BinaryData(HttpPacket, BitArray)
+  EndOfHeaders(BitArray)
   MoreData(Option(Int))
 }
 
@@ -61,18 +61,18 @@ pub type DecodeError {
   DiscardPacket
 }
 
-pub fn from_header(value: BitString) -> String {
+pub fn from_header(value: BitArray) -> String {
   let assert Ok(value) = bit_string.to_string(value)
 
   string.lowercase(value)
 }
 
 pub fn parse_headers(
-  bs: BitString,
+  bs: BitArray,
   socket: Socket,
   transport: Transport,
   headers: Map(String, String),
-) -> Result(#(Map(String, String), BitString), DecodeError) {
+) -> Result(#(Map(String, String), BitArray), DecodeError) {
   case decode_packet(HttphBin, bs, []) {
     Ok(BinaryData(HttpHeader(_, _field, field, value), rest)) -> {
       let field = from_header(field)
@@ -101,7 +101,7 @@ pub fn read_data(
   transport: Transport,
   buffer: Buffer,
   error: DecodeError,
-) -> Result(BitString, DecodeError) {
+) -> Result(BitArray, DecodeError) {
   // TODO:  don't hard-code these, probably
   let to_read = int.min(buffer.remaining, 1_000_000)
   let timeout = 15_000
@@ -113,7 +113,7 @@ pub fn read_data(
   let next_buffer =
     Buffer(
       remaining: int.max(0, buffer.remaining - to_read),
-      data: <<buffer.data:bit_string, data:bit_string>>,
+      data: <<buffer.data:bits, data:bits>>,
     )
 
   case next_buffer.remaining > 0 {
@@ -125,11 +125,11 @@ pub fn read_data(
 const crnl = <<13:int, 10:int>>
 
 pub type Chunk {
-  Chunk(data: BitString, buffer: Buffer)
+  Chunk(data: BitArray, buffer: Buffer)
   Complete
 }
 
-pub fn parse_chunk(string: BitString) -> Chunk {
+pub fn parse_chunk(string: BitArray) -> Chunk {
   case binary_split(string, <<"\r\n":utf8>>) {
     [<<"0":utf8>>, _] -> Complete
     [chunk_size, rest] -> {
@@ -138,12 +138,7 @@ pub fn parse_chunk(string: BitString) -> Chunk {
         Ok(size) -> {
           let size = size * 8
           case rest {
-            <<
-              next_chunk:bit_string-size(size),
-              13:int,
-              10:int,
-              rest:bit_string,
-            >> -> {
+            <<next_chunk:bits-size(size), 13:int, 10:int, rest:bits>> -> {
               Chunk(data: next_chunk, buffer: buffer.new(rest))
             }
             _ -> {
@@ -173,10 +168,10 @@ fn read_chunk(
   case buffer.data, binary_match(buffer.data, crnl) {
     _, Ok(#(offset, _)) -> {
       let assert <<
-        chunk:binary-size(offset),
+        chunk:bytes-size(offset),
         _return:int,
         _newline:int,
-        rest:binary,
+        rest:bytes,
       >> = buffer.data
       use chunk_size <- result.then(
         chunk
@@ -192,7 +187,7 @@ fn read_chunk(
         0 -> Ok(body)
         size ->
           case rest {
-            <<next_chunk:binary-size(size), 13:int, 10:int, rest:binary>> ->
+            <<next_chunk:bytes-size(size), 13:int, 10:int, rest:bytes>> ->
               read_chunk(
                 socket,
                 transport,
@@ -225,7 +220,7 @@ fn read_chunk(
 
 /// Turns the TCP message into an HTTP request
 pub fn parse_request(
-  bs: BitString,
+  bs: BitArray,
   conn: Connection,
 ) -> Result(request.Request(Connection), DecodeError) {
   case decode_packet(HttpBin, bs, []) {
@@ -271,12 +266,12 @@ pub fn parse_request(
 }
 
 pub type Body {
-  Initial(BitString)
+  Initial(BitArray)
 }
 
 pub fn read_body(
   req: Request(Connection),
-) -> Result(Request(BitString), DecodeError) {
+) -> Result(Request(BitArray), DecodeError) {
   let transport = case req.scheme {
     http.Https -> transport.ssl()
     http.Http -> transport.tcp()
@@ -322,8 +317,8 @@ pub fn read_body(
 }
 
 pub type BodySlice {
-  Chunked(data: BitString, buffer: Buffer)
-  Default(data: BitString)
+  Chunked(data: BitArray, buffer: Buffer)
+  Default(data: BitArray)
   Done
 }
 
@@ -433,7 +428,7 @@ pub fn handle_continue(req: Request(Connection)) -> Result(Nil, DecodeError) {
 @external(erlang, "mist_ffi", "decode_packet")
 fn decode_packet(
   packet_type packet_type: PacketType,
-  packet packet: BitString,
+  packet packet: BitArray,
   options options: List(a),
 ) -> Result(DecodedPacket, DecodeError)
 
@@ -445,12 +440,12 @@ pub fn base64_encode(data data: String) -> String
 
 @external(erlang, "mist_ffi", "binary_match")
 fn binary_match(
-  source source: BitString,
-  pattern pattern: BitString,
+  source source: BitArray,
+  pattern pattern: BitArray,
 ) -> Result(#(Int, Int), Nil)
 
 @external(erlang, "mist_ffi", "string_to_int")
 fn string_to_int(string string: Charlist, base base: Int) -> Result(Int, Nil)
 
 @external(erlang, "binary", "split")
-fn binary_split(source: BitString, pattern: BitString) -> List(BitString)
+fn binary_split(source: BitArray, pattern: BitArray) -> List(BitArray)
