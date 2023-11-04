@@ -24,7 +24,7 @@ fed updated configuration options with the associated methods (demonstrated
 in the examples below).
 
 ```gleam
-import gleam/bit_builder
+import gleam/bytes_builder
 import gleam/erlang/process
 import gleam/http/request.{Request}
 import gleam/http/response.{Response}
@@ -43,7 +43,7 @@ pub fn main() {
 
   let not_found =
     response.new(404)
-    |> response.set_body(mist.Bytes(bit_builder.new()))
+    |> response.set_body(mist.Bytes(bytes_builder.new()))
 
   let assert Ok(_) =
     fn(req: Request(Connection)) -> Response(ResponseData) {
@@ -100,12 +100,12 @@ fn echo_body(request: Request(Connection)) -> Response(ResponseData) {
   mist.read_body(request, 1024 * 1024 * 10)
   |> result.map(fn(req) {
     response.new(200)
-    |> response.set_body(mist.Bytes(bit_builder.from_bit_string(req.body)))
+    |> response.set_body(mist.Bytes(bytes_builder.from_bit_array(req.body)))
     |> response.set_header("content-type", content_type)
   })
   |> result.lazy_unwrap(fn() {
     response.new(400)
-    |> response.set_body(mist.Bytes(bit_builder.new()))
+    |> response.set_body(mist.Bytes(bytes_builder.new()))
   })
 }
 
@@ -113,7 +113,7 @@ fn serve_chunk(_request: Request(Connection)) -> Response(ResponseData) {
   let iter =
     ["one", "two", "three"]
     |> iterator.from_list
-    |> iterator.map(bit_builder.from_string)
+    |> iterator.map(bytes_builder.from_string)
 
   response.new(200)
   |> response.set_body(mist.Chunked(iter))
@@ -136,14 +136,14 @@ fn serve_file(
   })
   |> result.lazy_unwrap(fn() {
     response.new(404)
-    |> response.set_body(mist.Bytes(bit_builder.new()))
+    |> response.set_body(mist.Bytes(bytes_builder.new()))
   })
 }
 
 fn handle_form(req: Request(Connection)) -> Response(ResponseData) {
   let _req = mist.read_body(req, 1024 * 1024 * 30)
   response.new(200)
-  |> response.set_body(mist.Bytes(bit_builder.new()))
+  |> response.set_body(mist.Bytes(bytes_builder.new()))
 }
 
 fn guess_content_type(_path: String) -> String {
