@@ -1,4 +1,4 @@
-import gleam/bit_builder.{type BitBuilder}
+import gleam/bytes_builder.{type BytesBuilder}
 import gleam/dynamic
 import gleam/erlang.{Errored, Exited, Thrown, rescue}
 import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
@@ -22,8 +22,8 @@ import mist/internal/logger
 
 pub type ResponseData {
   Websocket(Selector(ProcessDown))
-  Bytes(BitBuilder)
-  Chunked(Iterator(BitBuilder))
+  Bytes(BytesBuilder)
+  Chunked(Iterator(BytesBuilder))
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
 }
 
@@ -85,7 +85,7 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
         let #(_req, response) = req_resp
         case response {
           response.Response(body: Bytes(body), ..) as resp ->
-            handle_bit_builder_body(resp, body, conn)
+            handle_bytes_builder_body(resp, body, conn)
             |> result.map(fn(_res) { close_or_set_timer(resp, conn, sender) })
             |> result.replace_error(stop_normal)
             |> result.unwrap_both
@@ -120,12 +120,12 @@ fn log_and_error(
     Exited(msg) | Thrown(msg) | Errored(msg) -> {
       logger.error(error)
       response.new(500)
-      |> response.set_body(bit_builder.from_bit_string(<<
+      |> response.set_body(bytes_builder.from_bit_array(<<
         "Internal Server Error":utf8,
       >>))
       |> response.prepend_header("content-length", "21")
       |> http.add_default_headers
-      |> encoder.to_bit_builder
+      |> encoder.to_bytes_builder
       |> transport.send(socket, _)
       let _ = transport.close(socket)
       actor.Stop(process.Abnormal(dynamic.unsafe_coerce(msg)))
@@ -153,15 +153,15 @@ fn close_or_set_timer(
   }
 }
 
-fn handle_bit_builder_body(
+fn handle_bytes_builder_body(
   resp: response.Response(ResponseData),
-  body: BitBuilder,
+  body: BytesBuilder,
   conn: Connection,
 ) -> Result(Nil, SocketReason) {
   resp
   |> response.set_body(body)
   |> http.add_default_headers
-  |> encoder.to_bit_builder
+  |> encoder.to_bytes_builder
   |> conn.transport.send(conn.socket, _)
 }
 
@@ -171,7 +171,7 @@ fn int_to_hex(int: Int) -> String {
 
 fn handle_chunked_body(
   resp: response.Response(ResponseData),
-  body: Iterator(BitBuilder),
+  body: Iterator(BytesBuilder),
   conn: Connection,
 ) -> Result(Nil, SocketReason) {
   let headers = [#("transfer-encoding", "chunked"), ..resp.headers]
@@ -180,18 +180,18 @@ fn handle_chunked_body(
   conn.transport.send(conn.socket, initial_payload)
   |> result.then(fn(_ok) {
     body
-    |> iterator.append(iterator.from_list([bit_builder.new()]))
+    |> iterator.append(iterator.from_list([bytes_builder.new()]))
     |> iterator.try_fold(
       Nil,
       fn(_prev, chunk) {
-        let size = bit_builder.byte_size(chunk)
+        let size = bytes_builder.byte_size(chunk)
         let encoded =
           size
           |> int_to_hex
-          |> bit_builder.from_string
-          |> bit_builder.append_string("\r\n")
-          |> bit_builder.append_builder(chunk)
-          |> bit_builder.append_string("\r\n")
+          |> bytes_builder.from_string
+          |> bytes_builder.append_string("\r\n")
+          |> bytes_builder.append_builder(chunk)
+          |> bytes_builder.append_string("\r\n")
 
         conn.transport.send(conn.socket, encoded)
       },
@@ -207,8 +207,8 @@ fn handle_file_body(
   let assert File(file_descriptor, offset, length) = resp.body
   resp
   |> response.prepend_header("content-length", int.to_string(length - offset))
-  |> response.set_body(bit_builder.new())
-  |> fn(r: response.Response(BitBuilder)) {
+  |> response.set_body(bytes_builder.new())
+  |> fn(r: response.Response(BytesBuilder)) {
     encoder.response_builder(resp.status, r.headers)
   }
   |> conn.transport.send(conn.socket, _)
