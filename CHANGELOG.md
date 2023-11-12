@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.14.2
 
 - Pass scheme to `after_start` to allow building valid URLs
 
