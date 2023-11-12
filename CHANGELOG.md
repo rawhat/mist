@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## v0.14.1
 
 - Pass WebSocket state to `on_close` handler
+- Fix socket active mode bug in WebSocket actor
 
 ## v0.14.0
 
