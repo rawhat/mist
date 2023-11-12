@@ -4,6 +4,8 @@
 
 - Pass WebSocket state to `on_close` handler
 - Fix socket active mode bug in WebSocket actor
+- Update packages and change `bit_string` to `bit_array` and `bit_builder` to
+  `bytes_builder`
 
 ## v0.14.0
 
