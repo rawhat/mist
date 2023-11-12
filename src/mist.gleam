@@ -4,6 +4,7 @@ import gleam/erlang/process.{type ProcessDown, type Selector}
 import gleam/function
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
+import gleam/http.{type Scheme, Http, Https} as gleam_http
 import gleam/int
 import gleam/io
 import gleam/iterator.{type Iterator}
@@ -290,7 +291,7 @@ pub opaque type Builder(request_body, response_body) {
   Builder(
     port: Int,
     handler: fn(Request(request_body)) -> Response(response_body),
-    after_start: fn(Int) -> Nil,
+    after_start: fn(Int, Scheme) -> Nil,
   )
 }
 
@@ -300,8 +301,11 @@ pub fn new(handler: fn(Request(in)) -> Response(out)) -> Builder(in, out) {
   Builder(
     port: 4000,
     handler: handler,
-    after_start: fn(port) {
-      let message = "Listening on localhost:" <> int.to_string(port)
+    after_start: fn(port, scheme) {
+      let message =
+        "Listening on " <> gleam_http.scheme_to_string(scheme) <> "://localhost:" <> int.to_string(
+          port,
+        )
       io.println(message)
     },
   )
@@ -333,7 +337,7 @@ pub fn read_request_body(
 /// default is to log a message with the listening port.
 pub fn after_start(
   builder: Builder(in, out),
-  after_start: fn(Int) -> Nil,
+  after_start: fn(Int, Scheme) -> Nil,
 ) -> Builder(in, out) {
   Builder(..builder, after_start: after_start)
 }
@@ -360,7 +364,7 @@ pub fn start_http(
   |> glisten.handler(fn() { #(handler.new_state(), None) }, _)
   |> glisten.serve(builder.port)
   |> result.map(fn(nil) {
-    builder.after_start(builder.port)
+    builder.after_start(builder.port, Http)
     // TODO:  This should not be `Nil` but instead a subject that can receive
     // messages, such as shutdown
     nil
@@ -381,7 +385,7 @@ pub fn start_https(
   |> glisten.handler(fn() { #(handler.new_state(), None) }, _)
   |> glisten.serve_ssl(builder.port, certfile, keyfile)
   |> result.map(fn(nil) {
-    builder.after_start(builder.port)
+    builder.after_start(builder.port, Https)
     // TODO:  This should not be `Nil` but instead a subject that can receive
     // messages, such as shutdown
     nil
