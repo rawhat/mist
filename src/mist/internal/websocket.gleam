@@ -282,7 +282,7 @@ pub fn initialize_connection(
     let assert Ok(_) =
       connection.transport.set_opts(
         connection.socket,
-        [options.ActiveMode(options.Active)],
+        [options.ActiveMode(options.Once)],
       )
     subj
   })
