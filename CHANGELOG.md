@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Pass scheme to `after_start` to allow building valid URLs
+
 ## v0.14.1
 
 - Pass WebSocket state to `on_close` handler
