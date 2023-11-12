@@ -1,5 +1,5 @@
-import gleam/bit_builder.{type BitBuilder}
-import gleam/bit_string
+import gleam/bytes_builder.{type BytesBuilder}
+import gleam/bit_array
 import gleam/erlang/process.{type ProcessDown, type Selector}
 import gleam/function
 import gleam/http/request.{type Request}
@@ -42,8 +42,8 @@ pub type Connection =
 /// Erlang's `sendfile` to more efficiently return a file to the client.
 pub type ResponseData {
   Websocket(Selector(ProcessDown))
-  Bytes(BitBuilder)
-  Chunked(Iterator(BitBuilder))
+  Bytes(BytesBuilder)
+  Chunked(Iterator(BytesBuilder))
   /// See `mist.send_file` to use this response type.
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
 }
@@ -77,7 +77,7 @@ pub fn send_file(
   limit limit: Option(Int),
 ) -> Result(ResponseData, FileError) {
   path
-  |> bit_string.from_string
+  |> bit_array.from_string
   |> file.stat
   |> result.map_error(convert_file_errors)
   |> result.map(fn(stat) {
@@ -137,7 +137,7 @@ fn do_stream(
   fn(size) {
     let socket = req.body.socket
     let transport = req.body.transport
-    let byte_size = bit_string.byte_size(buffer.data)
+    let byte_size = bit_array.byte_size(buffer.data)
 
     case buffer.remaining, byte_size {
       0, 0 -> Ok(Done)
@@ -157,10 +157,10 @@ fn do_stream(
         http.read_data(socket, transport, buffer.empty(), http.InvalidBody)
         |> result.replace_error(MalformedBody)
         |> result.map(fn(data) {
-          let fetched_data = bit_string.byte_size(data)
+          let fetched_data = bit_array.byte_size(data)
           let new_buffer =
             Buffer(
-              data: bit_string.append(buffer.data, data),
+              data: bit_array.append(buffer.data, data),
               remaining: int.max(0, buffer.remaining - fetched_data),
             )
           let #(new_data, rest) = buffer.slice(new_buffer, size)
@@ -201,7 +201,7 @@ fn fetch_chunks_until(
   state: ChunkState,
   byte_size: Int,
 ) -> Result(#(BitArray, ChunkState), ReadError) {
-  let data_size = bit_string.byte_size(state.data_buffer.data)
+  let data_size = bit_array.byte_size(state.data_buffer.data)
   case state.done, data_size {
     _, size if size >= byte_size -> {
       let #(value, rest) = buffer.slice(state.data_buffer, byte_size)
@@ -276,7 +276,7 @@ pub fn stream(
         |> result.then(int.parse)
         |> result.unwrap(0)
 
-      let initial_size = bit_string.byte_size(data)
+      let initial_size = bit_array.byte_size(data)
 
       let buffer =
         Buffer(data: data, remaining: int.max(0, content_length - initial_size))
@@ -454,7 +454,7 @@ pub fn websocket(
   })
   |> result.lazy_unwrap(fn() {
     response.new(400)
-    |> response.set_body(Bytes(bit_builder.new()))
+    |> response.set_body(Bytes(bytes_builder.new()))
   })
 }
 

@@ -1,5 +1,5 @@
-import gleam/bit_builder.{type BitBuilder}
-import gleam/bit_string
+import gleam/bytes_builder.{type BytesBuilder}
+import gleam/bit_array
 import gleam/dynamic
 import gleam/erlang.{rescue}
 import gleam/erlang/atom
@@ -81,7 +81,7 @@ pub fn frame_from_message(
     mask4:bits-size(8),
     rest:bits,
   >> = rest
-  case payload_length - bit_string.byte_size(rest) {
+  case payload_length - bit_array.byte_size(rest) {
     0 -> Ok(unmask_data(rest, [mask1, mask2, mask3, mask4], 0, <<>>))
     need -> {
       need
@@ -89,7 +89,7 @@ pub fn frame_from_message(
       |> result.replace_error(Nil)
       |> result.map(fn(needed) {
         rest
-        |> bit_string.append(needed)
+        |> bit_array.append(needed)
         |> unmask_data([mask1, mask2, mask3, mask4], 0, <<>>)
       })
     }
@@ -105,7 +105,7 @@ pub fn frame_from_message(
   })
 }
 
-pub fn frame_to_bit_builder(frame: Frame) -> BitBuilder {
+pub fn frame_to_bytes_builder(frame: Frame) -> BytesBuilder {
   case frame {
     Data(TextFrame(payload_length, payload)) ->
       make_frame(1, payload_length, payload)
@@ -120,7 +120,7 @@ pub fn frame_to_bit_builder(frame: Frame) -> BitBuilder {
   }
 }
 
-fn make_frame(opcode: Int, length: Int, payload: BitArray) -> BitBuilder {
+fn make_frame(opcode: Int, length: Int, payload: BitArray) -> BytesBuilder {
   let length_section = case length {
     length if length > 65_535 -> <<127:7, length:int-size(64)>>
     length if length >= 126 -> <<126:7, length:int-size(16)>>
@@ -128,17 +128,17 @@ fn make_frame(opcode: Int, length: Int, payload: BitArray) -> BitBuilder {
   }
 
   <<1:1, 0:3, opcode:4, 0:1, length_section:bits, payload:bits>>
-  |> bit_builder.from_bit_string
+  |> bytes_builder.from_bit_array
 }
 
-pub fn to_text_frame(data: BitArray) -> BitBuilder {
-  let size = bit_string.byte_size(data)
-  frame_to_bit_builder(Data(TextFrame(size, data)))
+pub fn to_text_frame(data: BitArray) -> BytesBuilder {
+  let size = bit_array.byte_size(data)
+  frame_to_bytes_builder(Data(TextFrame(size, data)))
 }
 
-pub fn to_binary_frame(data: BitArray) -> BitBuilder {
-  let size = bit_string.byte_size(data)
-  frame_to_bit_builder(Data(BinaryFrame(size, data)))
+pub fn to_binary_frame(data: BitArray) -> BytesBuilder {
+  let size = bit_array.byte_size(data)
+  frame_to_bytes_builder(Data(BinaryFrame(size, data)))
 }
 
 pub type ValidMessage(user_message) {
@@ -180,7 +180,7 @@ pub fn initialize_connection(
           atom.create_from_string("tcp"),
           fn(_sock, data) {
             data
-            |> dynamic.bit_string
+            |> dynamic.bit_array
             |> result.replace_error(Nil)
             |> result.then(frame_from_message(socket, transport, _))
             |> result.map(Internal)
@@ -192,7 +192,7 @@ pub fn initialize_connection(
           atom.create_from_string("ssl"),
           fn(_sock, data) {
             data
-            |> dynamic.bit_string
+            |> dynamic.bit_array
             |> result.replace_error(Nil)
             |> result.then(frame_from_message(socket, transport, _))
             |> result.map(Internal)
@@ -228,7 +228,7 @@ pub fn initialize_connection(
           let _ =
             connection.transport.send(
               connection.socket,
-              frame_to_bit_builder(frame),
+              frame_to_bytes_builder(frame),
             )
           on_close(state)
           actor.Stop(process.Normal)
@@ -236,7 +236,7 @@ pub fn initialize_connection(
         Valid(Internal(Control(PingFrame(length, payload)))) -> {
           connection.transport.send(
             connection.socket,
-            frame_to_bit_builder(Control(PongFrame(length, payload))),
+            frame_to_bytes_builder(Control(PongFrame(length, payload))),
           )
           |> result.map(fn(_nil) { actor.continue(state) })
           |> result.lazy_unwrap(fn() {
