@@ -1,33 +1,33 @@
-import gleam/bit_builder.{type BitBuilder}
+import gleam/bytes_builder.{type BytesBuilder}
 import gleam/http.{type Header}
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/list
 
 /// Turns an HTTP response into a TCP message
-pub fn to_bit_builder(resp: Response(BitBuilder)) -> BitBuilder {
+pub fn to_bytes_builder(resp: Response(BytesBuilder)) -> BytesBuilder {
   resp.status
   |> response_builder(resp.headers)
-  |> bit_builder.append_builder(resp.body)
+  |> bytes_builder.append_builder(resp.body)
 }
 
-pub fn response_builder(status: Int, headers: List(Header)) -> BitBuilder {
+pub fn response_builder(status: Int, headers: List(Header)) -> BytesBuilder {
   let status_string =
     status
     |> int.to_string
-    |> bit_builder.from_string
-    |> bit_builder.append(<<" ":utf8>>)
-    |> bit_builder.append(status_to_bit_string(status))
+    |> bytes_builder.from_string
+    |> bytes_builder.append(<<" ":utf8>>)
+    |> bytes_builder.append(status_to_bit_array(status))
 
-  bit_builder.new()
-  |> bit_builder.append(<<"HTTP/1.1 ":utf8>>)
-  |> bit_builder.append_builder(status_string)
-  |> bit_builder.append(<<"\r\n":utf8>>)
-  |> bit_builder.append_builder(encode_headers(headers))
-  |> bit_builder.append(<<"\r\n":utf8>>)
+  bytes_builder.new()
+  |> bytes_builder.append(<<"HTTP/1.1 ":utf8>>)
+  |> bytes_builder.append_builder(status_string)
+  |> bytes_builder.append(<<"\r\n":utf8>>)
+  |> bytes_builder.append_builder(encode_headers(headers))
+  |> bytes_builder.append(<<"\r\n":utf8>>)
 }
 
-pub fn status_to_bit_string(status: Int) -> BitArray {
+pub fn status_to_bit_array(status: Int) -> BitArray {
   // Obviously nowhere near exhaustive...
   case status {
     100 -> <<"Continue":utf8>>
@@ -87,18 +87,18 @@ pub fn status_to_bit_string(status: Int) -> BitArray {
   }
 }
 
-pub fn encode_headers(headers: List(Header)) -> BitBuilder {
+pub fn encode_headers(headers: List(Header)) -> BytesBuilder {
   list.fold(
     headers,
-    bit_builder.new(),
+    bytes_builder.new(),
     fn(builder, tup) {
       let #(header, value) = tup
 
       builder
-      |> bit_builder.append_string(header)
-      |> bit_builder.append(<<": ":utf8>>)
-      |> bit_builder.append_string(value)
-      |> bit_builder.append(<<"\r\n":utf8>>)
+      |> bytes_builder.append_string(header)
+      |> bytes_builder.append(<<": ":utf8>>)
+      |> bytes_builder.append_string(value)
+      |> bytes_builder.append(<<"\r\n":utf8>>)
     },
   )
 }

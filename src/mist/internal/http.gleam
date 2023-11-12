@@ -1,5 +1,5 @@
-import gleam/bit_builder.{type BitBuilder}
-import gleam/bit_string
+import gleam/bytes_builder.{type BytesBuilder}
+import gleam/bit_array
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist.{type Charlist}
@@ -62,7 +62,7 @@ pub type DecodeError {
 }
 
 pub fn from_header(value: BitArray) -> String {
-  let assert Ok(value) = bit_string.to_string(value)
+  let assert Ok(value) = bit_array.to_string(value)
 
   string.lowercase(value)
 }
@@ -76,7 +76,7 @@ pub fn parse_headers(
   case decode_packet(HttphBin, bs, []) {
     Ok(BinaryData(HttpHeader(_, _field, field, value), rest)) -> {
       let field = from_header(field)
-      let assert Ok(value) = bit_string.to_string(value)
+      let assert Ok(value) = bit_array.to_string(value)
       headers
       |> map.insert(field, value)
       |> parse_headers(rest, socket, transport, _)
@@ -133,7 +133,7 @@ pub fn parse_chunk(string: BitArray) -> Chunk {
   case binary_split(string, <<"\r\n":utf8>>) {
     [<<"0":utf8>>, _] -> Complete
     [chunk_size, rest] -> {
-      let assert Ok(chunk_size) = bit_string.to_string(chunk_size)
+      let assert Ok(chunk_size) = bit_array.to_string(chunk_size)
       case int.base_parse(chunk_size, 16) {
         Ok(size) -> {
           let size = size * 8
@@ -163,8 +163,8 @@ fn read_chunk(
   socket: Socket,
   transport: Transport,
   buffer: Buffer,
-  body: BitBuilder,
-) -> Result(BitBuilder, DecodeError) {
+  body: BytesBuilder,
+) -> Result(BytesBuilder, DecodeError) {
   case buffer.data, binary_match(buffer.data, crnl) {
     _, Ok(#(offset, _)) -> {
       let assert <<
@@ -175,7 +175,7 @@ fn read_chunk(
       >> = buffer.data
       use chunk_size <- result.then(
         chunk
-        |> bit_string.to_string
+        |> bit_array.to_string
         |> result.map(charlist.from_string)
         |> result.replace_error(InvalidBody),
       )
@@ -192,7 +192,7 @@ fn read_chunk(
                 socket,
                 transport,
                 Buffer(0, rest),
-                bit_builder.append(body, next_chunk),
+                bytes_builder.append(body, next_chunk),
               )
             _ -> {
               use next <- result.then(read_data(
@@ -242,7 +242,7 @@ pub fn parse_request(
       ))
       use path <- result.then(
         path
-        |> bit_string.to_string
+        |> bit_array.to_string
         |> result.replace_error(InvalidPath),
       )
       use parsed <- result.then(
@@ -284,9 +284,9 @@ pub fn read_body(
         req.body.socket,
         transport,
         Buffer(remaining: 0, data: rest),
-        bit_builder.new(),
+        bytes_builder.new(),
       ))
-      Ok(request.set_body(req, bit_builder.to_bit_string(chunk)))
+      Ok(request.set_body(req, bytes_builder.to_bit_array(chunk)))
     }
     _, Initial(rest) -> {
       use _nil <- result.then(handle_continue(req))
@@ -296,7 +296,7 @@ pub fn read_body(
         |> result.map(pair.second)
         |> result.then(int.parse)
         |> result.unwrap(0)
-      let remaining = body_size - bit_string.byte_size(rest)
+      let remaining = body_size - bit_array.byte_size(rest)
       case body_size, remaining {
         0, 0 -> Ok(<<>>)
         0, _n -> Ok(rest)
@@ -337,7 +337,7 @@ fn parse_websocket_key(key: String) -> String {
 
 pub fn upgrade_socket(
   req: Request(Connection),
-) -> Result(Response(BitBuilder), Request(Connection)) {
+) -> Result(Response(BytesBuilder), Request(Connection)) {
   use _upgrade <- result.then(
     request.get_header(req, "upgrade")
     |> result.replace_error(req),
@@ -354,7 +354,7 @@ pub fn upgrade_socket(
   let accept_key = parse_websocket_key(key)
 
   response.new(101)
-  |> response.set_body(bit_builder.new())
+  |> response.set_body(bytes_builder.new())
   |> response.prepend_header("Upgrade", "websocket")
   |> response.prepend_header("Connection", "Upgrade")
   |> response.prepend_header("Sec-WebSocket-Accept", accept_key)
@@ -375,7 +375,7 @@ pub fn upgrade(
   use _sent <- result.then(
     resp
     |> add_default_headers
-    |> encoder.to_bit_builder
+    |> encoder.to_bytes_builder
     |> transport.send(socket, _)
     |> result.nil_error,
   )
@@ -383,8 +383,10 @@ pub fn upgrade(
   Ok(Nil)
 }
 
-pub fn add_default_headers(resp: Response(BitBuilder)) -> Response(BitBuilder) {
-  let body_size = bit_builder.byte_size(resp.body)
+pub fn add_default_headers(
+  resp: Response(BytesBuilder),
+) -> Response(BytesBuilder) {
+  let body_size = bytes_builder.byte_size(resp.body)
 
   let headers =
     map.from_list([
@@ -416,8 +418,8 @@ pub fn handle_continue(req: Request(Connection)) -> Result(Nil, DecodeError) {
   case is_continue(req) {
     True -> {
       response.new(100)
-      |> response.set_body(bit_builder.new())
-      |> encoder.to_bit_builder
+      |> response.set_body(bytes_builder.new())
+      |> encoder.to_bytes_builder
       |> req.body.transport.send(req.body.socket, _)
       |> result.replace_error(MalformedRequest)
     }
