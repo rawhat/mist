@@ -238,7 +238,14 @@ pub fn initialize_connection(
             connection.socket,
             frame_to_bytes_builder(Control(PongFrame(length, payload))),
           )
-          |> result.map(fn(_nil) { actor.continue(state) })
+          |> result.map(fn(_nil) {
+            let assert Ok(_) =
+              connection.transport.set_opts(
+                connection.socket,
+                [options.ActiveMode(options.Once)],
+              )
+            actor.continue(state)
+          })
           |> result.lazy_unwrap(fn() {
             on_close(state)
             actor.Stop(process.Abnormal("Failed to send pong frame"))
@@ -246,6 +253,11 @@ pub fn initialize_connection(
         }
         Invalid -> {
           logger.error(#("Received a malformed Websocket frame"))
+          let assert Ok(_) =
+            connection.transport.set_opts(
+              connection.socket,
+              [options.ActiveMode(options.Once)],
+            )
           actor.continue(state)
         }
         Valid(msg) -> {
@@ -253,6 +265,11 @@ pub fn initialize_connection(
           |> result.map(fn(cont) {
             case cont {
               actor.Continue(state, selector) -> {
+                let assert Ok(_) =
+                  connection.transport.set_opts(
+                    connection.socket,
+                    [options.ActiveMode(options.Once)],
+                  )
                 selector
                 |> option.map(process.map_selector(_, fn(msg) {
                   Valid(User(msg))
