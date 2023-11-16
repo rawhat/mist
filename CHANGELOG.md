@@ -1,5 +1,9 @@
 # Changelog
 
+## V0.14.3
+
+- Fix regression in WebSocket handler
+
 ## v0.14.2
 
 - Pass scheme to `after_start` to allow building valid URLs
