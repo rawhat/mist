@@ -23,8 +23,8 @@ import mist/internal/handler.{
 }
 import mist/internal/http.{type Connection as InternalConnection}
 import mist/internal/websocket.{
-  type ValidMessage, type WebsocketConnection, BinaryFrame, Data, Internal,
-  SocketClosed, TextFrame, User,
+  type HandlerMessage, type WebsocketConnection as InternalWebsocketConnection,
+  BinaryFrame, Data, Internal, TextFrame, User,
 }
 
 /// Re-exported type that represents the default `Request` body type. See
@@ -402,12 +402,11 @@ pub type WebsocketMessage(custom) {
 }
 
 fn internal_to_public_ws_message(
-  msg: ValidMessage(custom),
+  msg: HandlerMessage(custom),
 ) -> WebsocketMessage(custom) {
   case msg {
     Internal(Data(TextFrame(_length, data))) -> Text(data)
     Internal(Data(BinaryFrame(_length, data))) -> Binary(data)
-    SocketClosed -> Closed
     User(msg) -> Custom(msg)
   }
 }
@@ -426,7 +425,8 @@ pub fn websocket(
   request request: Request(Connection),
   handler handler: fn(state, WebsocketConnection, WebsocketMessage(message)) ->
     actor.Next(message, state),
-  on_init on_init: fn() -> #(state, Option(process.Selector(message))),
+  on_init on_init: fn(WebsocketConnection) ->
+    #(state, Option(process.Selector(message))),
   on_close on_close: fn(state) -> Nil,
 ) -> Response(ResponseData) {
   let handler = fn(state, connection, message) {
@@ -461,6 +461,9 @@ pub fn websocket(
     |> response.set_body(Bytes(bytes_builder.new()))
   })
 }
+
+pub type WebsocketConnection =
+  InternalWebsocketConnection
 
 /// Sends a binary frame across the websocket.
 pub fn send_binary_frame(
