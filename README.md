@@ -51,7 +51,7 @@ pub fn main() {
         ["ws"] ->
           mist.websocket(
             request: req,
-            on_init: fn() { #(state, Some(selector)) },
+            on_init: fn(_conn) { #(state, Some(selector)) },
             on_close: fn(_state) { io.println("goodbye!") },
             handler: handle_ws_message,
           )
