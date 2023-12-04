@@ -1,11 +1,11 @@
 # Changelog
 
-## Unreleased
+## v0.15.0
 
 - Lots of WebSocket changes around spec correctness (still not 100% there)
 - Fixed a few bugs around WebSocket handlers and user selectors
 
-## V0.14.3
+## v0.14.3
 
 - Fix regression in WebSocket handler
 
