@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Log error from `rescue` in WebSocket handlers
+
 ## v0.15.0
 
 - Lots of WebSocket changes around spec correctness (still not 100% there)
