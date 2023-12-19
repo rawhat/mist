@@ -84,21 +84,18 @@ pub fn status_to_bit_array(status: Int) -> BitArray {
     508 -> <<"Loop Detected":utf8>>
     510 -> <<"Not Extended":utf8>>
     511 -> <<"Network Authentication Required":utf8>>
+    _ -> <<"Unknown HTTP Status":utf8>>
   }
 }
 
 pub fn encode_headers(headers: List(Header)) -> BytesBuilder {
-  list.fold(
-    headers,
-    bytes_builder.new(),
-    fn(builder, tup) {
-      let #(header, value) = tup
+  list.fold(headers, bytes_builder.new(), fn(builder, tup) {
+    let #(header, value) = tup
 
-      builder
-      |> bytes_builder.append_string(header)
-      |> bytes_builder.append(<<": ":utf8>>)
-      |> bytes_builder.append_string(value)
-      |> bytes_builder.append(<<"\r\n":utf8>>)
-    },
-  )
+    builder
+    |> bytes_builder.append_string(header)
+    |> bytes_builder.append(<<": ":utf8>>)
+    |> bytes_builder.append_string(value)
+    |> bytes_builder.append(<<"\r\n":utf8>>)
+  })
 }
