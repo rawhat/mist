@@ -47,16 +47,13 @@ pub fn open_server(port: Int) {
       |> bytes_builder.byte_size
       |> int.to_string
     let headers =
-      list.filter(
-        req.headers,
-        fn(p) {
-          case p {
-            #("transfer-encoding", "chunked") -> False
-            #("content-length", _) -> False
-            _ -> True
-          }
-        },
-      )
+      list.filter(req.headers, fn(p) {
+        case p {
+          #("transfer-encoding", "chunked") -> False
+          #("content-length", _) -> False
+          _ -> True
+        }
+      })
       |> list.prepend(#("content-length", length))
     Response(status: 200, headers: headers, body: mist.Bytes(body))
   }
@@ -90,15 +87,13 @@ fn compare_headers_and_status(actual: Response(a), expected: Response(b)) {
   let actual_headers = set.from_list(actual.headers)
 
   let missing_headers =
-    set.filter(
-      expected_headers,
-      fn(header) { set.contains(actual_headers, header) == False },
-    )
+    set.filter(expected_headers, fn(header) {
+      set.contains(actual_headers, header) == False
+    })
   let extra_headers =
-    set.filter(
-      actual_headers,
-      fn(header) { set.contains(expected_headers, header) == False },
-    )
+    set.filter(actual_headers, fn(header) {
+      set.contains(expected_headers, header) == False
+    })
 
   should.equal(missing_headers, extra_headers)
 }

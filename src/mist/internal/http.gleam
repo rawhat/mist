@@ -111,10 +111,10 @@ pub fn read_data(
     |> result.replace_error(error),
   )
   let next_buffer =
-    Buffer(
-      remaining: int.max(0, buffer.remaining - to_read),
-      data: <<buffer.data:bits, data:bits>>,
-    )
+    Buffer(remaining: int.max(0, buffer.remaining - to_read), data: <<
+      buffer.data:bits,
+      data:bits,
+    >>)
 
   case next_buffer.remaining > 0 {
     True -> read_data(socket, transport, next_buffer, error)
