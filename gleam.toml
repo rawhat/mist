@@ -8,7 +8,7 @@ target = "erlang"
 gleam = ">= 0.32.0"
 
 [dependencies]
-gleam_stdlib = "~> 0.32"
+gleam_stdlib = "~> 0.34"
 gleam_erlang = "~> 0.23"
 gleam_http = "~> 3.5"
 gleam_otp = "~> 0.8"
@@ -16,4 +16,4 @@ glisten = "~> 0.9"
 
 [dev-dependencies]
 gleeunit = "~> 1.0"
-gleam_hackney = "~> 1.0"
+gleam_hackney = "~> 1.2"
