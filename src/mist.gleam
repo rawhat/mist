@@ -298,17 +298,14 @@ pub opaque type Builder(request_body, response_body) {
 /// Create a new `mist` handler with a given function. The default port is
 /// 4000.
 pub fn new(handler: fn(Request(in)) -> Response(out)) -> Builder(in, out) {
-  Builder(
-    port: 4000,
-    handler: handler,
-    after_start: fn(port, scheme) {
-      let message =
-        "Listening on " <> gleam_http.scheme_to_string(scheme) <> "://localhost:" <> int.to_string(
-          port,
-        )
-      io.println(message)
-    },
-  )
+  Builder(port: 4000, handler: handler, after_start: fn(port, scheme) {
+    let message =
+      "Listening on "
+      <> gleam_http.scheme_to_string(scheme)
+      <> "://localhost:"
+      <> int.to_string(port)
+    io.println(message)
+  })
 }
 
 /// Assign a different listening port to the service.
@@ -403,11 +400,12 @@ pub type WebsocketMessage(custom) {
 
 fn internal_to_public_ws_message(
   msg: HandlerMessage(custom),
-) -> WebsocketMessage(custom) {
+) -> Result(WebsocketMessage(custom), Nil) {
   case msg {
-    Internal(Data(TextFrame(_length, data))) -> Text(data)
-    Internal(Data(BinaryFrame(_length, data))) -> Binary(data)
-    User(msg) -> Custom(msg)
+    Internal(Data(TextFrame(_length, data))) -> Ok(Text(data))
+    Internal(Data(BinaryFrame(_length, data))) -> Ok(Binary(data))
+    User(msg) -> Ok(Custom(msg))
+    _ -> Error(Nil)
   }
 }
 
@@ -432,7 +430,8 @@ pub fn websocket(
   let handler = fn(state, connection, message) {
     message
     |> internal_to_public_ws_message
-    |> handler(state, connection, _)
+    |> result.map(handler(state, connection, _))
+    |> result.unwrap(actor.continue(state))
   }
   let socket = request.body.socket
   let transport = request.body.transport
