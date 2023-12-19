@@ -120,9 +120,9 @@ fn log_and_error(
     Exited(msg) | Thrown(msg) | Errored(msg) -> {
       logger.error(error)
       response.new(500)
-      |> response.set_body(bytes_builder.from_bit_array(<<
-        "Internal Server Error":utf8,
-      >>))
+      |> response.set_body(
+        bytes_builder.from_bit_array(<<"Internal Server Error":utf8>>),
+      )
       |> response.prepend_header("content-length", "21")
       |> http.add_default_headers
       |> encoder.to_bytes_builder
@@ -181,21 +181,18 @@ fn handle_chunked_body(
   |> result.then(fn(_ok) {
     body
     |> iterator.append(iterator.from_list([bytes_builder.new()]))
-    |> iterator.try_fold(
-      Nil,
-      fn(_prev, chunk) {
-        let size = bytes_builder.byte_size(chunk)
-        let encoded =
-          size
-          |> int_to_hex
-          |> bytes_builder.from_string
-          |> bytes_builder.append_string("\r\n")
-          |> bytes_builder.append_builder(chunk)
-          |> bytes_builder.append_string("\r\n")
+    |> iterator.try_fold(Nil, fn(_prev, chunk) {
+      let size = bytes_builder.byte_size(chunk)
+      let encoded =
+        size
+        |> int_to_hex
+        |> bytes_builder.from_string
+        |> bytes_builder.append_string("\r\n")
+        |> bytes_builder.append_builder(chunk)
+        |> bytes_builder.append_string("\r\n")
 
-        conn.transport.send(conn.socket, encoded)
-      },
-    )
+      conn.transport.send(conn.socket, encoded)
+    })
   })
   |> result.replace(Nil)
 }

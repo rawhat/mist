@@ -176,9 +176,11 @@ pub fn it_supports_query_parameters() {
   let expected =
     get_default_response()
     |> response.set_header("content-length", "61")
-    |> response.set_body(bytes_builder.from_bit_array(<<
-      "something=123&another=true&a-complicated-one=is%20the%20thing":utf8,
-    >>))
+    |> response.set_body(
+      bytes_builder.from_bit_array(<<
+        "something=123&another=true&a-complicated-one=is%20the%20thing":utf8,
+      >>),
+    )
 
   string_response_should_equal(resp, expected)
 }

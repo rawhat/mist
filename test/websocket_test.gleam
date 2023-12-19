@@ -19,5 +19,6 @@ pub fn it_should_combine_continuation_frames_test() {
 
   messages
   |> websocket.aggregate_frames(None, [])
-  |> should.equal(Ok([Data(TextFrame(bit_array.byte_size(combined), combined))]))
+  |> should.equal(Ok([Data(TextFrame(bit_array.byte_size(combined), combined))]),
+  )
 }
