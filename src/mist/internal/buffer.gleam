@@ -1,3 +1,6 @@
+import gleam/bit_array
+import gleam/int
+
 pub type Buffer {
   Buffer(remaining: Int, data: BitArray)
 }
@@ -11,7 +14,9 @@ pub fn new(data: BitArray) -> Buffer {
 }
 
 pub fn append(buffer: Buffer, data: BitArray) -> Buffer {
-  Buffer(..buffer, data: <<buffer.data:bits, data:bits>>)
+  let data_size = bit_array.byte_size(data)
+  let remaining = int.max(buffer.remaining - data_size, 0)
+  Buffer(data: <<buffer.data:bits, data:bits>>, remaining: remaining)
 }
 
 pub fn slice(buffer: Buffer, bits: Int) -> #(BitArray, BitArray) {
