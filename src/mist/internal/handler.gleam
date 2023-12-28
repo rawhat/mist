@@ -23,6 +23,7 @@ import mist/internal/http.{
 }
 import mist/internal/http2/frame.{Settings}
 import mist/internal/http2/stream
+import mist/internal/http2.{type HpackContext, hpack_new_context}
 import mist/internal/logger
 
 pub type HandlerError {
@@ -45,7 +46,11 @@ pub type Http2Settings {
 
 pub type State {
   Http1(idle_timer: Option(process.Timer))
-  Http2(frame_buffer: Buffer, settings: Http2Settings)
+  Http2(
+    frame_buffer: Buffer,
+    settings: Http2Settings,
+    hpack_context: HpackContext,
+  )
 }
 
 // Http(idle_timer: Option(process.Timer))
@@ -169,6 +174,9 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
                         actor.continue(Http2(
                           frame_buffer: buffer.new(rest),
                           settings: http2_settings,
+                          hpack_context: hpack_new_context(
+                            http2_settings.header_table_size,
+                          ),
                         )),
                       )
                     }
@@ -189,7 +197,7 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
         }
         |> result.unwrap_both
       }
-      Http2(frame_buffer, settings) -> {
+      Http2(frame_buffer, settings, hpack_context) -> {
         let new_buffer = buffer.append(frame_buffer, msg)
         case frame.decode(new_buffer.data) {
           Ok(#(frame.WindowUpdate(amount, identifier), rest)) -> {
@@ -202,6 +210,7 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
                     ..settings,
                     initial_window_size: amount,
                   ),
+                  hpack_context: hpack_context,
                 ))
               }
               _n -> {
@@ -210,6 +219,9 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
             }
           }
           Ok(#(frame.Header(data, _end_stream, identifier, _priority), rest)) -> {
+            // TODO:  will this be the end headers?  i guess we should wait to
+            // receive all of them before starting the stream.  is that how it
+            // works?
             let conn =
               Connection(
                 body: Initial(<<>>),
@@ -225,6 +237,7 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
             actor.continue(Http2(
               frame_buffer: buffer.new(rest),
               settings: settings,
+              hpack_context: hpack_context,
             ))
           }
           Ok(data) -> {
@@ -232,7 +245,11 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
             todo
           }
           Error(frame.NoError) -> {
-            actor.continue(Http2(frame_buffer: new_buffer, settings: settings))
+            actor.continue(Http2(
+              frame_buffer: new_buffer,
+              settings: settings,
+              hpack_context: hpack_context,
+            ))
           }
           Error(_connection_error) -> {
             // TODO:
