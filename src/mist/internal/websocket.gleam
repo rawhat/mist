@@ -154,9 +154,10 @@ fn make_frame(opcode: Int, length: Int, payload: BitArray) -> BytesBuilder {
   |> bytes_builder.from_bit_array
 }
 
-pub fn to_text_frame(data: BitArray) -> BytesBuilder {
-  let size = bit_array.byte_size(data)
-  frame_to_bytes_builder(Data(TextFrame(size, data)))
+pub fn to_text_frame(data: String) -> BytesBuilder {
+  let msg = bit_array.from_string(data)
+  let size = bit_array.byte_size(msg)
+  frame_to_bytes_builder(Data(TextFrame(size, msg)))
 }
 
 pub fn to_binary_frame(data: BitArray) -> BytesBuilder {

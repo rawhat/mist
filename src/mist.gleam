@@ -391,7 +391,7 @@ pub fn start_https(
 
 /// These are the types of messages that a websocket handler may receive.
 pub type WebsocketMessage(custom) {
-  Text(BitArray)
+  Text(String)
   Binary(BitArray)
   Closed
   Shutdown
@@ -402,7 +402,11 @@ fn internal_to_public_ws_message(
   msg: HandlerMessage(custom),
 ) -> Result(WebsocketMessage(custom), Nil) {
   case msg {
-    Internal(Data(TextFrame(_length, data))) -> Ok(Text(data))
+    Internal(Data(TextFrame(_length, data))) -> {
+      data
+      |> bit_array.to_string
+      |> result.map(Text)
+    }
     Internal(Data(BinaryFrame(_length, data))) -> Ok(Binary(data))
     User(msg) -> Ok(Custom(msg))
     _ -> Error(Nil)
@@ -477,7 +481,7 @@ pub fn send_binary_frame(
 /// Sends a text frame across the websocket.
 pub fn send_text_frame(
   connection: WebsocketConnection,
-  frame: BitArray,
+  frame: String,
 ) -> Result(Nil, socket.SocketReason) {
   frame
   |> websocket.to_text_frame
