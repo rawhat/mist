@@ -21,7 +21,7 @@ import mist/internal/http.{
   type Connection, type DecodeError, type Handler, type ResponseData, Bytes,
   Chunked, Connection, DiscardPacket, File, Initial, Websocket,
 }
-import mist/internal/http2/frame.{Settings}
+import mist/internal/http2/frame.{Complete, Continued, Settings}
 import mist/internal/http2/stream
 import mist/internal/http2.{type HpackContext, hpack_new_context}
 import mist/internal/logger
@@ -218,7 +218,10 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
               }
             }
           }
-          Ok(#(frame.Header(data, _end_stream, identifier, _priority), rest)) -> {
+          Ok(#(
+            frame.Header(Complete(data), end_stream, identifier, _priority),
+            rest,
+          )) -> {
             // TODO:  will this be the end headers?  i guess we should wait to
             // receive all of them before starting the stream.  is that how it
             // works?
@@ -230,14 +233,20 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
                 client_ip: conn.client_ip,
               )
             let assert Ok(new_stream) =
-              stream.new(identifier, settings.initial_window_size, handler, conn,
+              stream.new(
+                identifier,
+                settings.initial_window_size,
+                handler,
+                conn,
+                fn(_resp) { Nil },
               )
-            let assert frame.Complete(data) = data
-            process.send(new_stream, stream.HeaderChunk(data))
+            let assert Ok(#(headers, context)) =
+              http2.hpack_decode(hpack_context, data)
+            process.send(new_stream, stream.Headers(headers, end_stream))
             actor.continue(Http2(
               frame_buffer: buffer.new(rest),
               settings: settings,
-              hpack_context: hpack_context,
+              hpack_context: context,
             ))
           }
           Ok(data) -> {
