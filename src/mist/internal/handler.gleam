@@ -1,7 +1,7 @@
 import gleam/bytes_builder.{type BytesBuilder}
 import gleam/dynamic
 import gleam/erlang.{Errored, Exited, Thrown, rescue}
-import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
+import gleam/erlang/process.{type Subject}
 import gleam/http/request.{type Request}
 import gleam/http/response
 import gleam/int
@@ -11,7 +11,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
 import glisten.{type Loop, type Message, Packet}
-import glisten/handler.{Close, Internal, LoopState}
+import glisten/handler.{Close, Internal}
 import glisten/socket.{type Socket, type SocketReason, Badarg}
 import glisten/socket/transport.{type Transport}
 import mist/internal/buffer.{type Buffer, Buffer}
@@ -209,7 +209,7 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
               }
             }
           }
-          Ok(#(frame.Header(data, end_stream, identifier, priority), rest)) -> {
+          Ok(#(frame.Header(data, _end_stream, identifier, _priority), rest)) -> {
             let conn =
               Connection(
                 body: Initial(<<>>),
@@ -234,7 +234,7 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
           Error(frame.NoError) -> {
             actor.continue(Http2(frame_buffer: new_buffer, settings: settings))
           }
-          Error(connection_error) -> {
+          Error(_connection_error) -> {
             // TODO:
             //  - send GOAWAY with last good stream ID
             //  - close the connection
@@ -287,6 +287,7 @@ fn handle_http1(
           Bytes(body) -> handle_bytes_builder_body(resp, body, conn)
           Chunked(body) -> handle_chunked_body(resp, body, conn)
           File(..) -> handle_file_body(resp, body, conn)
+          _ -> panic as "This shouldn't ever happen 🤞"
         }
         |> result.map(fn(_res) { close_or_set_timer(resp, conn, sender) })
         |> result.replace_error(stop_normal)

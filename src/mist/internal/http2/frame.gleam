@@ -123,6 +123,7 @@ pub fn decode(frame: BitArray) -> Result(#(Frame, BitArray), ConnectionError) {
       parse_window_update(length, rest)
     <<length:int-size(24), 9:int-size(8), rest:bits>> ->
       parse_continuation(length, rest)
+    _ -> Error(ProtocolError)
   }
 }
 
@@ -418,6 +419,7 @@ fn parse_continuation(
         rest,
       ))
     }
+    _ -> Error(ProtocolError)
   }
 }
 
@@ -586,6 +588,7 @@ fn get_error(value: Int) -> ConnectionError {
     11 -> EnhanceYourCalm
     12 -> InadequateSecurity
     13 -> Http11Required
+    n -> Unsupported(n)
   }
 }
 
@@ -601,6 +604,7 @@ fn get_settings(
         Error(err) -> Error(err)
       }
     }
+    _ -> Error(ProtocolError)
   }
 }
 
@@ -628,6 +632,7 @@ fn get_setting(identifier: Int, value: Int) -> Result(Setting, ConnectionError) 
       }
     }
     6 -> Ok(MaxHeaderListSize(value))
+    _ -> Error(ProtocolError)
   }
 }
 
