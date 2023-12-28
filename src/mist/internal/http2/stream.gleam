@@ -43,10 +43,10 @@ pub fn new(
           actor.continue(
             State(..state, headers: bit_array.append(state.headers, data)),
           )
-        LastHeaderChunk(data, False) ->
-          actor.continue(
-            State(..state, headers: bit_array.append(state.headers, data)),
-          )
+        LastHeaderChunk(data, False) -> {
+          let headers = bit_array.append(state.headers, data)
+          actor.continue(State(..state, headers: headers))
+        }
         LastHeaderChunk(_data, True) -> {
           let req =
             request.new()
