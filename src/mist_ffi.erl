@@ -1,6 +1,7 @@
 -module(mist_ffi).
 
--export([binary_match/2, decode_packet/3, file_open/1, string_to_int/2]).
+-export([binary_match/2, decode_packet/3, file_open/1, string_to_int/2, hpack_decode/2,
+         hpack_encode/2, hpack_new_context/1, hpack_new_max_table_size/2]).
 
 decode_packet(Type, Packet, Opts) ->
   case erlang:decode_packet(Type, Packet, Opts) of
@@ -47,3 +48,25 @@ file_open(Path) ->
     _ ->
       {error, unknown_file_error}
   end.
+
+hpack_decode(Context, Bin) ->
+  case hpack:decode(Bin, Context) of
+    {ok, {Headers, NewContext}} ->
+      {ok, {Headers, NewContext}};
+    {error, compression_error} ->
+      {error, {hpack_error, compression}};
+    {error, {compression_error, {bad_header_packet, Binary}}} ->
+      {error, {hpack_error, {bad_header_packet, Binary}}}
+  end.
+
+hpack_encode(Context, Headers) ->
+  case hpack:encode(Headers, Context) of
+    _ ->
+      {ok, nil}
+  end.
+
+hpack_new_context(Size) ->
+  hpack:new_context(Size).
+
+hpack_new_max_table_size(Context, Size) ->
+  hpack:new_max_table_size(Size, Context).
