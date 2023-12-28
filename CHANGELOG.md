@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Log error from `rescue` in WebSocket handlers
+- WebSocket `Text` frame is now a `String`, since the spec notes that this type
+  of message must be valid UTF-8
 
 ## v0.15.0
 
