@@ -1,14 +1,14 @@
 import gleam/bytes_builder
-import gleam/result
+import gleam/erlang/process
+import gleam/io
 import gleam/list
 import gleam/option.{Some}
+import gleam/result
 import mist/internal/buffer.{type Buffer}
 import mist/internal/http.{type Connection, type Handler, Connection, Initial}
-import mist/internal/http2/frame.{Complete, Settings}
-import gleam/io
 import mist/internal/http2.{type HpackContext, type Http2Settings, Http2Settings}
+import mist/internal/http2/frame.{Complete, Settings}
 import mist/internal/http2/stream
-import gleam/erlang/process
 
 pub type State {
   State(
@@ -40,28 +40,7 @@ pub fn upgrade(data: BitArray, conn: Connection) -> Result(State, String) {
     let assert #(frame, rest) = pair
     case frame {
       Settings(settings: settings, ..) -> {
-        let http2_settings =
-          initial_settings
-          |> list.fold(
-            settings,
-            _,
-            fn(settings, setting) {
-              case setting {
-                frame.HeaderTableSize(size) ->
-                  Http2Settings(..settings, header_table_size: size)
-                frame.ServerPush(push) ->
-                  Http2Settings(..settings, server_push: push)
-                frame.MaxConcurrentStreams(max) ->
-                  Http2Settings(..settings, max_concurrent_streams: max)
-                frame.InitialWindowSize(size) ->
-                  Http2Settings(..settings, initial_window_size: size)
-                frame.MaxFrameSize(size) ->
-                  Http2Settings(..settings, max_frame_size: size)
-                frame.MaxHeaderListSize(size) ->
-                  Http2Settings(..settings, max_header_list_size: Some(size))
-              }
-            },
-          )
+        let http2_settings = http2.update_settings(initial_settings, settings)
         Ok(State(
           frame_buffer: buffer.new(rest),
           settings: http2_settings,
