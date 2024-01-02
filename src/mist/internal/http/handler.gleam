@@ -68,7 +68,7 @@ fn log_and_error(
         bytes_builder.from_bit_array(<<"Internal Server Error":utf8>>),
       )
       |> response.prepend_header("content-length", "21")
-      |> http.add_default_headers
+      |> http.add_default_headers(True)
       |> encoder.to_bytes_builder
       |> transport.send(socket, _)
       let _ = transport.close(socket)
@@ -153,7 +153,7 @@ fn handle_bytes_builder_body(
 ) -> Result(Nil, SocketReason) {
   resp
   |> response.set_body(body)
-  |> http.add_default_headers
+  |> http.add_default_headers(True)
   |> encoder.to_bytes_builder
   |> conn.transport.send(conn.socket, _)
 }

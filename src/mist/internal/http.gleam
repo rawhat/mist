@@ -1,4 +1,6 @@
+import birl
 import gleam/bit_array
+import gleam/bool
 import gleam/bytes_builder.{type BytesBuilder}
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
@@ -406,7 +408,7 @@ pub fn upgrade(
 
   use _sent <- result.then(
     resp
-    |> add_default_headers
+    |> add_default_headers(True)
     |> encoder.to_bytes_builder
     |> transport.send(socket, _)
     |> result.nil_error,
@@ -417,14 +419,21 @@ pub fn upgrade(
 
 pub fn add_default_headers(
   resp: Response(BytesBuilder),
+  keep_alive: Bool,
 ) -> Response(BytesBuilder) {
   let body_size = bytes_builder.byte_size(resp.body)
 
+  let defaults = [
+    #("content-length", int.to_string(body_size)),
+    #("date", birl.to_http(birl.now())),
+  ]
+  let defaults = {
+    use <- bool.guard(when: !keep_alive, return: defaults)
+    [#("connection", "keep-alive"), ..defaults]
+  }
+
   let headers =
-    dict.from_list([
-      #("content-length", int.to_string(body_size)),
-      #("connection", "keep-alive"),
-    ])
+    dict.from_list(defaults)
     |> list.fold(
       resp.headers,
       _,

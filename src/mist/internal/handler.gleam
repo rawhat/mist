@@ -1,6 +1,8 @@
+import birl
 import gleam/bytes_builder
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/function
+import gleam/http/response
 import gleam/option.{type Option, Some}
 import gleam/otp/actor
 import gleam/result
@@ -55,26 +57,45 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
         ))
       }
       User(Send(id, resp)), Http2(state) -> {
-        state.hpack_context
-        // TODO:  fix end_stream
-        |> http2.send_headers(conn, resp.headers, False, id)
-        |> result.then(fn(context) {
-          case resp.body {
-            Bytes(bytes) -> {
+        case resp.body {
+          Bytes(bytes) -> {
+            let resp =
+              resp
+              |> response.set_body(bytes)
+              |> http.add_default_headers(False)
+            // TODO:  fix end_stream
+            http2.send_headers(
+              state.hpack_context,
+              conn,
+              resp.headers,
+              False,
+              id,
+            )
+            |> result.then(fn(context) {
               // TODO:  fix end_stream
               http2.send_data(conn, bytes_builder.to_bit_array(bytes), id, True)
               |> result.replace(context)
-            }
-            File(..) -> todo
-            // TODO:  properly error in some fashion for these
-            Websocket(_selector) -> Error(Nil)
-            Chunked(_iterator) -> Error(Nil)
+            })
           }
-        })
-        |> result.replace_error(process.Abnormal("ruh oh"))
+          File(..) -> todo
+          // TODO:  properly error in some fashion for these
+          Websocket(_selector) ->
+            Error(process.Abnormal("WebSocket unsupported for HTTP/2"))
+          Chunked(_iterator) ->
+            Error(process.Abnormal("Chunked encoding not supported for HTTP/2"))
+        }
         |> result.map(fn(context) {
           Http2(http2_handler.with_hpack_context(state, context))
         })
+        // let resp = http.add_default_headers(resp, False)
+        // state.hpack_context
+        // // TODO:  fix end_stream
+        // |> http2.send_headers(conn, resp.headers, False, id)
+        // |> result.then(fn(context) { todo })
+        // |> result.replace_error(process.Abnormal("ruh oh"))
+        // |> result.map(fn(context) {
+        //   Http2(http2_handler.with_hpack_context(state, context))
+        // })
       }
       Packet(msg), Http1(state, self) -> {
         let _ = case state.idle_timer {

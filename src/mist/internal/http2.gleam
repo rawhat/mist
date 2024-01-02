@@ -1,4 +1,5 @@
 import gleam/bytes_builder
+import gleam/erlang/process
 import gleam/http.{type Header} as _http
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -61,7 +62,7 @@ pub fn send_headers(
   headers: List(Header),
   end_stream: Bool,
   stream_identifier: StreamIdentifier(Frame),
-) -> Result(HpackContext, Nil) {
+) -> Result(HpackContext, process.ExitReason) {
   io.println("going to encode:  " <> erlang.format(headers))
   hpack_encode(context, headers)
   |> result.then(fn(pair) {
@@ -79,7 +80,7 @@ pub fn send_headers(
       conn.transport.send(conn.socket, bytes_builder.from_bit_array(encoded))
     {
       Ok(_nil) -> Ok(new_context)
-      Error(_reason) -> Error(Nil)
+      Error(_reason) -> Error(process.Abnormal("Failed to send HTTP/2 headers"))
     }
   })
 }
@@ -89,7 +90,7 @@ pub fn send_data(
   data: BitArray,
   stream_identifier: StreamIdentifier(Frame),
   end_stream: Bool,
-) -> Result(Nil, Nil) {
+) -> Result(Nil, process.ExitReason) {
   let data_frame =
     Data(data: data, end_stream: end_stream, identifier: stream_identifier)
   io.println("gonna send data frame:  " <> erlang.format(data_frame))
@@ -99,7 +100,7 @@ pub fn send_data(
   |> result.map_error(fn(err) {
     io.println("failed to send :(  " <> erlang.format(err))
   })
-  |> result.replace_error(Nil)
+  |> result.replace_error(process.Abnormal("Failed to send HTTP/2 data"))
 }
 
 pub type HpackContext
