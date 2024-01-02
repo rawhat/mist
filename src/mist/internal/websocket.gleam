@@ -20,13 +20,10 @@ pub type DataFrame {
 
 pub type ControlFrame {
   CloseFrame(payload_length: Int, payload: BitArray)
-  // We don't care about basicaly everything else for now
   PingFrame(payload_length: Int, payload: BitArray)
   PongFrame(payload_length: Int, payload: BitArray)
 }
 
-// TODO:  there are other message types, AND ALSO will need to buffer across
-// multiple frames, potentially
 pub type Frame {
   Data(DataFrame)
   Control(ControlFrame)
