@@ -1,15 +1,20 @@
 import gleam/bytes_builder
 import gleam/erlang/process.{type Subject}
+import gleam/http/response.{type Response}
 import gleam/io
 import gleam/result
 import mist/internal/buffer.{type Buffer}
-import mist/internal/http.{type Connection, type Handler, Connection, Initial}
+import mist/internal/http.{
+  type Connection, type Handler, type ResponseData, Connection, Initial,
+}
 import mist/internal/http2.{type HpackContext, type Http2Settings, Http2Settings}
-import mist/internal/http2/frame.{type Frame, Complete, Settings}
+import mist/internal/http2/frame.{
+  type Frame, type StreamIdentifier, Complete, Settings,
+}
 import mist/internal/http2/stream
 
 pub type Message {
-  Send(Frame)
+  Send(identifier: StreamIdentifier(Frame), resp: Response(ResponseData))
 }
 
 pub type State {
@@ -19,6 +24,10 @@ pub type State {
     settings: Http2Settings,
     self: Subject(Message),
   )
+}
+
+pub fn with_hpack_context(state: State, context: HpackContext) -> State {
+  State(..state, hpack_context: context)
 }
 
 pub fn upgrade(
@@ -111,7 +120,7 @@ pub fn call(
           state.settings.initial_window_size,
           handler,
           conn,
-          fn(_resp) { Nil },
+          fn(resp) { process.send(state.self, Send(identifier, resp)) },
         )
       let assert Ok(#(headers, context)) =
         http2.hpack_decode(state.hpack_context, data)
