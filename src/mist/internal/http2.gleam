@@ -1,6 +1,7 @@
-import gleam/bytes_builder
+import gleam/bytes_builder.{type BytesBuilder}
 import gleam/erlang/process
 import gleam/http.{type Header} as _http
+import gleam/http/response.{type Response}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -56,7 +57,7 @@ pub fn update_settings(
 import gleam/erlang
 import gleam/io
 
-pub fn send_headers(
+fn send_headers(
   context: HpackContext,
   conn: Connection,
   headers: List(Header),
@@ -85,7 +86,7 @@ pub fn send_headers(
   })
 }
 
-pub fn send_data(
+fn send_data(
   conn: Connection,
   data: BitArray,
   stream_identifier: StreamIdentifier(Frame),
@@ -101,6 +102,22 @@ pub fn send_data(
     io.println("failed to send :(  " <> erlang.format(err))
   })
   |> result.replace_error(process.Abnormal("Failed to send HTTP/2 data"))
+}
+
+pub fn send_bytes_builder(
+  resp: Response(BytesBuilder),
+  conn: Connection,
+  context: HpackContext,
+  id: StreamIdentifier(Frame),
+) -> Result(HpackContext, process.ExitReason) {
+  let resp = http.add_default_headers(resp, False)
+  // TODO:  fix end_stream
+  send_headers(context, conn, resp.headers, False, id)
+  |> result.then(fn(context) {
+    // TODO:  fix end_stream
+    send_data(conn, bytes_builder.to_bit_array(resp.body), id, True)
+    |> result.replace(context)
+  })
 }
 
 pub type HpackContext

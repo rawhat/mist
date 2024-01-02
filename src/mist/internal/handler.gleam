@@ -58,25 +58,10 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
       }
       User(Send(id, resp)), Http2(state) -> {
         case resp.body {
-          Bytes(bytes) -> {
-            let resp =
-              resp
-              |> response.set_body(bytes)
-              |> http.add_default_headers(False)
-            // TODO:  fix end_stream
-            http2.send_headers(
-              state.hpack_context,
-              conn,
-              resp.headers,
-              False,
-              id,
-            )
-            |> result.then(fn(context) {
-              // TODO:  fix end_stream
-              http2.send_data(conn, bytes_builder.to_bit_array(bytes), id, True)
-              |> result.replace(context)
-            })
-          }
+          Bytes(bytes) ->
+            resp
+            |> response.set_body(bytes)
+            |> http2.send_bytes_builder(conn, state.hpack_context, id)
           File(..) -> todo
           // TODO:  properly error in some fashion for these
           Websocket(_selector) ->
@@ -87,15 +72,6 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
         |> result.map(fn(context) {
           Http2(http2_handler.with_hpack_context(state, context))
         })
-        // let resp = http.add_default_headers(resp, False)
-        // state.hpack_context
-        // // TODO:  fix end_stream
-        // |> http2.send_headers(conn, resp.headers, False, id)
-        // |> result.then(fn(context) { todo })
-        // |> result.replace_error(process.Abnormal("ruh oh"))
-        // |> result.map(fn(context) {
-        //   Http2(http2_handler.with_hpack_context(state, context))
-        // })
       }
       Packet(msg), Http1(state, self) -> {
         let _ = case state.idle_timer {
