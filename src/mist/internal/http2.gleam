@@ -2,6 +2,7 @@ import gleam/bytes_builder.{type BytesBuilder}
 import gleam/erlang/process
 import gleam/http.{type Header} as _http
 import gleam/http/response.{type Response}
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -25,7 +26,7 @@ pub type Http2Settings {
 pub fn default_settings() -> Http2Settings {
   Http2Settings(
     header_table_size: 4096,
-    server_push: frame.Enabled,
+    server_push: frame.Disabled,
     max_concurrent_streams: 100,
     initial_window_size: 65_535,
     max_frame_size: 16_384,
@@ -110,14 +111,23 @@ pub fn send_bytes_builder(
   context: HpackContext,
   id: StreamIdentifier(Frame),
 ) -> Result(HpackContext, process.ExitReason) {
-  let resp = http.add_default_headers(resp, False)
-  // TODO:  fix end_stream
-  send_headers(context, conn, resp.headers, False, id)
-  |> result.then(fn(context) {
-    // TODO:  fix end_stream
-    send_data(conn, bytes_builder.to_bit_array(resp.body), id, True)
-    |> result.replace(context)
-  })
+  let resp =
+    resp
+    |> http.add_default_headers(False)
+    |> response.set_header(":status", int.to_string(resp.status))
+
+  case bytes_builder.byte_size(resp.body) {
+    0 -> send_headers(context, conn, resp.headers, True, id)
+    _ -> {
+      send_headers(context, conn, resp.headers, False, id)
+      |> result.then(fn(context) {
+        // TODO:  this should be broken up by window size
+        // TODO:  fix end_stream
+        send_data(conn, bytes_builder.to_bit_array(resp.body), id, True)
+        |> result.replace(context)
+      })
+    }
+  }
 }
 
 pub type HpackContext

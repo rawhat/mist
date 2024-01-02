@@ -30,6 +30,10 @@ pub fn with_hpack_context(state: State, context: HpackContext) -> State {
   State(..state, hpack_context: context)
 }
 
+pub fn append_data(state: State, data: BitArray) -> State {
+  State(..state, frame_buffer: buffer.append(state.frame_buffer, data))
+}
+
 pub fn upgrade(
   data: BitArray,
   conn: Connection,
@@ -76,20 +80,45 @@ pub fn upgrade(
 
 pub fn call(
   state: State,
-  msg: BitArray,
   conn: Connection,
   handler: Handler,
 ) -> Result(State, process.ExitReason) {
-  let new_buffer = buffer.append(state.frame_buffer, msg)
-  case frame.decode(new_buffer.data) {
-    Ok(#(frame.WindowUpdate(amount, identifier), rest)) -> {
+  case frame.decode(state.frame_buffer.data) {
+    Ok(#(frame, rest)) -> {
+      io.println("frame:  " <> erlang.format(frame))
+      io.println("rest:  " <> erlang.format(rest))
+      let new_state = State(..state, frame_buffer: buffer.new(rest))
+      case handle_frame(frame, new_state, conn, handler) {
+        Ok(updated) -> call(updated, conn, handler)
+        Error(reason) -> Error(reason)
+      }
+    }
+    Error(frame.NoError) -> Ok(state)
+    Error(_connection_error) -> {
+      // TODO:
+      //  - send GOAWAY with last good stream ID
+      //  - close the connection
+      Ok(state)
+    }
+  }
+}
+
+import gleam/erlang
+
+fn handle_frame(
+  frame: Frame,
+  state: State,
+  conn: Connection,
+  handler: Handler,
+) -> Result(State, process.ExitReason) {
+  case frame {
+    frame.WindowUpdate(amount, identifier) -> {
       case frame.get_stream_identifier(identifier) {
         0 -> {
           io.println("setting window size!")
           Ok(
             State(
               ..state,
-              frame_buffer: buffer.new(rest),
               settings: Http2Settings(
                 ..state.settings,
                 initial_window_size: amount,
@@ -103,7 +132,7 @@ pub fn call(
         }
       }
     }
-    Ok(#(frame.Header(Complete(data), end_stream, identifier, _priority), rest)) -> {
+    frame.Header(Complete(data), end_stream, identifier, _priority) -> {
       // TODO:  will this be the end headers?  i guess we should wait to
       // receive all of them before starting the stream.  is that how it
       // works?
@@ -114,6 +143,7 @@ pub fn call(
           transport: conn.transport,
           client_ip: conn.client_ip,
         )
+      io.println("we got some headers:  " <> erlang.format(data))
       let assert Ok(new_stream) =
         stream.new(
           identifier,
@@ -125,20 +155,26 @@ pub fn call(
       let assert Ok(#(headers, context)) =
         http2.hpack_decode(state.hpack_context, data)
       process.send(new_stream, stream.Headers(headers, end_stream))
-      Ok(State(..state, frame_buffer: buffer.new(rest), hpack_context: context))
+      Ok(State(..state, hpack_context: context))
     }
-    Ok(data) -> {
-      io.debug(#("we got a frame!!111oneone", data))
-      todo
-    }
-    Error(frame.NoError) -> {
+    frame.Priority(..) -> {
       Ok(state)
     }
-    Error(_connection_error) -> {
-      // TODO:
-      //  - send GOAWAY with last good stream ID
-      //  - close the connection
-      todo
+    frame.Settings(ack: True, ..) -> {
+      let resp =
+        frame.Settings(ack: True, settings: [])
+        |> frame.encode
+      conn.transport.send(conn.socket, bytes_builder.from_bit_array(resp))
+      |> result.replace(state)
+      |> result.replace_error(process.Abnormal(
+        "Failed to respond to settings ACK",
+      ))
     }
+    frame.GoAway(..) -> {
+      io.println("byeeee~~")
+      Error(process.Normal)
+    }
+    // TODO:  obviously fill these out
+    _ -> Ok(state)
   }
 }

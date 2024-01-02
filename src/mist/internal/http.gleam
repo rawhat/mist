@@ -423,13 +423,16 @@ pub fn add_default_headers(
 ) -> Response(BytesBuilder) {
   let body_size = bytes_builder.byte_size(resp.body)
 
-  let defaults = [
-    #("content-length", int.to_string(body_size)),
-    #("date", birl.to_http(birl.now())),
-  ]
+  let defaults = [#("content-length", int.to_string(body_size))]
   let defaults = {
     use <- bool.guard(when: !keep_alive, return: defaults)
     [#("connection", "keep-alive"), ..defaults]
+  }
+  let defaults = {
+    case response.get_header(resp, "date") {
+      Error(_nil) -> [#("date", birl.to_http(birl.now())), ..defaults]
+      _ -> defaults
+    }
   }
 
   let headers =
