@@ -1,23 +1,23 @@
-import gleam/dynamic
-import gleam/int
 import gleam/bytes_builder.{type BytesBuilder}
-import gleam/iterator.{type Iterator}
-import gleam/erlang/process.{type Subject}
+import gleam/dynamic
 import gleam/erlang.{Errored, Exited, Thrown, rescue}
+import gleam/erlang/process.{type Subject}
+import gleam/http/request.{type Request}
+import gleam/http/response
+import gleam/int
+import gleam/iterator.{type Iterator}
 import gleam/option.{type Option, None, Some}
+import gleam/result
+import glisten/handler.{Close, Internal}
+import glisten/socket.{type Socket, type SocketReason, Badarg}
+import glisten/socket/transport.{type Transport}
+import mist/internal/encoder
+import mist/internal/file
 import mist/internal/http.{
   type Connection, type Handler, type ResponseData, Bytes, Chunked, File,
   Websocket,
 }
-import gleam/result
 import mist/internal/logger
-import gleam/http/request.{type Request}
-import glisten/handler.{Close, Internal}
-import glisten/socket.{type Socket, type SocketReason, Badarg}
-import glisten/socket/transport.{type Transport}
-import gleam/http/response
-import mist/internal/encoder
-import mist/internal/file
 
 pub type State {
   State(idle_timer: Option(process.Timer))
