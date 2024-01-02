@@ -1,15 +1,17 @@
+import gleam/bytes_builder
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/function
 import gleam/option.{type Option, Some}
 import gleam/otp/actor
 import gleam/result
-import glisten.{type Loop, Packet}
+import glisten.{type Loop, Packet, User}
 import mist/internal/http.{
-  type Connection, type DecodeError, type Handler, Connection, DiscardPacket,
-  Initial,
+  type Connection, type DecodeError, type Handler, Bytes, Chunked, Connection,
+  DiscardPacket, File, Initial, Websocket,
 }
 import mist/internal/http/handler as http_handler
-import mist/internal/http2/handler.{type Message} as http2_handler
+import mist/internal/http2/handler.{type Message, Send} as http2_handler
+import mist/internal/http2
 import mist/internal/logger
 
 pub type HandlerError {
@@ -35,9 +37,8 @@ pub fn init() -> #(State, Option(Selector(Message))) {
   #(new_state(subj), Some(selector))
 }
 
-pub fn with_func(handler: Handler) -> Loop(user_message, State) {
-  fn(msg, state: State, conn: glisten.Connection(user_message)) {
-    let assert Packet(msg) = msg
+pub fn with_func(handler: Handler) -> Loop(Message, State) {
+  fn(msg, state: State, conn: glisten.Connection(Message)) {
     let sender = conn.subject
     let conn =
       Connection(
@@ -47,8 +48,35 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
         client_ip: conn.client_ip,
       )
 
-    case state {
-      Http1(state, self) -> {
+    case msg, state {
+      User(Send(..)), Http1(..) -> {
+        Error(process.Abnormal(
+          "Attempted to send HTTP/2 response without upgrade",
+        ))
+      }
+      User(Send(id, resp)), Http2(state) -> {
+        state.hpack_context
+        // TODO:  fix end_stream
+        |> http2.send_headers(conn, resp.headers, False, id)
+        |> result.then(fn(context) {
+          case resp.body {
+            Bytes(bytes) -> {
+              // TODO:  fix end_stream
+              http2.send_data(conn, bytes_builder.to_bit_array(bytes), id, True)
+              |> result.replace(context)
+            }
+            File(..) -> todo
+            // TODO:  properly error in some fashion for these
+            Websocket(_selector) -> Error(Nil)
+            Chunked(_iterator) -> Error(Nil)
+          }
+        })
+        |> result.replace_error(process.Abnormal("ruh oh"))
+        |> result.map(fn(context) {
+          Http2(http2_handler.with_hpack_context(state, context))
+        })
+      }
+      Packet(msg), Http1(state, self) -> {
         let _ = case state.idle_timer {
           Some(t) -> process.cancel_timer(t)
           _ -> process.TimerNotFound
@@ -78,7 +106,7 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
           }
         })
       }
-      Http2(state) ->
+      Packet(msg), Http2(state) ->
         http2_handler.call(state, msg, conn, handler)
         |> result.map(Http2)
     }

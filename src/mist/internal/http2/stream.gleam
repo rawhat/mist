@@ -1,4 +1,5 @@
 import gleam/dynamic
+import gleam/erlang
 import gleam/erlang/process.{type Subject}
 import gleam/http.{type Header} as ghttp
 import gleam/http/request.{type Request, Request}
@@ -81,11 +82,13 @@ pub fn new(
               |> result.map(fn(req) { request.set_body(req, connection) })
               |> result.map(handler)
               |> result.map(fn(resp) {
+                io.println("gonna reply with:  " <> erlang.format(resp))
                 send(resp)
                 // TODO:  send response
                 actor.Stop(process.Normal)
               })
-              |> result.map_error(fn(_err) {
+              |> result.map_error(fn(err) {
+                io.println("oh no, we got an error:  " <> erlang.format(err))
                 // TODO:  send close?
                 actor.Stop(process.Normal)
               })
@@ -179,6 +182,9 @@ pub fn make_request(
         |> make_request(rest, _)
       }
     }
-    _ -> Error(Nil)
+    [#(key, value), ..rest] ->
+      req
+      |> request.set_header(key, value)
+      |> make_request(rest, _)
   }
 }

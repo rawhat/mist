@@ -492,6 +492,7 @@ pub fn send_text_frame(
 pub fn main() {
   let assert Ok(_server) =
     fn(_req) {
+      io.println("hi we in here")
       response.new(200)
       |> response.set_body(Bytes(bytes_builder.from_string("hello, world!")))
     }
