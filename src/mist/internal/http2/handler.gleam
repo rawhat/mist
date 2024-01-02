@@ -65,21 +65,21 @@ pub fn call(
   msg: BitArray,
   conn: Connection,
   handler: Handler,
-) -> State {
+) -> Result(State, process.ExitReason) {
   let new_buffer = buffer.append(state.frame_buffer, msg)
   case frame.decode(new_buffer.data) {
     Ok(#(frame.WindowUpdate(amount, identifier), rest)) -> {
       case frame.get_stream_identifier(identifier) {
         0 -> {
           io.println("setting window size!")
-          State(
+          Ok(State(
             frame_buffer: buffer.new(rest),
             settings: Http2Settings(
               ..state.settings,
               initial_window_size: amount,
             ),
             hpack_context: state.hpack_context,
-          )
+          ))
         }
         _n -> {
           todo
@@ -108,14 +108,14 @@ pub fn call(
       let assert Ok(#(headers, context)) =
         http2.hpack_decode(state.hpack_context, data)
       process.send(new_stream, stream.Headers(headers, end_stream))
-      State(..state, frame_buffer: buffer.new(rest), hpack_context: context)
+      Ok(State(..state, frame_buffer: buffer.new(rest), hpack_context: context))
     }
     Ok(data) -> {
       io.debug(#("we got a frame!!111oneone", data))
       todo
     }
     Error(frame.NoError) -> {
-      state
+      Ok(state)
     }
     Error(_connection_error) -> {
       // TODO:

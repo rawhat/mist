@@ -16,8 +16,6 @@ pub type HandlerError {
   NotFound
 }
 
-const stop_normal = actor.Stop(process.Normal)
-
 pub type State {
   Http1(state: http_handler.State)
   Http2(state: http2_handler.State)
@@ -27,8 +25,6 @@ pub fn new_state() -> State {
   Http1(http_handler.initial_state())
 }
 
-/// This is a more flexible handler. It will allow you to upgrade a connection
-/// to a websocket connection, or deal with a regular HTTP req->resp workflow.
 pub fn with_func(handler: Handler) -> Loop(user_message, State) {
   fn(msg, state: State, conn: glisten.Connection(user_message)) {
     let assert Packet(msg) = msg
@@ -51,33 +47,31 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
         |> http.parse_request(conn)
         |> result.map_error(fn(err) {
           case err {
-            DiscardPacket -> Nil
+            DiscardPacket -> process.Normal
             _ -> {
               logger.error(err)
               let _ = conn.transport.close(conn.socket)
-              Nil
+              process.Abnormal("Received invalid request")
             }
           }
         })
-        |> result.replace_error(stop_normal)
         |> result.then(fn(req) {
           case req {
             http.Http1Request(req) ->
               http_handler.call(req, handler, conn, sender)
-              |> result.map(fn(state) { actor.continue(Http1(state)) })
-              |> result.map_error(actor.Stop)
+              |> result.map(Http1)
             http.Upgrade(data) ->
               http2_handler.upgrade(data, conn)
-              |> result.map(fn(state) { actor.continue(Http2(state)) })
-              |> result.map_error(actor.Stop)
+              |> result.map(Http2)
           }
         })
-        |> result.unwrap_both
       }
       Http2(state) ->
         http2_handler.call(state, msg, conn, handler)
-        |> Http2
-        |> actor.continue
+        |> result.map(Http2)
     }
+    |> result.map(actor.continue)
+    |> result.map_error(actor.Stop)
+    |> result.unwrap_both
   }
 }
