@@ -1,4 +1,28 @@
 import gleam/http.{type Header} as _http
+import gleam/option.{type Option, None}
+import mist/internal/http2/frame.{type PushState}
+
+pub type Http2Settings {
+  Http2Settings(
+    header_table_size: Int,
+    server_push: PushState,
+    max_concurrent_streams: Int,
+    initial_window_size: Int,
+    max_frame_size: Int,
+    max_header_list_size: Option(Int),
+  )
+}
+
+pub fn default_settings() -> Http2Settings {
+  Http2Settings(
+    header_table_size: 4096,
+    server_push: frame.Enabled,
+    max_concurrent_streams: 100,
+    initial_window_size: 65_535,
+    max_frame_size: 16_384,
+    max_header_list_size: None,
+  )
+}
 
 pub type HpackContext
 
