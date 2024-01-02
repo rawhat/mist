@@ -1,26 +1,30 @@
 import gleam/bytes_builder
-import gleam/erlang/process
+import gleam/erlang/process.{type Subject}
 import gleam/io
-import gleam/list
-import gleam/option.{Some}
 import gleam/result
 import mist/internal/buffer.{type Buffer}
 import mist/internal/http.{type Connection, type Handler, Connection, Initial}
 import mist/internal/http2.{type HpackContext, type Http2Settings, Http2Settings}
-import mist/internal/http2/frame.{Complete, Settings}
+import mist/internal/http2/frame.{type Frame, Complete, Settings}
 import mist/internal/http2/stream
+
+pub type Message {
+  Send(Frame)
+}
 
 pub type State {
   State(
     frame_buffer: Buffer,
     hpack_context: HpackContext,
     settings: Http2Settings,
+    self: Subject(Message),
   )
 }
 
 pub fn upgrade(
   data: BitArray,
   conn: Connection,
+  self: Subject(Message),
 ) -> Result(State, process.ExitReason) {
   let initial_settings = http2.default_settings()
   let settings_frame =
@@ -50,6 +54,7 @@ pub fn upgrade(
           hpack_context: http2.hpack_new_context(
             http2_settings.header_table_size,
           ),
+          self: self,
         ))
       }
       _ -> {
@@ -72,14 +77,17 @@ pub fn call(
       case frame.get_stream_identifier(identifier) {
         0 -> {
           io.println("setting window size!")
-          Ok(State(
-            frame_buffer: buffer.new(rest),
-            settings: Http2Settings(
-              ..state.settings,
-              initial_window_size: amount,
+          Ok(
+            State(
+              ..state,
+              frame_buffer: buffer.new(rest),
+              settings: Http2Settings(
+                ..state.settings,
+                initial_window_size: amount,
+              ),
+              hpack_context: state.hpack_context,
             ),
-            hpack_context: state.hpack_context,
-          ))
+          )
         }
         _n -> {
           todo

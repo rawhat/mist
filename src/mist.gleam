@@ -8,7 +8,7 @@ import gleam/http.{type Scheme, Http, Https} as gleam_http
 import gleam/int
 import gleam/io
 import gleam/iterator.{type Iterator}
-import gleam/option.{type Option, None}
+import gleam/option.{type Option}
 import gleam/otp/actor
 import gleam/result
 import glisten
@@ -359,7 +359,7 @@ pub fn start_http(
   builder.handler
   |> function.compose(convert_body_types)
   |> handler.with_func
-  |> glisten.handler(fn() { #(handler.new_state(), None) }, _)
+  |> glisten.handler(handler.init, _)
   |> glisten.serve(builder.port)
   |> result.map(fn(nil) {
     builder.after_start(builder.port, Http)
@@ -380,7 +380,7 @@ pub fn start_https(
   builder.handler
   |> function.compose(convert_body_types)
   |> handler.with_func
-  |> glisten.handler(fn() { #(handler.new_state(), None) }, _)
+  |> glisten.handler(handler.init, _)
   |> glisten.serve_ssl(builder.port, certfile, keyfile)
   |> result.map(fn(nil) {
     builder.after_start(builder.port, Https)

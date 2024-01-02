@@ -1,5 +1,6 @@
-import gleam/erlang/process
-import gleam/option.{Some}
+import gleam/erlang/process.{type Selector, type Subject}
+import gleam/function
+import gleam/option.{type Option, Some}
 import gleam/otp/actor
 import gleam/result
 import glisten.{type Loop, Packet}
@@ -8,7 +9,7 @@ import mist/internal/http.{
   Initial,
 }
 import mist/internal/http/handler as http_handler
-import mist/internal/http2/handler as http2_handler
+import mist/internal/http2/handler.{type Message} as http2_handler
 import mist/internal/logger
 
 pub type HandlerError {
@@ -17,12 +18,21 @@ pub type HandlerError {
 }
 
 pub type State {
-  Http1(state: http_handler.State)
+  Http1(state: http_handler.State, self: Subject(Message))
   Http2(state: http2_handler.State)
 }
 
-pub fn new_state() -> State {
-  Http1(http_handler.initial_state())
+pub fn new_state(subj: Subject(Message)) -> State {
+  Http1(http_handler.initial_state(), subj)
+}
+
+pub fn init() -> #(State, Option(Selector(Message))) {
+  let subj = process.new_subject()
+  let selector =
+    process.new_selector()
+    |> process.selecting(subj, function.identity)
+
+  #(new_state(subj), Some(selector))
 }
 
 pub fn with_func(handler: Handler) -> Loop(user_message, State) {
@@ -38,7 +48,7 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
       )
 
     case state {
-      Http1(state) -> {
+      Http1(state, self) -> {
         let _ = case state.idle_timer {
           Some(t) -> process.cancel_timer(t)
           _ -> process.TimerNotFound
@@ -59,9 +69,11 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
           case req {
             http.Http1Request(req) ->
               http_handler.call(req, handler, conn, sender)
-              |> result.map(Http1)
+              |> result.map(fn(new_state) {
+                Http1(state: new_state, self: self)
+              })
             http.Upgrade(data) ->
-              http2_handler.upgrade(data, conn)
+              http2_handler.upgrade(data, conn, self)
               |> result.map(Http2)
           }
         })
