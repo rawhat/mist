@@ -18,3 +18,20 @@ pub fn it_should_encode_headers_frame_test() {
   |> frame.encode
   |> should.equal(<<0, 0, 3, 1, 4, 0, 0, 0, 123, 1, 2, 3>>)
 }
+
+pub fn it_should_encode_data_frame_with_end_of_stream_test() {
+  Data(identifier: stream_identifier(123), end_stream: True, data: <<1, 2, 3>>)
+  |> frame.encode
+  |> should.equal(<<0, 0, 3, 0, 1, 0, 0, 0, 123, 1, 2, 3>>)
+}
+
+pub fn it_should_encode_headers_frame_with_end_of_stream_test() {
+  Header(
+    identifier: stream_identifier(123),
+    end_stream: True,
+    data: Complete(<<1, 2, 3>>),
+    priority: None,
+  )
+  |> frame.encode
+  |> should.equal(<<0, 0, 3, 1, 5, 0, 0, 0, 123, 1, 2, 3>>)
+}

@@ -84,7 +84,13 @@ fn compare_headers_and_status(actual: Response(a), expected: Response(b)) {
   should.equal(actual.status, expected.status)
 
   let expected_headers = set.from_list(expected.headers)
-  let actual_headers = set.from_list(actual.headers)
+  let actual_headers =
+    actual.headers
+    |> set.from_list
+    |> set.filter(fn(pair) {
+      let assert #(key, _value) = pair
+      key != "date"
+    })
 
   let missing_headers =
     set.filter(expected_headers, fn(header) {
