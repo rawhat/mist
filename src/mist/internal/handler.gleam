@@ -48,13 +48,10 @@ pub type State {
   Http1(idle_timer: Option(process.Timer))
   Http2(
     frame_buffer: Buffer,
-    settings: Http2Settings,
     hpack_context: HpackContext,
+    settings: Http2Settings,
   )
 }
-
-// Http(idle_timer: Option(process.Timer))
-// Http2
 
 pub fn new_state() -> State {
   Http1(None)
@@ -197,7 +194,7 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
         }
         |> result.unwrap_both
       }
-      Http2(frame_buffer, settings, hpack_context) -> {
+      Http2(frame_buffer, hpack_context, settings) -> {
         let new_buffer = buffer.append(frame_buffer, msg)
         case frame.decode(new_buffer.data) {
           Ok(#(frame.WindowUpdate(amount, identifier), rest)) -> {
