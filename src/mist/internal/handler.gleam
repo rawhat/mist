@@ -39,6 +39,9 @@ pub fn init() -> #(State, Option(Selector(Message))) {
   #(new_state(subj), Some(selector))
 }
 
+import gleam/erlang
+import gleam/io
+
 pub fn with_func(handler: Handler) -> Loop(Message, State) {
   fn(msg, state: State, conn: glisten.Connection(Message)) {
     let sender = conn.subject
@@ -50,6 +53,8 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
         client_ip: conn.client_ip,
       )
 
+    io.println("got a message:  " <> erlang.format(msg))
+
     case msg, state {
       User(Send(..)), Http1(..) -> {
         Error(process.Abnormal(
@@ -58,11 +63,12 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
       }
       User(Send(id, resp)), Http2(state) -> {
         case resp.body {
-          Bytes(bytes) ->
+          Bytes(bytes) -> {
             resp
             |> response.set_body(bytes)
             |> http2.send_bytes_builder(conn, state.hpack_context, id)
-          File(..) -> todo
+          }
+          File(..) -> todo as "Need to implement file support"
           // TODO:  properly error in some fashion for these
           Websocket(_selector) ->
             Error(process.Abnormal("WebSocket unsupported for HTTP/2"))
@@ -70,6 +76,7 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
             Error(process.Abnormal("Chunked encoding not supported for HTTP/2"))
         }
         |> result.map(fn(context) {
+          io.println("seems like we successfully sent?")
           Http2(http2_handler.with_hpack_context(state, context))
         })
       }
@@ -103,9 +110,12 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
           }
         })
       }
-      Packet(msg), Http2(state) ->
-        http2_handler.call(state, msg, conn, handler)
+      Packet(msg), Http2(state) -> {
+        state
+        |> http2_handler.append_data(msg)
+        |> http2_handler.call(conn, handler)
         |> result.map(Http2)
+      }
     }
     |> result.map(actor.continue)
     |> result.map_error(actor.Stop)
