@@ -1,6 +1,6 @@
 import gleam/http.{type Header} as _http
 import gleam/list
-import gleam/option.{type Option, None}
+import gleam/option.{type Option, None, Some}
 import mist/internal/http2/frame.{type PushState, type Setting}
 
 pub type Http2Settings {
@@ -29,25 +29,21 @@ pub fn update_settings(
   current: Http2Settings,
   settings: List(Setting),
 ) -> Http2Settings {
-  list.fold(
-    settings,
-    _,
-    fn(settings, setting) {
-      case setting {
-        frame.HeaderTableSize(size) ->
-          Http2Settings(..settings, header_table_size: size)
-        frame.ServerPush(push) -> Http2Settings(..settings, server_push: push)
-        frame.MaxConcurrentStreams(max) ->
-          Http2Settings(..settings, max_concurrent_streams: max)
-        frame.InitialWindowSize(size) ->
-          Http2Settings(..settings, initial_window_size: size)
-        frame.MaxFrameSize(size) ->
-          Http2Settings(..settings, max_frame_size: size)
-        frame.MaxHeaderListSize(size) ->
-          Http2Settings(..settings, max_header_list_size: Some(size))
-      }
-    },
-  )
+  list.fold(settings, current, fn(settings, setting) {
+    case setting {
+      frame.HeaderTableSize(size) ->
+        Http2Settings(..settings, header_table_size: size)
+      frame.ServerPush(push) -> Http2Settings(..settings, server_push: push)
+      frame.MaxConcurrentStreams(max) ->
+        Http2Settings(..settings, max_concurrent_streams: max)
+      frame.InitialWindowSize(size) ->
+        Http2Settings(..settings, initial_window_size: size)
+      frame.MaxFrameSize(size) ->
+        Http2Settings(..settings, max_frame_size: size)
+      frame.MaxHeaderListSize(size) ->
+        Http2Settings(..settings, max_header_list_size: Some(size))
+    }
+  })
 }
 
 pub type HpackContext

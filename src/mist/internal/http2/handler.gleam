@@ -18,7 +18,10 @@ pub type State {
   )
 }
 
-pub fn upgrade(data: BitArray, conn: Connection) -> Result(State, String) {
+pub fn upgrade(
+  data: BitArray,
+  conn: Connection,
+) -> Result(State, process.ExitReason) {
   let initial_settings = http2.default_settings()
   let settings_frame =
     frame.Settings(ack: False, settings: [
@@ -35,7 +38,7 @@ pub fn upgrade(data: BitArray, conn: Connection) -> Result(State, String) {
     |> conn.transport.send(conn.socket, _)
 
   frame.decode(data)
-  |> result.map_error(fn(_err) { "Missing first frame" })
+  |> result.map_error(fn(_err) { process.Abnormal("Missing first frame") })
   |> result.then(fn(pair) {
     let assert #(frame, rest) = pair
     case frame {
@@ -51,7 +54,7 @@ pub fn upgrade(data: BitArray, conn: Connection) -> Result(State, String) {
       }
       _ -> {
         let assert Ok(_) = conn.transport.close(conn.socket)
-        Error("SETTINGS frame must be sent first")
+        Error(process.Abnormal("SETTINGS frame must be sent first"))
       }
     }
   })

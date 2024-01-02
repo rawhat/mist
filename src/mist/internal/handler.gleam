@@ -69,9 +69,7 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
             http.Upgrade(data) ->
               http2_handler.upgrade(data, conn)
               |> result.map(fn(state) { actor.continue(Http2(state)) })
-              |> result.map_error(fn(reason) {
-                actor.Stop(process.Abnormal(reason))
-              })
+              |> result.map_error(actor.Stop)
           }
         })
         |> result.unwrap_both
