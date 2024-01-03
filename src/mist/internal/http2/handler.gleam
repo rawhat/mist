@@ -1,7 +1,11 @@
 import gleam/bytes_builder
+import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/http/response.{type Response}
+import gleam/int
 import gleam/io
+import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import mist/internal/buffer.{type Buffer}
 import mist/internal/http.{
@@ -9,7 +13,7 @@ import mist/internal/http.{
 }
 import mist/internal/http2.{type HpackContext, type Http2Settings, Http2Settings}
 import mist/internal/http2/frame.{
-  type Frame, type StreamIdentifier, Complete, Settings,
+  type Frame, type StreamIdentifier, Complete, Continued, Settings,
 }
 import mist/internal/http2/stream
 
@@ -17,12 +21,19 @@ pub type Message {
   Send(identifier: StreamIdentifier(Frame), resp: Response(ResponseData))
 }
 
+pub type PendingSend {
+  PendingSend
+}
+
 pub type State {
   State(
+    fragment: Option(Frame),
     frame_buffer: Buffer,
     hpack_context: HpackContext,
-    settings: Http2Settings,
+    pending_sends: List(PendingSend),
     self: Subject(Message),
+    settings: Http2Settings,
+    streams: Dict(StreamIdentifier(Frame), stream.State),
   )
 }
 
@@ -62,12 +73,15 @@ pub fn upgrade(
       Settings(settings: settings, ..) -> {
         let http2_settings = http2.update_settings(initial_settings, settings)
         Ok(State(
+          fragment: None,
           frame_buffer: buffer.new(rest),
-          settings: http2_settings,
           hpack_context: http2.hpack_new_context(
             http2_settings.header_table_size,
           ),
+          pending_sends: [],
           self: self,
+          settings: http2_settings,
+          streams: dict.new(),
         ))
       }
       _ -> {
@@ -105,14 +119,47 @@ pub fn call(
 
 import gleam/erlang
 
+// TODO:  this should use the frame error types to actually do some shit with
+// the stream(s)
 fn handle_frame(
   frame: Frame,
   state: State,
   conn: Connection,
   handler: Handler,
 ) -> Result(State, process.ExitReason) {
-  case frame {
-    frame.WindowUpdate(amount, identifier) -> {
+  case state.fragment, frame {
+    Some(frame.Header(
+      identifier: id1,
+      data: Continued(existing),
+      end_stream: end_stream,
+      priority: priority,
+    )), frame.Continuation(data: Complete(data), identifier: id2) if id1 == id2 -> {
+      let complete_frame =
+        frame.Header(
+          identifier: id1,
+          data: Complete(<<existing:bits, data:bits>>),
+          end_stream: end_stream,
+          priority: priority,
+        )
+      handle_frame(complete_frame, State(..state, fragment: None), conn, handler,
+      )
+    }
+    Some(frame.Header(
+      identifier: id1,
+      data: Continued(existing),
+      end_stream: end_stream,
+      priority: priority,
+    )), frame.Continuation(data: Continued(data), identifier: id2) if id1 == id2 -> {
+      let next =
+        frame.Header(
+          identifier: id1,
+          data: Continued(<<existing:bits, data:bits>>),
+          end_stream: end_stream,
+          priority: priority,
+        )
+      Ok(State(..state, fragment: Some(next)))
+    }
+    None, frame.WindowUpdate(amount, identifier) -> {
       case frame.get_stream_identifier(identifier) {
         0 -> {
           io.println("setting window size!")
@@ -132,10 +179,13 @@ fn handle_frame(
         }
       }
     }
-    frame.Header(Complete(data), end_stream, identifier, _priority) -> {
-      // TODO:  will this be the end headers?  i guess we should wait to
-      // receive all of them before starting the stream.  is that how it
-      // works?
+    None, frame.Header(Complete(data), end_stream, identifier, _priority) -> {
+      // TODO:
+      //  x add stream to dict
+      //  - figure out how to get the headers to it
+      //  - figure out how to allow reading from the body
+      //    - this presumably would require "blocking" on that until it
+      //      receives the rest of the data
       let conn =
         Connection(
           body: Initial(<<>>),
@@ -143,7 +193,16 @@ fn handle_frame(
           transport: conn.transport,
           client_ip: conn.client_ip,
         )
-      io.println("we got some headers:  " <> erlang.format(data))
+      let assert Ok(#(headers, context)) =
+        http2.hpack_decode(state.hpack_context, data)
+      io.println("we got some headers:  " <> erlang.format(headers))
+
+      let pending_content_length =
+        headers
+        |> list.key_find("content-length")
+        |> result.then(int.parse)
+        |> option.from_result
+
       let assert Ok(new_stream) =
         stream.new(
           identifier,
@@ -152,29 +211,47 @@ fn handle_frame(
           conn,
           fn(resp) { process.send(state.self, Send(identifier, resp)) },
         )
-      let assert Ok(#(headers, context)) =
-        http2.hpack_decode(state.hpack_context, data)
+      let stream_state =
+        stream.State(
+          id: identifier,
+          state: stream.Open,
+          subj: new_stream,
+          receive_window_size: state.settings.initial_window_size,
+          send_window_size: state.settings.initial_window_size,
+          pending_content_length: pending_content_length,
+        )
+      let streams = dict.insert(state.streams, identifier, stream_state)
       process.send(new_stream, stream.Headers(headers, end_stream))
-      Ok(State(..state, hpack_context: context))
+      Ok(State(..state, hpack_context: context, streams: streams))
     }
-    frame.Priority(..) -> {
+    None, frame.Priority(..) -> {
       Ok(state)
     }
-    frame.Settings(ack: True, ..) -> {
-      let resp =
-        frame.Settings(ack: True, settings: [])
-        |> frame.encode
+    None, frame.Settings(ack: True, ..) -> {
+      let resp = frame.settings_ack()
       conn.transport.send(conn.socket, bytes_builder.from_bit_array(resp))
       |> result.replace(state)
       |> result.replace_error(process.Abnormal(
         "Failed to respond to settings ACK",
       ))
     }
-    frame.GoAway(..) -> {
+    _, frame.Settings(..) -> {
+      let resp = frame.settings_ack()
+      conn.transport.send(conn.socket, bytes_builder.from_bit_array(resp))
+      |> result.replace(state)
+      |> result.replace_error(process.Abnormal(
+        "Failed to respond to settings ACK",
+      ))
+    }
+    None, frame.GoAway(..) -> {
       io.println("byeeee~~")
       Error(process.Normal)
     }
     // TODO:  obviously fill these out
-    _ -> Ok(state)
+    _, _ -> Ok(state)
   }
+}
+
+fn do_pending_sends() -> todo_type {
+  todo
 }

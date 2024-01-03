@@ -16,7 +16,7 @@ import mist/internal/buffer.{type Buffer}
 import mist/internal/http.{
   type Connection, type Handler, type ResponseData, Connection, Initial,
 }
-import mist/internal/http2/frame.{type StreamIdentifier}
+import mist/internal/http2/frame.{type Frame, type StreamIdentifier}
 
 pub type Message {
   Headers(headers: List(Header), end_stream: Bool)
@@ -33,16 +33,13 @@ pub type StreamState {
 
 pub type State {
   State(
-    headers: List(Header),
-    body: Buffer,
-    window_size: Int,
+    id: StreamIdentifier(Frame),
     state: StreamState,
+    subj: Subject(Message),
+    receive_window_size: Int,
+    send_window_size: Int,
+    pending_content_length: Option(Int),
   )
-}
-
-pub type SendData {
-  HeaderResponse
-  DataResponse
 }
 
 import gleam/io
@@ -54,86 +51,68 @@ pub fn new(
   connection: Connection,
   send: fn(Response(ResponseData)) -> todo_resp,
 ) -> Result(Subject(Message), actor.StartError) {
-  actor.start(
-    State(
-      headers: [],
-      body: buffer.empty(),
-      window_size: window_size,
-      state: Open,
-    ),
-    fn(msg, state) {
-      io.debug(#("our stream got a msg", msg, "with state", state))
-      case msg {
-        Headers(headers, True) -> {
-          let content_length =
-            headers
-            |> list.key_find("content-length")
-            |> result.then(int.parse)
-            |> result.unwrap(0)
+  actor.start(Nil, fn(msg, state) {
+    io.debug(#("our stream got a msg", msg, "with state", state))
+    case msg {
+      Headers(headers, True) -> {
+        let content_length =
+          headers
+          |> list.key_find("content-length")
+          |> result.then(int.parse)
+          |> result.unwrap(0)
 
-          case content_length {
-            0 -> {
-              io.println("we got no content, zoomin")
-              headers
-              |> make_request(
-                request.new()
-                |> request.set_body(Nil),
-              )
-              |> result.map(fn(req) { request.set_body(req, connection) })
-              |> result.map(handler)
-              |> result.map(fn(resp) {
-                io.println("gonna reply with:  " <> erlang.format(resp))
-                send(resp)
-                // TODO:  send response
-                actor.Stop(process.Normal)
-              })
-              |> result.map_error(fn(err) {
-                io.println("oh no, we got an error:  " <> erlang.format(err))
-                // TODO:  send close?
-                actor.Stop(process.Normal)
-              })
-              |> result.unwrap_both
-            }
-            _n -> {
-              // TODO:  send an error back
+        case content_length {
+          0 -> {
+            io.println("we got no content, zoomin")
+            headers
+            |> make_request(
+              request.new()
+              |> request.set_body(Nil),
+            )
+            |> result.map(fn(req) { request.set_body(req, connection) })
+            |> result.map(handler)
+            |> result.map(fn(resp) {
+              io.println("gonna reply with:  " <> erlang.format(resp))
+              send(resp)
+              // TODO:  send response
               actor.Stop(process.Normal)
-            }
+            })
+            |> result.map_error(fn(err) {
+              io.println("oh no, we got an error:  " <> erlang.format(err))
+              // TODO:  send close?
+              actor.Stop(process.Normal)
+            })
+            |> result.unwrap_both
+          }
+          _n -> {
+            // TODO:  send an error back
+            actor.Stop(process.Normal)
           }
         }
-        Headers(headers, False) -> {
-          let content_length =
-            headers
-            |> list.key_find("content-length")
-            |> result.then(int.parse)
-            |> result.unwrap(0)
-          actor.continue(
-            State(
-              ..state,
-              headers: headers,
-              body: buffer.empty()
-              |> buffer.with_capacity(content_length),
-            ),
-          )
-        }
-        // TODO:  i think i'll need to hook into something like this to handle
-        // receiving the data when requested... i'll also need to do whatever
-        // this mechanism is _instead_ of the http.{read_body} stuff
-        BodyChunk(data) ->
-          actor.continue(State(..state, body: buffer.append(state.body, data)))
-        LastBodyChunk(data) -> {
-          let body = buffer.append(state.body, data)
-          let req =
-            request.new()
-            |> request.set_body(
-              Connection(..connection, body: Initial(body.data)),
-            )
-          let resp = handler(req)
-          send(resp)
-          actor.Stop(process.Normal)
-        }
       }
-    },
-  )
+      Headers(headers, False) -> {
+        let content_length =
+          headers
+          |> list.key_find("content-length")
+          |> result.then(int.parse)
+          |> result.unwrap(0)
+        actor.continue(Nil)
+      }
+      // TODO:  i think i'll need to hook into something like this to handle
+      // receiving the data when requested... i'll also need to do whatever
+      // this mechanism is _instead_ of the http.{read_body} stuff
+      BodyChunk(data) -> actor.continue(Nil)
+      LastBodyChunk(data) -> {
+        // let body = buffer.append(state.body, data)
+        let req =
+          request.new()
+          |> request.set_body(Connection(..connection, body: Initial(<<>>)))
+        let resp = handler(req)
+        send(resp)
+        actor.Stop(process.Normal)
+      }
+    }
+  })
 }
 
 pub fn make_request(
