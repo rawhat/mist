@@ -689,3 +689,8 @@ fn encode_settings(settings: List(Setting)) -> BitArray {
     }
   })
 }
+
+pub fn settings_ack() -> BitArray {
+  Settings(ack: True, settings: [])
+  |> encode
+}
