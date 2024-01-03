@@ -494,9 +494,9 @@ pub fn main() {
     fn(_req) {
       io.println("hi we in here")
       response.new(200)
-      |> response.set_body(Bytes(bytes_builder.new()))
+      // |> response.set_body(Bytes(bytes_builder.new()))
+      |> response.set_body(Bytes(bytes_builder.from_string("hello, world!")))
     }
-    // |> response.set_body(Bytes(bytes_builder.from_string("hello, world!")))
     |> new
     |> port(1234)
     |> start_https(

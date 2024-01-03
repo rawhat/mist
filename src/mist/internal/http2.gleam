@@ -114,12 +114,13 @@ pub fn send_bytes_builder(
   let resp =
     resp
     |> http.add_default_headers(False)
-    |> response.set_header(":status", int.to_string(resp.status))
+
+  let headers = [#(":status", int.to_string(resp.status)), ..resp.headers]
 
   case bytes_builder.byte_size(resp.body) {
-    0 -> send_headers(context, conn, resp.headers, True, id)
+    0 -> send_headers(context, conn, headers, True, id)
     _ -> {
-      send_headers(context, conn, resp.headers, False, id)
+      send_headers(context, conn, headers, False, id)
       |> result.then(fn(context) {
         // TODO:  this should be broken up by window size
         // TODO:  fix end_stream
