@@ -1,6 +1,7 @@
 import gleam/dynamic
 import gleam/erlang
 import gleam/erlang/process.{type Subject}
+import gleam/function
 import gleam/http.{type Header} as ghttp
 import gleam/http/request.{type Request, Request}
 import gleam/http/response.{type Response}
@@ -12,16 +13,13 @@ import gleam/pair
 import gleam/result
 import gleam/string
 import gleam/uri
-import mist/internal/buffer.{type Buffer}
 import mist/internal/http.{
-  type Connection, type Handler, type ResponseData, Connection, Initial,
+  type Connection, type Handler, type ResponseData, Connection, Stream,
 }
 import mist/internal/http2/frame.{type Frame, type StreamIdentifier}
 
 pub type Message {
-  Headers(headers: List(Header), end_stream: Bool)
-  BodyChunk(data: BitArray)
-  LastBodyChunk(data: BitArray)
+  Ready(Subject(Subject(BitArray)))
 }
 
 pub type StreamState {
@@ -33,6 +31,7 @@ pub type StreamState {
 
 pub type State {
   State(
+    data_subject: Subject(BitArray),
     id: StreamIdentifier(Frame),
     state: StreamState,
     subj: Subject(Message),
@@ -42,83 +41,70 @@ pub type State {
   )
 }
 
-import gleam/io
-
 pub fn new(
   _identifier: StreamIdentifier(any),
-  window_size: Int,
   handler: Handler,
+  headers: List(Header),
   connection: Connection,
   send: fn(Response(ResponseData)) -> todo_resp,
 ) -> Result(Subject(Message), actor.StartError) {
-  actor.start(Nil, fn(msg, state) {
-    io.debug(#("our stream got a msg", msg, "with state", state))
-    case msg {
-      Headers(headers, True) -> {
-        let content_length =
-          headers
-          |> list.key_find("content-length")
-          |> result.then(int.parse)
-          |> result.unwrap(0)
+  actor.start_spec(
+    actor.Spec(
+      init: fn() {
+        let data_subj = process.new_subject()
+        let data_selector =
+          process.new_selector()
+          |> process.selecting(data_subj, function.identity)
+        actor.Ready(#(data_subj, data_selector), process.new_selector())
+      },
+      init_timeout: 1000,
+      loop: fn(msg, state) {
+        let assert #(data_subj, data_selector) = state
+        case msg {
+          Ready(subj) -> {
+            process.send(subj, data_subj)
+            let content_length =
+              headers
+              |> list.key_find("content-length")
+              |> result.then(int.parse)
+              |> result.unwrap(0)
+            let conn =
+              Connection(
+                ..connection,
+                body: Stream(
+                  selector: data_selector,
+                  attempts: 0,
+                  data: <<>>,
+                  remaining: content_length,
+                ),
+              )
 
-        case content_length {
-          0 -> {
-            io.println("we got no content, zoomin")
-            headers
-            |> make_request(
-              request.new()
-              |> request.set_body(Nil),
-            )
-            |> result.map(fn(req) { request.set_body(req, connection) })
+            request.new()
+            |> request.set_body(conn)
+            |> make_request(headers, _)
             |> result.map(handler)
             |> result.map(fn(resp) {
-              io.println("gonna reply with:  " <> erlang.format(resp))
               send(resp)
-              // TODO:  send response
-              actor.Stop(process.Normal)
+              actor.continue(state)
             })
             |> result.map_error(fn(err) {
-              io.println("oh no, we got an error:  " <> erlang.format(err))
-              // TODO:  send close?
-              actor.Stop(process.Normal)
+              actor.Stop(process.Abnormal(
+                "Failed to respond to request: "
+                <> erlang.format(err),
+              ))
             })
             |> result.unwrap_both
           }
-          _n -> {
-            // TODO:  send an error back
-            actor.Stop(process.Normal)
-          }
         }
-      }
-      Headers(headers, False) -> {
-        let content_length =
-          headers
-          |> list.key_find("content-length")
-          |> result.then(int.parse)
-          |> result.unwrap(0)
-        actor.continue(Nil)
-      }
-      // TODO:  i think i'll need to hook into something like this to handle
-      // receiving the data when requested... i'll also need to do whatever
-      // this mechanism is _instead_ of the http.{read_body} stuff
-      BodyChunk(data) -> actor.continue(Nil)
-      LastBodyChunk(data) -> {
-        // let body = buffer.append(state.body, data)
-        let req =
-          request.new()
-          |> request.set_body(Connection(..connection, body: Initial(<<>>)))
-        let resp = handler(req)
-        send(resp)
-        actor.Stop(process.Normal)
-      }
-    }
-  })
+      },
+    ),
+  )
 }
 
 pub fn make_request(
   headers: List(Header),
-  req: Request(Nil),
-) -> Result(Request(Nil), Nil) {
+  req: Request(Connection),
+) -> Result(Request(Connection), Nil) {
   case headers {
     [] -> Ok(req)
     [#("method", method), ..rest] -> {
