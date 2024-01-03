@@ -15,7 +15,7 @@ import mist/internal/http2.{type HpackContext, type Http2Settings, Http2Settings
 import mist/internal/http2/frame.{
   type Frame, type StreamIdentifier, Complete, Continued, Settings,
 }
-import mist/internal/http2/stream
+import mist/internal/http2/stream.{Ready}
 
 pub type Message {
   Send(identifier: StreamIdentifier(Frame), resp: Response(ResponseData))
@@ -179,13 +179,7 @@ fn handle_frame(
         }
       }
     }
-    None, frame.Header(Complete(data), end_stream, identifier, _priority) -> {
-      // TODO:
-      //  x add stream to dict
-      //  - figure out how to get the headers to it
-      //  - figure out how to allow reading from the body
-      //    - this presumably would require "blocking" on that until it
-      //      receives the rest of the data
+    None, frame.Header(Complete(data), _end_stream, identifier, _priority) -> {
       let conn =
         Connection(
           body: Initial(<<>>),
@@ -204,15 +198,15 @@ fn handle_frame(
         |> option.from_result
 
       let assert Ok(new_stream) =
-        stream.new(
-          identifier,
-          state.settings.initial_window_size,
-          handler,
-          conn,
-          fn(resp) { process.send(state.self, Send(identifier, resp)) },
-        )
+        stream.new(identifier, handler, headers, conn, fn(resp) {
+          process.send(state.self, Send(identifier, resp))
+        })
+
+      let assert Ok(data_subject) = process.try_call(new_stream, Ready, 1000)
+
       let stream_state =
         stream.State(
+          data_subject: data_subject,
           id: identifier,
           state: stream.Open,
           subj: new_stream,
@@ -221,8 +215,16 @@ fn handle_frame(
           pending_content_length: pending_content_length,
         )
       let streams = dict.insert(state.streams, identifier, stream_state)
-      process.send(new_stream, stream.Headers(headers, end_stream))
       Ok(State(..state, hpack_context: context, streams: streams))
+    }
+    None, frame.Data(
+      identifier: identifier,
+      data: data,
+      end_stream: _end_stream,
+    ) -> {
+      let assert Ok(existing) = dict.get(state.streams, identifier)
+      process.send(existing.data_subject, data)
+      Ok(state)
     }
     None, frame.Priority(..) -> {
       Ok(state)

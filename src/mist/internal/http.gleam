@@ -32,6 +32,14 @@ pub type ResponseData {
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
 }
 
+// TODO:
+//  i think this will need to grow _some_ way to block on reading the body
+//  for http/2 data frames... i'm not sure exactly how to do that at the
+//  moment
+//
+//  current thoughts:
+//    - provide a subject here for reading the body?
+//      - perhaps as a variant to the `Body`?
 pub type Connection {
   Connection(
     body: Body,
@@ -307,6 +315,12 @@ pub fn parse_request(
 
 pub type Body {
   Initial(BitArray)
+  Stream(
+    selector: Selector(BitArray),
+    data: BitArray,
+    remaining: Int,
+    attempts: Int,
+  )
 }
 
 pub fn read_body(
@@ -353,6 +367,33 @@ pub fn read_body(
       |> result.map(request.set_body(req, _))
       |> result.replace_error(InvalidBody)
     }
+    _, Stream(
+      selector: selector,
+      data: data,
+      remaining: remaining,
+      attempts: attempts,
+    ) if remaining > 0 -> {
+      let res =
+        selector
+        |> process.select(1000)
+        |> result.replace_error(InvalidBody)
+      use next <- result.then(res)
+      let got = bit_array.byte_size(next)
+      let left = int.max(remaining - got, 0)
+      let new_data = bit_array.append(data, next)
+      case left {
+        0 -> Ok(request.set_body(req, new_data))
+        _rem ->
+          read_body(request.set_body(
+            req,
+            Connection(
+              ..req.body,
+              body: Stream(selector, new_data, left, attempts + 1),
+            ),
+          ))
+      }
+    }
+    _, Stream(data: data, ..) -> Ok(request.set_body(req, data))
   }
 }
 

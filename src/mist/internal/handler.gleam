@@ -1,5 +1,3 @@
-import birl
-import gleam/bytes_builder
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/function
 import gleam/http/response
