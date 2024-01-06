@@ -1,3 +1,4 @@
+import gleam/bit_array
 import gleam/bytes_builder
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
@@ -16,6 +17,7 @@ import mist/internal/http2/frame.{
   type Frame, type StreamIdentifier, Complete, Continued, Settings,
 }
 import mist/internal/http2/stream.{Ready}
+import mist/internal/http2/flow_control
 
 pub type Message {
   Send(identifier: StreamIdentifier(Frame), resp: Response(ResponseData))
@@ -29,16 +31,23 @@ pub type State {
   State(
     fragment: Option(Frame),
     frame_buffer: Buffer,
-    hpack_context: HpackContext,
     pending_sends: List(PendingSend),
+    receive_hpack_context: HpackContext,
     self: Subject(Message),
+    send_hpack_context: HpackContext,
+    send_window_size: Int,
+    receive_window_size: Int,
     settings: Http2Settings,
     streams: Dict(StreamIdentifier(Frame), stream.State),
   )
 }
 
-pub fn with_hpack_context(state: State, context: HpackContext) -> State {
-  State(..state, hpack_context: context)
+pub fn send_hpack_context(state: State, context: HpackContext) -> State {
+  State(..state, send_hpack_context: context)
+}
+
+pub fn receive_hpack_context(state: State, context: HpackContext) -> State {
+  State(..state, receive_hpack_context: context)
 }
 
 pub fn append_data(state: State, data: BitArray) -> State {
@@ -75,11 +84,16 @@ pub fn upgrade(
         Ok(State(
           fragment: None,
           frame_buffer: buffer.new(rest),
-          hpack_context: http2.hpack_new_context(
+          pending_sends: [],
+          receive_hpack_context: http2.hpack_new_context(
             http2_settings.header_table_size,
           ),
-          pending_sends: [],
+          receive_window_size: 65_535,
           self: self,
+          send_hpack_context: http2.hpack_new_context(
+            http2_settings.header_table_size,
+          ),
+          send_window_size: 65_535,
           settings: http2_settings,
           streams: dict.new(),
         ))
@@ -99,8 +113,8 @@ pub fn call(
 ) -> Result(State, process.ExitReason) {
   case frame.decode(state.frame_buffer.data) {
     Ok(#(frame, rest)) -> {
-      io.println("frame:  " <> erlang.format(frame))
-      io.println("rest:  " <> erlang.format(rest))
+      // io.println("frame:  " <> erlang.format(frame))
+      // io.println("rest:  " <> erlang.format(rest))
       let new_state = State(..state, frame_buffer: buffer.new(rest))
       case handle_frame(frame, new_state, conn, handler) {
         Ok(updated) -> call(updated, conn, handler)
@@ -162,7 +176,7 @@ fn handle_frame(
     None, frame.WindowUpdate(amount, identifier) -> {
       case frame.get_stream_identifier(identifier) {
         0 -> {
-          io.println("setting window size!")
+          // do_pending_sends(state)
           Ok(
             State(
               ..state,
@@ -170,12 +184,32 @@ fn handle_frame(
                 ..state.settings,
                 initial_window_size: amount,
               ),
-              hpack_context: state.hpack_context,
             ),
           )
         }
-        _n -> {
-          todo
+        _stream_id -> {
+          state.streams
+          |> dict.get(identifier)
+          |> result.replace_error(process.Abnormal(
+            "Window update for non-existent stream",
+          ))
+          |> result.then(fn(stream) {
+            case
+              flow_control.update_send_window(stream.send_window_size, amount)
+            {
+              Ok(update) -> {
+                let new_stream =
+                  stream.State(..stream, send_window_size: update)
+                Ok(
+                  State(
+                    ..state,
+                    streams: dict.insert(state.streams, identifier, new_stream),
+                  ),
+                )
+              }
+              _err -> Error(process.Abnormal("Failed to update send window"))
+            }
+          })
         }
       }
     }
@@ -188,7 +222,7 @@ fn handle_frame(
           client_ip: conn.client_ip,
         )
       let assert Ok(#(headers, context)) =
-        http2.hpack_decode(state.hpack_context, data)
+        http2.hpack_decode(state.receive_hpack_context, data)
       io.println("we got some headers:  " <> erlang.format(headers))
 
       let pending_content_length =
@@ -201,42 +235,79 @@ fn handle_frame(
         stream.new(identifier, handler, headers, conn, fn(resp) {
           process.send(state.self, Send(identifier, resp))
         })
-
-      let assert Ok(data_subject) = process.try_call(new_stream, Ready, 1000)
+      io.println("initialized new stream")
+      process.send(new_stream, Ready)
+      io.println("sent ready")
 
       let stream_state =
         stream.State(
-          data_subject: data_subject,
           id: identifier,
           state: stream.Open,
-          subj: new_stream,
+          subject: new_stream,
           receive_window_size: state.settings.initial_window_size,
           send_window_size: state.settings.initial_window_size,
           pending_content_length: pending_content_length,
         )
       let streams = dict.insert(state.streams, identifier, stream_state)
-      Ok(State(..state, hpack_context: context, streams: streams))
+      Ok(State(..state, receive_hpack_context: context, streams: streams))
     }
     None, frame.Data(
       identifier: identifier,
       data: data,
       end_stream: _end_stream,
     ) -> {
-      let assert Ok(existing) = dict.get(state.streams, identifier)
-      process.send(existing.data_subject, data)
-      Ok(state)
+      let data_size = bit_array.byte_size(data)
+      let assert #(conn_receive_window_size, conn_window_increment) =
+        flow_control.compute_receive_window(state.receive_window_size, data_size,
+        )
+
+      state.streams
+      |> dict.get(identifier)
+      |> result.map(stream.receive_data(_, data_size))
+      // TODO:  this whole business should much more gracefully handle
+      // individual stream errors rather than just blowin up
+      |> result.replace_error(process.Abnormal("Stream failed to receive data"))
+      // TODO:  handle end of stream?
+      |> result.map(fn(update) {
+        let assert #(new_stream, increment) = update
+        let _ = case conn_window_increment > 0 {
+          True -> {
+            http2.send_frame(
+              frame.WindowUpdate(
+                identifier: frame.stream_identifier(0),
+                amount: conn_window_increment,
+              ),
+              conn.socket,
+              conn.transport,
+            )
+          }
+          False -> Ok(Nil)
+        }
+        let _ = case increment > 0 {
+          True -> {
+            http2.send_frame(
+              frame.WindowUpdate(identifier: identifier, amount: increment),
+              conn.socket,
+              conn.transport,
+            )
+          }
+          False -> Ok(Nil)
+        }
+        process.send(new_stream.subject, stream.Data(data))
+        State(
+          ..state,
+          streams: dict.insert(state.streams, identifier, new_stream),
+          receive_window_size: conn_receive_window_size,
+        )
+      })
     }
     None, frame.Priority(..) -> {
       Ok(state)
     }
     None, frame.Settings(ack: True, ..) -> {
-      let resp = frame.settings_ack()
-      conn.transport.send(conn.socket, bytes_builder.from_bit_array(resp))
-      |> result.replace(state)
-      |> result.replace_error(process.Abnormal(
-        "Failed to respond to settings ACK",
-      ))
+      Ok(state)
     }
+    // TODO:  update any settings from this
     _, frame.Settings(..) -> {
       let resp = frame.settings_ack()
       conn.transport.send(conn.socket, bytes_builder.from_bit_array(resp))

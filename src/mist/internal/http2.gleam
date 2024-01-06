@@ -6,6 +6,8 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import glisten/socket.{type Socket, type SocketReason}
+import glisten/socket/transport.{type Transport}
 import mist/internal/http2/frame.{
   type Frame, type PushState, type Setting, type StreamIdentifier, Complete,
   Data, Header,
@@ -103,6 +105,17 @@ fn send_data(
     io.println("failed to send :(  " <> erlang.format(err))
   })
   |> result.replace_error(process.Abnormal("Failed to send HTTP/2 data"))
+}
+
+// TODO:  handle max frame size
+pub fn send_frame(
+  frame_to_send: Frame,
+  socket: Socket,
+  transport: Transport,
+) -> Result(Nil, SocketReason) {
+  let data = frame.encode(frame_to_send)
+
+  transport.send(socket, bytes_builder.from_bit_array(data))
 }
 
 pub fn send_bytes_builder(
