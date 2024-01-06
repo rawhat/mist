@@ -489,15 +489,21 @@ pub fn send_text_frame(
   |> connection.transport.send(connection.socket, _)
 }
 
+import gleam/erlang
+
 pub fn main() {
   let assert Ok(_server) =
-    fn(_req) {
-      io.println("hi we in here")
+    new(fn(req) {
+      // io.println("body is: " <> erlang.format(bit_array.byte_size(req.body)))
       response.new(200)
       // |> response.set_body(Bytes(bytes_builder.new()))
       |> response.set_body(Bytes(bytes_builder.from_string("hello, world!")))
-    }
-    |> new
+    })
+    // |> read_request_body(
+    //   bytes_limit: 4_000_000,
+    //   failure_response: response.new(413)
+    //   |> response.set_body(Bytes(bytes_builder.new())),
+    // )
     |> port(1234)
     |> start_https(
       certfile: "/home/alex/gleams/mist/domain.crt",

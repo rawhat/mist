@@ -12,6 +12,7 @@ import mist/internal/http.{
 import mist/internal/http/handler as http_handler
 import mist/internal/http2/handler.{type Message, Send} as http2_handler
 import mist/internal/http2
+import mist/internal/http2/frame
 import mist/internal/logger
 
 pub type HandlerError {
@@ -51,7 +52,7 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
         client_ip: conn.client_ip,
       )
 
-    io.println("got a message:  " <> erlang.format(msg))
+    // io.println("got a message:  " <> erlang.format(msg))
 
     case msg, state {
       User(Send(..)), Http1(..) -> {
@@ -60,11 +61,12 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
         ))
       }
       User(Send(id, resp)), Http2(state) -> {
+        io.println("hi we gonna send")
         case resp.body {
           Bytes(bytes) -> {
             resp
             |> response.set_body(bytes)
-            |> http2.send_bytes_builder(conn, state.hpack_context, id)
+            |> http2.send_bytes_builder(conn, state.send_hpack_context, id)
           }
           File(..) -> todo as "Need to implement file support"
           // TODO:  properly error in some fashion for these
@@ -75,7 +77,11 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
         }
         |> result.map(fn(context) {
           io.println("seems like we successfully sent?")
-          Http2(http2_handler.with_hpack_context(state, context))
+          Http2(http2_handler.send_hpack_context(state, context))
+        })
+        |> result.map_error(fn(err) {
+          io.println("=== OH NO, ERROR:  " <> erlang.format(err))
+          err
         })
       }
       Packet(msg), Http1(state, self) -> {

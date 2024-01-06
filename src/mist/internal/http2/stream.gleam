@@ -17,9 +17,11 @@ import mist/internal/http.{
   type Connection, type Handler, type ResponseData, Connection, Stream,
 }
 import mist/internal/http2/frame.{type Frame, type StreamIdentifier}
+import mist/internal/http2/flow_control
 
 pub type Message {
-  Ready(Subject(Subject(BitArray)))
+  Ready
+  Data(BitArray)
 }
 
 pub type StreamState {
@@ -31,15 +33,16 @@ pub type StreamState {
 
 pub type State {
   State(
-    data_subject: Subject(BitArray),
     id: StreamIdentifier(Frame),
     state: StreamState,
-    subj: Subject(Message),
+    subject: Subject(Message),
     receive_window_size: Int,
     send_window_size: Int,
     pending_content_length: Option(Int),
   )
 }
+
+import gleam/io
 
 pub fn new(
   _identifier: StreamIdentifier(any),
@@ -55,14 +58,13 @@ pub fn new(
         let data_selector =
           process.new_selector()
           |> process.selecting(data_subj, function.identity)
-        actor.Ready(#(data_subj, data_selector), process.new_selector())
+        actor.Ready(data_selector, data_selector)
       },
       init_timeout: 1000,
       loop: fn(msg, state) {
-        let assert #(data_subj, data_selector) = state
         case msg {
-          Ready(subj) -> {
-            process.send(subj, data_subj)
+          Ready -> {
+            io.println("hi we are ready")
             let content_length =
               headers
               |> list.key_find("content-length")
@@ -72,7 +74,10 @@ pub fn new(
               Connection(
                 ..connection,
                 body: Stream(
-                  selector: data_selector,
+                  selector: process.map_selector(state, fn(val) {
+                    let assert Data(val) = val
+                    val
+                  }),
                   attempts: 0,
                   data: <<>>,
                   remaining: content_length,
@@ -84,6 +89,7 @@ pub fn new(
             |> make_request(headers, _)
             |> result.map(handler)
             |> result.map(fn(resp) {
+              io.println("sending response! " <> erlang.format(resp))
               send(resp)
               actor.continue(state)
             })
@@ -94,6 +100,10 @@ pub fn new(
               ))
             })
             |> result.unwrap_both
+          }
+          _ -> {
+            // TODO:  probably just discard this?
+            actor.continue(state)
           }
         }
       },
@@ -152,4 +162,20 @@ pub fn make_request(
       |> request.set_header(key, value)
       |> make_request(rest, _)
   }
+}
+
+pub fn receive_data(state: State, size: Int) -> #(State, Int) {
+  let assert #(new_window_size, increment) =
+    flow_control.compute_receive_window(state.receive_window_size, size)
+
+  let new_state =
+    State(
+      ..state,
+      receive_window_size: new_window_size,
+      pending_content_length: option.map(state.pending_content_length, fn(val) {
+        val - size
+      }),
+    )
+
+  #(new_state, increment)
 }
