@@ -95,8 +95,7 @@ pub fn new(
             })
             |> result.map_error(fn(err) {
               actor.Stop(process.Abnormal(
-                "Failed to respond to request: "
-                <> erlang.format(err),
+                "Failed to respond to request: " <> erlang.format(err),
               ))
             })
             |> result.unwrap_both

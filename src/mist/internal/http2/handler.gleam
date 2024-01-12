@@ -155,7 +155,11 @@ fn handle_frame(
           end_stream: end_stream,
           priority: priority,
         )
-      handle_frame(complete_frame, State(..state, fragment: None), conn, handler,
+      handle_frame(
+        complete_frame,
+        State(..state, fragment: None),
+        conn,
+        handler,
       )
     }
     Some(frame.Header(
@@ -258,7 +262,9 @@ fn handle_frame(
     ) -> {
       let data_size = bit_array.byte_size(data)
       let assert #(conn_receive_window_size, conn_window_increment) =
-        flow_control.compute_receive_window(state.receive_window_size, data_size,
+        flow_control.compute_receive_window(
+          state.receive_window_size,
+          data_size,
         )
 
       state.streams

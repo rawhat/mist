@@ -46,11 +46,16 @@ pub fn it_should_decode_data_frame_test() {
   let data = <<0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 3>>
   frame.decode(data)
   |> should.equal(
-    Ok(#(
-      frame.Data(identifier: stream_identifier(1), data: <<>>, end_stream: False,
+    Ok(
+      #(
+        frame.Data(
+          identifier: stream_identifier(1),
+          data: <<>>,
+          end_stream: False,
+        ),
+        <<1, 2, 3>>,
       ),
-      <<1, 2, 3>>,
-    )),
+    ),
   )
 }
 
