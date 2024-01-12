@@ -170,8 +170,7 @@ fn parse_data(
         <<data:bytes-size(data_length), _padding:bits>> -> {
           Ok(Data(
             data: data,
-            end_stream: end_stream
-            == 1,
+            end_stream: end_stream == 1,
             identifier: stream_identifier(identifier),
           ))
         }
@@ -259,8 +258,7 @@ fn parse_priority(
       weight:size(8),
     >> if identifier != 0 -> {
       Ok(Priority(
-        exclusive: exclusive
-        == 1,
+        exclusive: exclusive == 1,
         identifier: stream_identifier(identifier),
         stream_dependency: stream_identifier(dependency),
         weight: weight,
