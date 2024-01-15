@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Updated for Gleam v0.33.0.
 - Log error from `rescue` in WebSocket handlers
 - WebSocket `Text` frame is now a `String`, since the spec notes that this type
   of message must be valid UTF-8
