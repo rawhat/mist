@@ -8,7 +8,7 @@ import gleam/http/response.{type Response, Response}
 import gleam/http
 import gleam/int
 import gleam/list
-import gleam/map.{type Map}
+import gleam/dict.{type Dict}
 import gleam/option.{type Option}
 import gleam/pair
 import gleam/result
@@ -71,14 +71,14 @@ pub fn parse_headers(
   bs: BitArray,
   socket: Socket,
   transport: Transport,
-  headers: Map(String, String),
-) -> Result(#(Map(String, String), BitArray), DecodeError) {
+  headers: Dict(String, String),
+) -> Result(#(Dict(String, String), BitArray), DecodeError) {
   case decode_packet(HttphBin, bs, []) {
     Ok(BinaryData(HttpHeader(_, _field, field, value), rest)) -> {
       let field = from_header(field)
       let assert Ok(value) = bit_array.to_string(value)
       headers
-      |> map.insert(field, value)
+      |> dict.insert(field, value)
       |> parse_headers(rest, socket, transport, _)
     }
     Ok(EndOfHeaders(rest)) -> Ok(#(headers, rest))
@@ -238,7 +238,7 @@ pub fn parse_request(
         rest,
         conn.socket,
         conn.transport,
-        map.new(),
+        dict.new(),
       ))
       use path <- result.then(
         path
@@ -259,7 +259,7 @@ pub fn parse_request(
         |> request.set_body(Connection(..conn, body: Initial(rest)))
         |> request.set_method(method)
         |> request.set_path(path)
-      Ok(request.Request(..req, query: query, headers: map.to_list(headers)))
+      Ok(request.Request(..req, query: query, headers: dict.to_list(headers)))
     }
     _ -> Error(DiscardPacket)
   }
@@ -389,7 +389,7 @@ pub fn add_default_headers(
   let body_size = bytes_builder.byte_size(resp.body)
 
   let headers =
-    map.from_list([
+    dict.from_list([
       #("content-length", int.to_string(body_size)),
       #("connection", "keep-alive"),
     ])
@@ -398,10 +398,10 @@ pub fn add_default_headers(
       _,
       fn(defaults, tup) {
         let #(key, value) = tup
-        map.insert(defaults, key, value)
+        dict.insert(defaults, key, value)
       },
     )
-    |> map.to_list
+    |> dict.to_list
 
   Response(..resp, headers: headers)
 }

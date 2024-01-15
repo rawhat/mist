@@ -301,8 +301,7 @@ pub fn initialize_connection(
             })
             |> result.map_error(fn(err) {
               logger.error(
-                "Caught error in websocket handler: "
-                <> erlang.format(err),
+                "Caught error in websocket handler: " <> erlang.format(err),
               )
             })
             |> result.lazy_unwrap(fn() {
@@ -318,7 +317,8 @@ pub fn initialize_connection(
           Invalid -> {
             logger.error(#("Received a malformed WebSocket frame"))
             on_close(state.user)
-            actor.Stop(process.Abnormal("WebSocket received a malformed message",
+            actor.Stop(process.Abnormal(
+              "WebSocket received a malformed message",
             ))
           }
         }
@@ -410,8 +410,7 @@ fn apply_frames(
         }
         Error(reason) -> {
           logger.error(
-            "Caught error in websocket handler: "
-            <> erlang.format(reason),
+            "Caught error in websocket handler: " <> erlang.format(reason),
           )
           on_close(state)
           actor.Stop(process.Abnormal("Crash in user websocket handler"))

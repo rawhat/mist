@@ -26,21 +26,17 @@ pub type Instantiator {
 }
 
 pub fn set_up_echo_server_test_() {
-  #(
-    Setup,
-    fn() { open_server(8888) },
-    [
-      it_echoes_with_data,
-      it_supports_large_header_fields,
-      it_supports_patch_requests,
-      it_rejects_large_requests,
-      it_supports_chunked_encoding,
-      it_supports_query_parameters,
-      it_handles_query_parameters_with_question_mark,
-      it_doesnt_mangle_query,
-      it_supports_expect_continue_header,
-    ],
-  )
+  #(Setup, fn() { open_server(8888) }, [
+    it_echoes_with_data,
+    it_supports_large_header_fields,
+    it_supports_patch_requests,
+    it_rejects_large_requests,
+    it_supports_chunked_encoding,
+    it_supports_query_parameters,
+    it_handles_query_parameters_with_question_mark,
+    it_doesnt_mangle_query,
+    it_supports_expect_continue_header,
+  ])
 }
 
 fn get_default_response() -> Response(BytesBuilder) {
