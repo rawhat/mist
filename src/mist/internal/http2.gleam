@@ -67,10 +67,10 @@ fn send_headers(
   end_stream: Bool,
   stream_identifier: StreamIdentifier(Frame),
 ) -> Result(HpackContext, process.ExitReason) {
-  io.println("going to encode:  " <> erlang.format(headers))
+  // io.println("going to encode:  " <> erlang.format(headers))
   hpack_encode(context, headers)
   |> result.then(fn(pair) {
-    io.println("hi we encoded:  " <> erlang.format(pair))
+    // io.println("hi we encoded:  " <> erlang.format(pair))
     let assert #(headers, new_context) = pair
     let header_frame =
       Header(
@@ -97,7 +97,7 @@ fn send_data(
 ) -> Result(Nil, process.ExitReason) {
   let data_frame =
     Data(data: data, end_stream: end_stream, identifier: stream_identifier)
-  io.println("gonna send data frame:  " <> erlang.format(data_frame))
+  // io.println("gonna send data frame:  " <> erlang.format(data_frame))
   let encoded = frame.encode(data_frame)
 
   conn.transport.send(conn.socket, bytes_builder.from_bit_array(encoded))

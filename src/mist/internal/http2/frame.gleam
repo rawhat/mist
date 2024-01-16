@@ -533,7 +533,10 @@ pub fn encode(frame: Frame) -> BitArray {
     }
     GoAway(data, error, StreamIdentifier(last_stream_id)) -> {
       let error = encode_error(error)
+      let payload_size = bit_array.byte_size(data)
       <<
+        payload_size:size(24),
+        7:size(8),
         0:size(8),
         0:size(1),
         0:size(31),
@@ -544,11 +547,22 @@ pub fn encode(frame: Frame) -> BitArray {
       >>
     }
     WindowUpdate(amount, StreamIdentifier(identifier)) -> {
-      <<0:size(8), 0:size(1), identifier:size(31), 0:size(1), amount:size(31)>>
+      <<
+        4:size(24),
+        8:size(8),
+        0:size(8),
+        0:size(1),
+        identifier:size(31),
+        0:size(1),
+        amount:size(31),
+      >>
     }
     Continuation(data, StreamIdentifier(identifier)) -> {
       let #(end_headers, data) = encode_data(data)
+      let payload_size = bit_array.byte_size(data)
       <<
+        payload_size:size(24),
+        9:size(8),
         0:size(5),
         end_headers:size(1),
         0:size(2),
@@ -688,7 +702,6 @@ fn encode_settings(settings: List(Setting)) -> BitArray {
   })
 }
 
-pub fn settings_ack() -> BitArray {
+pub fn settings_ack() -> Frame {
   Settings(ack: True, settings: [])
-  |> encode
 }

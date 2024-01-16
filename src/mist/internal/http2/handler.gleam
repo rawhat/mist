@@ -60,50 +60,62 @@ pub fn upgrade(
   self: Subject(Message),
 ) -> Result(State, process.ExitReason) {
   let initial_settings = http2.default_settings()
-  let settings_frame =
-    frame.Settings(ack: False, settings: [
-      frame.HeaderTableSize(initial_settings.header_table_size),
-      frame.ServerPush(initial_settings.server_push),
-      frame.MaxConcurrentStreams(initial_settings.max_concurrent_streams),
-      frame.InitialWindowSize(initial_settings.initial_window_size),
-      frame.MaxFrameSize(initial_settings.max_frame_size),
-    ])
-  let assert Ok(_nil) =
-    settings_frame
-    |> frame.encode
-    |> bytes_builder.from_bit_array
-    |> conn.transport.send(conn.socket, _)
+  let settings_frame = frame.Settings(ack: False, settings: [])
 
-  frame.decode(data)
-  |> result.map_error(fn(_err) { process.Abnormal("Missing first frame") })
-  |> result.then(fn(pair) {
-    let assert #(frame, rest) = pair
-    case frame {
-      Settings(settings: settings, ..) -> {
-        let http2_settings = http2.update_settings(initial_settings, settings)
-        Ok(State(
-          fragment: None,
-          frame_buffer: buffer.new(rest),
-          pending_sends: [],
-          receive_hpack_context: http2.hpack_new_context(
-            http2_settings.header_table_size,
-          ),
-          receive_window_size: 65_535,
-          self: self,
-          send_hpack_context: http2.hpack_new_context(
-            http2_settings.header_table_size,
-          ),
-          send_window_size: 65_535,
-          settings: http2_settings,
-          streams: dict.new(),
-        ))
-      }
-      _ -> {
-        let assert Ok(_) = conn.transport.close(conn.socket)
-        Error(process.Abnormal("SETTINGS frame must be sent first"))
-      }
-    }
-  })
+  // frame.HeaderTableSize(initial_settings.header_table_size),
+  // frame.ServerPush(initial_settings.server_push),
+  // frame.MaxConcurrentStreams(initial_settings.max_concurrent_streams),
+  // frame.InitialWindowSize(initial_settings.initial_window_size),
+  // frame.MaxFrameSize(initial_settings.max_frame_size),
+  let assert Ok(_nil) =
+    http2.send_frame(settings_frame, conn.socket, conn.transport)
+
+  Ok(State(
+    fragment: None,
+    frame_buffer: buffer.new(data),
+    pending_sends: [],
+    receive_hpack_context: http2.hpack_new_context(
+      initial_settings.header_table_size,
+    ),
+    receive_window_size: 65_535,
+    self: self,
+    send_hpack_context: http2.hpack_new_context(
+      initial_settings.header_table_size,
+    ),
+    send_window_size: 65_535,
+    settings: initial_settings,
+    streams: dict.new(),
+  ))
+  // frame.decode(data)
+  // |> result.map_error(fn(_err) { process.Abnormal("Missing first frame") })
+  // |> result.then(fn(pair) {
+  //   let assert #(frame, rest) = pair
+  //   case frame {
+  //     Settings(settings: settings, ..) -> {
+  //       let http2_settings = http2.update_settings(initial_settings, settings)
+  //       Ok(State(
+  //         fragment: None,
+  //         frame_buffer: buffer.new(rest),
+  //         pending_sends: [],
+  //         receive_hpack_context: http2.hpack_new_context(
+  //           http2_settings.header_table_size,
+  //         ),
+  //         receive_window_size: 65_535,
+  //         self: self,
+  //         send_hpack_context: http2.hpack_new_context(
+  //           http2_settings.header_table_size,
+  //         ),
+  //         send_window_size: 65_535,
+  //         settings: http2_settings,
+  //         streams: dict.new(),
+  //       ))
+  //     }
+  //     _ -> {
+  //       let assert Ok(_) = conn.transport.close(conn.socket)
+  //       Error(process.Abnormal("SETTINGS frame must be sent first"))
+  //     }
+  //   }
+  // })
 }
 
 pub fn call(
@@ -132,6 +144,7 @@ pub fn call(
 }
 
 import gleam/erlang
+import gleam/string
 
 // TODO:  this should use the frame error types to actually do some shit with
 // the stream(s)
@@ -141,6 +154,7 @@ fn handle_frame(
   conn: Connection,
   handler: Handler,
 ) -> Result(State, process.ExitReason) {
+  // io.println("handling frame:  " <> string.slice(erlang.format(frame), 0, 25))
   case state.fragment, frame {
     Some(frame.Header(
       identifier: id1,
@@ -217,7 +231,7 @@ fn handle_frame(
         }
       }
     }
-    None, frame.Header(Complete(data), _end_stream, identifier, _priority) -> {
+    None, frame.Header(Complete(data), end_stream, identifier, _priority) -> {
       let conn =
         Connection(
           body: Initial(<<>>),
@@ -227,7 +241,7 @@ fn handle_frame(
         )
       let assert Ok(#(headers, context)) =
         http2.hpack_decode(state.receive_hpack_context, data)
-      io.println("we got some headers:  " <> erlang.format(headers))
+      // io.println("we got some headers:  " <> erlang.format(headers))
 
       let pending_content_length =
         headers
@@ -236,12 +250,16 @@ fn handle_frame(
         |> option.from_result
 
       let assert Ok(new_stream) =
-        stream.new(identifier, handler, headers, conn, fn(resp) {
-          process.send(state.self, Send(identifier, resp))
-        })
-      io.println("initialized new stream")
+        stream.new(
+          handler,
+          headers,
+          conn,
+          fn(resp) { process.send(state.self, Send(identifier, resp)) },
+          end_stream,
+        )
+      // io.println("initialized new stream")
       process.send(new_stream, Ready)
-      io.println("sent ready")
+      // io.println("sent ready")
 
       let stream_state =
         stream.State(
@@ -255,11 +273,7 @@ fn handle_frame(
       let streams = dict.insert(state.streams, identifier, stream_state)
       Ok(State(..state, receive_hpack_context: context, streams: streams))
     }
-    None, frame.Data(
-      identifier: identifier,
-      data: data,
-      end_stream: _end_stream,
-    ) -> {
+    None, frame.Data(identifier: identifier, data: data, end_stream: end_stream) -> {
       let data_size = bit_array.byte_size(data)
       let assert #(conn_receive_window_size, conn_window_increment) =
         flow_control.compute_receive_window(
@@ -278,6 +292,10 @@ fn handle_frame(
         let assert #(new_stream, increment) = update
         let _ = case conn_window_increment > 0 {
           True -> {
+            // io.println(
+            //   "updating connection window increment to: "
+            //     <> int.to_string(conn_window_increment),
+            // )
             http2.send_frame(
               frame.WindowUpdate(
                 identifier: frame.stream_identifier(0),
@@ -291,6 +309,10 @@ fn handle_frame(
         }
         let _ = case increment > 0 {
           True -> {
+            // io.println(
+            //   "updating stream window increment to: "
+            //     <> int.to_string(increment),
+            // )
             http2.send_frame(
               frame.WindowUpdate(identifier: identifier, amount: increment),
               conn.socket,
@@ -299,7 +321,10 @@ fn handle_frame(
           }
           False -> Ok(Nil)
         }
-        process.send(new_stream.subject, stream.Data(data))
+        process.send(
+          new_stream.subject,
+          stream.Data(bits: data, end: end_stream),
+        )
         State(
           ..state,
           streams: dict.insert(state.streams, identifier, new_stream),
@@ -315,8 +340,8 @@ fn handle_frame(
     }
     // TODO:  update any settings from this
     _, frame.Settings(..) -> {
-      let resp = frame.settings_ack()
-      conn.transport.send(conn.socket, bytes_builder.from_bit_array(resp))
+      // io.println("got some settings...")
+      http2.send_frame(frame.settings_ack(), conn.socket, conn.transport)
       |> result.replace(state)
       |> result.replace_error(process.Abnormal(
         "Failed to respond to settings ACK",
@@ -327,7 +352,10 @@ fn handle_frame(
       Error(process.Normal)
     }
     // TODO:  obviously fill these out
-    _, _ -> Ok(state)
+    _, frame -> {
+      io.println("Ignoring frame:  " <> erlang.format(frame))
+      Ok(state)
+    }
   }
 }
 
