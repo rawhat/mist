@@ -12,7 +12,6 @@ import mist/internal/http.{
 import mist/internal/http/handler as http_handler
 import mist/internal/http2/handler.{type Message, Send} as http2_handler
 import mist/internal/http2
-import mist/internal/http2/frame
 import mist/internal/logger
 
 pub type HandlerError {
@@ -52,8 +51,6 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
         client_ip: conn.client_ip,
       )
 
-    // io.println("got a message:  " <> erlang.format(msg))
-
     case msg, state {
       User(Send(..)), Http1(..) -> {
         Error(process.Abnormal(
@@ -61,7 +58,7 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
         ))
       }
       User(Send(id, resp)), Http2(state) -> {
-        io.println("hi we gonna send")
+        // io.println("hi we gonna send")
         case resp.body {
           Bytes(bytes) -> {
             resp
@@ -76,7 +73,7 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
             Error(process.Abnormal("Chunked encoding not supported for HTTP/2"))
         }
         |> result.map(fn(context) {
-          io.println("seems like we successfully sent?")
+          // io.println("seems like we successfully sent?")
           Http2(http2_handler.send_hpack_context(state, context))
         })
         |> result.map_error(fn(err) {

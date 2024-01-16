@@ -1,6 +1,7 @@
+import gleam/bit_array
 import gleam/dynamic
 import gleam/erlang
-import gleam/erlang/process.{type Subject}
+import gleam/erlang/process.{type Selector, type Subject}
 import gleam/function
 import gleam/http.{type Header} as ghttp
 import gleam/http/request.{type Request, Request}
@@ -21,7 +22,8 @@ import mist/internal/http2/flow_control
 
 pub type Message {
   Ready
-  Data(BitArray)
+  Data(bits: BitArray, end: Bool)
+  Done
 }
 
 pub type StreamState {
@@ -42,14 +44,24 @@ pub type State {
   )
 }
 
+pub type InternalState {
+  InternalState(
+    data_selector: Selector(Message),
+    data_subject: Subject(Message),
+    end: Bool,
+    pending_response: Option(Response(ResponseData)),
+    to_remove: BitArray,
+  )
+}
+
 import gleam/io
 
 pub fn new(
-  _identifier: StreamIdentifier(any),
   handler: Handler,
   headers: List(Header),
   connection: Connection,
   send: fn(Response(ResponseData)) -> todo_resp,
+  end: Bool,
 ) -> Result(Subject(Message), actor.StartError) {
   actor.start_spec(
     actor.Spec(
@@ -58,13 +70,16 @@ pub fn new(
         let data_selector =
           process.new_selector()
           |> process.selecting(data_subj, function.identity)
-        actor.Ready(data_selector, data_selector)
+        actor.Ready(
+          InternalState(data_selector, data_subj, end, None, <<>>),
+          data_selector,
+        )
       },
       init_timeout: 1000,
       loop: fn(msg, state) {
-        case msg {
-          Ready -> {
-            io.println("hi we are ready")
+        case msg, state.end {
+          Ready, _ -> {
+            // io.println("hi we are ready: " <> erlang.format(identifier))
             let content_length =
               headers
               |> list.key_find("content-length")
@@ -74,9 +89,9 @@ pub fn new(
               Connection(
                 ..connection,
                 body: Stream(
-                  selector: process.map_selector(state, fn(val) {
-                    let assert Data(val) = val
-                    val
+                  selector: process.map_selector(state.data_selector, fn(val) {
+                    let assert Data(bits, ..) = val
+                    bits
                   }),
                   attempts: 0,
                   data: <<>>,
@@ -89,9 +104,11 @@ pub fn new(
             |> make_request(headers, _)
             |> result.map(handler)
             |> result.map(fn(resp) {
-              io.println("sending response! " <> erlang.format(resp))
-              send(resp)
-              actor.continue(state)
+              // io.println("sending done...")
+              process.send(state.data_subject, Done)
+              actor.continue(
+                InternalState(..state, pending_response: Some(resp)),
+              )
             })
             |> result.map_error(fn(err) {
               actor.Stop(process.Abnormal(
@@ -100,7 +117,39 @@ pub fn new(
             })
             |> result.unwrap_both
           }
-          _ -> {
+          Done, True -> {
+            // io.println("we are done receiving...")
+            let assert Some(resp) = state.pending_response
+            send(resp)
+            actor.continue(state)
+          }
+          Data(bits: bits, end: True), _ -> {
+            // io.println("we done!")
+            process.send(state.data_subject, Done)
+            actor.continue(
+              InternalState(
+                ..state,
+                end: True,
+                to_remove: <<state.to_remove:bits, bits:bits>>,
+              ),
+            )
+          }
+          Data(bits: bits, ..), _ -> {
+            actor.continue(
+              InternalState(
+                ..state,
+                to_remove: <<state.to_remove:bits, bits:bits>>,
+              ),
+            )
+          }
+          msg, _ -> {
+            // io.println(
+            //   "Discarding message: " <> string.slice(erlang.format(msg), 0, 50),
+            // )
+            // io.println(
+            //   "data is: " <> int.to_string(bit_array.byte_size(state.to_remove)),
+            // )
+            // io.println("GOT MESSAGE:  " <> erlang.format(msg))
             // TODO:  probably just discard this?
             actor.continue(state)
           }
