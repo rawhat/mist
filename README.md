@@ -26,15 +26,15 @@ in the examples below).
 ```gleam
 import gleam/bytes_builder
 import gleam/erlang/process
-import gleam/http/request.{Request}
-import gleam/http/response.{Response}
+import gleam/http/request.{type Request}
+import gleam/http/response.{type Response}
 import gleam/io
 import gleam/iterator
 import gleam/option.{None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
-import mist.{Connection, ResponseData}
+import mist.{type Connection, type ResponseData}
 
 pub fn main() {
   // These values are for the Websocket process initialized below
