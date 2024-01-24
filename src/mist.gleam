@@ -1,6 +1,6 @@
 import gleam/bytes_builder.{type BytesBuilder}
 import gleam/bit_array
-import gleam/erlang/process.{type ProcessDown, type Selector}
+import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
 import gleam/function
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
@@ -10,6 +10,7 @@ import gleam/io
 import gleam/iterator.{type Iterator}
 import gleam/option.{type Option, None}
 import gleam/otp/actor
+import gleam/otp/supervisor
 import gleam/result
 import glisten
 import glisten/socket
@@ -354,17 +355,15 @@ fn convert_body_types(
 /// Start a `mist` service over HTTP with the provided builder.
 pub fn start_http(
   builder: Builder(Connection, ResponseData),
-) -> Result(Nil, glisten.StartError) {
+) -> Result(Subject(supervisor.Message), glisten.StartError) {
   builder.handler
   |> function.compose(convert_body_types)
   |> handler.with_func
   |> glisten.handler(fn() { #(handler.new_state(), None) }, _)
   |> glisten.serve(builder.port)
-  |> result.map(fn(nil) {
+  |> result.map(fn(subj) {
     builder.after_start(builder.port, Http)
-    // TODO:  This should not be `Nil` but instead a subject that can receive
-    // messages, such as shutdown
-    nil
+    subj
   })
 }
 
@@ -375,17 +374,15 @@ pub fn start_https(
   builder: Builder(Connection, ResponseData),
   certfile certfile: String,
   keyfile keyfile: String,
-) -> Result(Nil, glisten.StartError) {
+) -> Result(Subject(supervisor.Message), glisten.StartError) {
   builder.handler
   |> function.compose(convert_body_types)
   |> handler.with_func
   |> glisten.handler(fn() { #(handler.new_state(), None) }, _)
   |> glisten.serve_ssl(builder.port, certfile, keyfile)
-  |> result.map(fn(nil) {
+  |> result.map(fn(subj) {
     builder.after_start(builder.port, Https)
-    // TODO:  This should not be `Nil` but instead a subject that can receive
-    // messages, such as shutdown
-    nil
+    subj
   })
 }
 

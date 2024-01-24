@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## v0.17.0
+
+- Bump dep versions to get access to `Subject` from `glisten.serve(_ssl)`
+
+## v0.16.0
 
 - Updated for Gleam v0.33.0.
 - Log error from `rescue` in WebSocket handlers
