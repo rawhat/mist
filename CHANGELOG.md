@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Parse `Host` header to set `host` and `port` fields on `Request`
+
 ## v0.17.0
 
 - Bump dep versions to get access to `Subject` from `glisten.serve(_ssl)`
