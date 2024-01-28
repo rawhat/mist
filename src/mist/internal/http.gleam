@@ -259,10 +259,10 @@ pub fn parse_request(
         dict.get(headers, "host")
         |> result.replace_error(NoHostHeader),
       )
-      use #(hostname, port) <- result.then(
-        string.split_once(host_header, ":")
-        |> result.replace_error(NoHostHeader),
-      )
+      let #(hostname, port) =
+        host_header
+        |> string.split_once(":")
+        |> result.unwrap(#(host_header, ""))
       let port =
         int.parse(port)
         |> result.map_error(fn(_err) {
