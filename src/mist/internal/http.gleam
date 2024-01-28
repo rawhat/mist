@@ -59,6 +59,7 @@ pub type DecodeError {
   // TODO:  better name?
   InvalidBody
   DiscardPacket
+  NoHostHeader
 }
 
 pub fn from_header(value: BitArray) -> String {
@@ -250,12 +251,32 @@ pub fn parse_request(
         |> result.replace_error(InvalidPath),
       )
       let #(path, query) = #(parsed.path, parsed.query)
+      let scheme = case conn.transport {
+        transport.Ssl(..) -> http.Https
+        transport.Tcp(..) -> http.Http
+      }
+      use host_header <- result.then(
+        dict.get(headers, "host")
+        |> result.replace_error(NoHostHeader),
+      )
+      use #(hostname, port) <- result.then(
+        string.split_once(host_header, ":")
+        |> result.replace_error(NoHostHeader),
+      )
+      let port =
+        int.parse(port)
+        |> result.map_error(fn(_err) {
+          case scheme {
+            http.Https -> 443
+            http.Http -> 80
+          }
+        })
+        |> result.unwrap_both
       let req =
         request.new()
-        |> request.set_scheme(case conn.transport {
-          transport.Ssl(..) -> http.Https
-          transport.Tcp(..) -> http.Http
-        })
+        |> request.set_scheme(scheme)
+        |> request.set_host(hostname)
+        |> request.set_port(port)
         |> request.set_body(Connection(..conn, body: Initial(rest)))
         |> request.set_method(method)
         |> request.set_path(path)
