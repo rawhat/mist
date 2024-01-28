@@ -8,18 +8,21 @@ import gleam/http.{type Scheme, Http, Https} as gleam_http
 import gleam/int
 import gleam/io
 import gleam/iterator.{type Iterator}
-import gleam/option.{type Option, None}
+import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/supervisor
 import gleam/result
+import gleam/string_builder.{type StringBuilder}
 import glisten
 import glisten/transport
 import mist/internal/buffer.{type Buffer, Buffer}
+import mist/internal/encoder
 import mist/internal/file
 import mist/internal/handler.{
   type ResponseData as InternalResponseData, Bytes as InternalBytes,
-  Chunked as InternalChunked, File as InternalFile,
-  Websocket as InternalWebsocket,
+  Chunked as InternalChunked, CloseEvents as InternalCloseEvents,
+  File as InternalFile, Websocket as InternalWebsocket,
 }
 import mist/internal/http.{type Connection as InternalConnection}
 import mist/internal/websocket.{
@@ -47,6 +50,7 @@ pub type ResponseData {
   Chunked(Iterator(BytesBuilder))
   /// See `mist.send_file` to use this response type.
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
+  CloseEvents
 }
 
 /// Potential errors when opening a file to send. This list is
@@ -347,6 +351,7 @@ fn convert_body_types(
     Bytes(data) -> InternalBytes(data)
     File(descriptor, offset, length) -> InternalFile(descriptor, offset, length)
     Chunked(iter) -> InternalChunked(iter)
+    CloseEvents -> InternalCloseEvents
   }
   response.set_body(resp, new_body)
 }
@@ -510,4 +515,77 @@ pub fn send_text_frame(
   frame
   |> websocket.to_text_frame
   |> transport.send(connection.transport, connection.socket, _)
+}
+
+// SSE Stuff
+pub opaque type SSEConnection {
+  SSEConnection(Connection)
+}
+
+pub type SSEEvent {
+  SSEEvent(id: Option(String), event: Option(String), data: StringBuilder)
+}
+
+pub fn event(data: StringBuilder) -> SSEEvent {
+  SSEEvent(id: None, event: None, data: data)
+}
+
+pub fn id(event: SSEEvent, id: String) -> SSEEvent {
+  SSEEvent(..event, id: Some(id))
+}
+
+pub fn event_name(event: SSEEvent, name: String) -> SSEEvent {
+  SSEEvent(..event, event: Some(name))
+}
+
+pub fn init_server_sent_events(
+  conn: Connection,
+  resp: Response(Nil),
+) -> Result(SSEConnection, Nil) {
+  let with_default_headers =
+    resp
+    |> response.set_header("content-type", "text/event-stream")
+    |> response.set_header("cache-control", "no-cache")
+    |> response.set_header("connection", "keep-alive")
+  // |> response.set_header("transfer-encoding", "chunked")
+
+  conn.transport.send(
+    conn.socket,
+    encoder.response_builder(200, with_default_headers.headers),
+  )
+  |> result.replace(SSEConnection(conn))
+  |> result.nil_error
+}
+
+pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
+  let SSEConnection(conn) = conn
+  let id =
+    event.id
+    |> option.map(fn(id) { "id: " <> id <> "\n" })
+    |> option.unwrap("")
+  let event_name =
+    event.event
+    |> option.map(fn(name) { "event: " <> name <> "\n" })
+    |> option.unwrap("")
+  let data =
+    event.data
+    |> string_builder.split("\n")
+    |> list.map(fn(row) { string_builder.prepend(row, "data: ") })
+    |> string_builder.join("\n")
+
+  let message =
+    data
+    |> string_builder.prepend(event_name)
+    |> string_builder.prepend(id)
+    |> string_builder.append("\n\n")
+    |> bytes_builder.from_string_builder
+
+  conn.transport.send(conn.socket, message)
+  |> result.replace(Nil)
+  |> result.nil_error
+}
+
+pub fn end_events(_conn: SSEConnection) -> Response(ResponseData) {
+  response.new(204)
+  |> response.set_body(CloseEvents)
 }
