@@ -517,27 +517,38 @@ pub fn send_text_frame(
   |> transport.send(connection.transport, connection.socket, _)
 }
 
-// SSE Stuff
+// Returned by `init_server_sent_events`. This type must be passed to
+// `send_event` since we need to enforce that the correct headers / data shapw
+// is provided.
 pub opaque type SSEConnection {
   SSEConnection(Connection)
 }
 
+// Represents each event.  Only `data` is required.  The `event` name will
+// default to `message`.  If an `id` is provided, it will be included in the
+// event received by the client.
 pub type SSEEvent {
   SSEEvent(id: Option(String), event: Option(String), data: StringBuilder)
 }
 
+// Builder for generating the base event
 pub fn event(data: StringBuilder) -> SSEEvent {
   SSEEvent(id: None, event: None, data: data)
 }
 
+// Adds an `id` to the event
 pub fn id(event: SSEEvent, id: String) -> SSEEvent {
   SSEEvent(..event, id: Some(id))
 }
 
+// Sets the `event` name field
 pub fn event_name(event: SSEEvent, name: String) -> SSEEvent {
   SSEEvent(..event, event: Some(name))
 }
 
+// Sets up the connection for server-sent events.  The existing connection
+// _must_ no longer be used.  After initializing this connection, the valid
+// actions are `send_event` or `end_events`.
 pub fn init_server_sent_events(
   conn: Connection,
   resp: Response(Nil),
@@ -547,7 +558,6 @@ pub fn init_server_sent_events(
     |> response.set_header("content-type", "text/event-stream")
     |> response.set_header("cache-control", "no-cache")
     |> response.set_header("connection", "keep-alive")
-  // |> response.set_header("transfer-encoding", "chunked")
 
   conn.transport.send(
     conn.socket,
@@ -557,6 +567,10 @@ pub fn init_server_sent_events(
   |> result.nil_error
 }
 
+// This constructs an event from the provided type.  If `id` or `event` are
+// provided, they are included in the message.  The data provided is split
+// across newlines, which I think is per the spec? The `Result` returned here
+// can be used to determine whether the event send has succeeded.
 pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
   let SSEConnection(conn) = conn
   let id =
@@ -585,6 +599,8 @@ pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
   |> result.nil_error
 }
 
+// This completes the stream of server-sent events.  It will close the
+// connection to the client.
 pub fn end_events(_conn: SSEConnection) -> Response(ResponseData) {
   response.new(204)
   |> response.set_body(CloseEvents)
