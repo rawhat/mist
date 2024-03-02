@@ -367,6 +367,22 @@ pub fn start_http(
   })
 }
 
+/// These are the types of errors raised by trying to read the certificate and
+/// key files.
+pub type CertificateError {
+  NoCertificate
+  NoKey
+  NoKeyOrCertificate
+}
+
+/// These are the possible errors raised when trying to start an Https server.
+/// If there are issues reading the certificate or key files, those will be
+/// returned.
+pub type HttpsError {
+  GlistenError(glisten.StartError)
+  CertificateError(CertificateError)
+}
+
 /// Start a `mist` service over HTTPS with the provided builder. This method
 /// requires both a certificate file and a key file. The library will attempt
 /// to read these files off of the disk.
@@ -374,11 +390,24 @@ pub fn start_https(
   builder: Builder(Connection, ResponseData),
   certfile certfile: String,
   keyfile keyfile: String,
-) -> Result(Subject(supervisor.Message), glisten.StartError) {
+) -> Result(Subject(supervisor.Message), HttpsError) {
+  let cert = file.open(bit_array.from_string(certfile))
+  let key = file.open(bit_array.from_string(keyfile))
+
+  let res = case cert, key {
+    Error(_), Error(_) -> Error(CertificateError(NoKeyOrCertificate))
+    Ok(_), Error(_) -> Error(CertificateError(NoKey))
+    Error(_), Ok(_) -> Error(CertificateError(NoCertificate))
+    Ok(_), Ok(_) -> Ok(Nil)
+  }
+
+  use _ <- result.then(res)
+
   fn(req) { convert_body_types(builder.handler(req)) }
   |> handler.with_func
   |> glisten.handler(fn() { #(handler.new_state(), None) }, _)
   |> glisten.serve_ssl(builder.port, certfile, keyfile)
+  |> result.map_error(GlistenError)
   |> result.map(fn(subj) {
     builder.after_start(builder.port, Https)
     subj
