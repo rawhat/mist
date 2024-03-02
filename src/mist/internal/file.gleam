@@ -72,7 +72,7 @@ fn pread(
 ) -> Result(BitArray, FileError)
 
 @external(erlang, "mist_ffi", "file_open")
-fn open(file: BitArray) -> Result(FileDescriptor, FileError)
+pub fn open(file: BitArray) -> Result(FileDescriptor, FileError)
 
 @external(erlang, "filelib", "file_size")
 fn size(path: BitArray) -> Int
