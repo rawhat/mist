@@ -5,6 +5,11 @@
 - Parse `Host` header to set `host` and `port` fields on `Request`
 - Bump `glisten` version
 - Remove deprecated `function.compose` usage
+- Support sending files over SSL
+    - This does not use `sendfile` as that's not supported
+    - Currently, it will naively read the whole file into memory
+- Changed error type returned from `mist.start_https`
+    - This now checks for the presence of the key and certificate files
 
 ## v0.17.0
 
