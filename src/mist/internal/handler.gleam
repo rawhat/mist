@@ -210,7 +210,14 @@ fn handle_file_body(
   }
   |> conn.transport.send(conn.socket, _)
   |> result.then(fn(_) {
-    file.sendfile(file_descriptor, conn.socket, offset, length, [])
+    file.sendfile(
+      conn.transport,
+      file_descriptor,
+      conn.socket,
+      offset,
+      length,
+      [],
+    )
     |> result.map_error(fn(err) { logger.error(#("Failed to send file", err)) })
     |> result.replace_error(Badarg)
   })
