@@ -357,7 +357,7 @@ pub fn start_http(
   builder: Builder(Connection, ResponseData),
 ) -> Result(Subject(supervisor.Message), glisten.StartError) {
   builder.handler
-  |> function.compose(convert_body_types)
+  fn(req) { convert_body_types(builder.handler(req)) }
   |> handler.with_func
   |> glisten.handler(fn() { #(handler.new_state(), None) }, _)
   |> glisten.serve(builder.port)
@@ -375,8 +375,7 @@ pub fn start_https(
   certfile certfile: String,
   keyfile keyfile: String,
 ) -> Result(Subject(supervisor.Message), glisten.StartError) {
-  builder.handler
-  |> function.compose(convert_body_types)
+  fn(req) { convert_body_types(builder.handler(req)) }
   |> handler.with_func
   |> glisten.handler(fn() { #(handler.new_state(), None) }, _)
   |> glisten.serve_ssl(builder.port, certfile, keyfile)
