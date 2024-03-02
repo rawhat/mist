@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Parse `Host` header to set `host` and `port` fields on `Request`
+- Bump `glisten` version
+- Remove deprecated `function.compose` usage
 
 ## v0.17.0
 
