@@ -61,8 +61,8 @@ pub fn open_server(port: Int) {
   |> mist.read_request_body(
     4_000_000,
     response.new(413)
-    |> response.set_header("connection", "close")
-    |> response.set_body(mist.Bytes(bytes_builder.new())),
+      |> response.set_header("connection", "close")
+      |> response.set_body(mist.Bytes(bytes_builder.new())),
   )
   |> mist.port(port)
   |> mist.start_http
