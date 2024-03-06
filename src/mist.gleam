@@ -559,7 +559,8 @@ pub fn init_server_sent_events(
     |> response.set_header("cache-control", "no-cache")
     |> response.set_header("connection", "keep-alive")
 
-  conn.transport.send(
+  transport.send(
+    conn.transport,
     conn.socket,
     encoder.response_builder(200, with_default_headers.headers),
   )
@@ -594,7 +595,7 @@ pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
     |> string_builder.append("\n\n")
     |> bytes_builder.from_string_builder
 
-  conn.transport.send(conn.socket, message)
+  transport.send(conn.transport, conn.socket, message)
   |> result.replace(Nil)
   |> result.nil_error
 }
