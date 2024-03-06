@@ -537,7 +537,7 @@ pub fn event(data: StringBuilder) -> SSEEvent {
 }
 
 // Adds an `id` to the event
-pub fn id(event: SSEEvent, id: String) -> SSEEvent {
+pub fn event_id(event: SSEEvent, id: String) -> SSEEvent {
   SSEEvent(..event, id: Some(id))
 }
 
@@ -546,9 +546,18 @@ pub fn event_name(event: SSEEvent, name: String) -> SSEEvent {
   SSEEvent(..event, event: Some(name))
 }
 
-// Sets up the connection for server-sent events.  The existing connection
-// _must_ no longer be used.  After initializing this connection, the valid
-// actions are `send_event` or `end_events`.
+/// Sets up the connection for server-sent events.  The existing connection
+/// _must_ no longer be used.  After initializing this connection, the valid
+/// actions are `send_event` or `end_events`.
+///
+/// Here is an example of using it:
+/// ```gleam
+///   let assert Ok(sse_connection) =
+///     mist.start_sse(conn, response.new() |> response.add_header(...))
+///   let event = mist.event(data) |> mist.event_id("1234")
+///   let resp = mist.send_event(sse_connection, event)
+///   mist.end_events(sse_connection)
+///  ```
 pub fn init_server_sent_events(
   conn: Connection,
   resp: Response(Nil),
