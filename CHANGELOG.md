@@ -10,6 +10,7 @@
     - Currently, it will naively read the whole file into memory
 - Changed error type returned from `mist.start_https`
     - This now checks for the presence of the key and certificate files
+- Bump `glisten` version again!
 
 ## v0.17.0
 
