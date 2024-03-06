@@ -11,6 +11,7 @@
 - Changed error type returned from `mist.start_https`
     - This now checks for the presence of the key and certificate files
 - Bump `glisten` version again!
+- First pass at support for Server-Sent Events
 
 ## v0.17.0
 
