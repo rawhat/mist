@@ -20,10 +20,10 @@ packages = [
 ]
 
 [requirements]
-gleam_erlang = { version = "~> 0.24" }
+gleam_erlang = { version = "~> 0.24"}
 gleam_hackney = { version = "~> 1.2" }
-gleam_http = { version = "~> 3.5" }
-gleam_otp = { version = "~> 0.9" }
-gleam_stdlib = { version = "~> 0.34" }
+gleam_http = { version = "~> 3.5"}
+gleam_otp = { version = "~> 0.9"}
+gleam_stdlib = { version = "~> 0.35 or ~> 1.0" }
 gleeunit = { version = "~> 1.0" }
-glisten = { version = "~> 1.0"}
+glisten = { version = "~> 1.0" }
