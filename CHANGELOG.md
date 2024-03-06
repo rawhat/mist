@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.0.0-rc1
 
 - Parse `Host` header to set `host` and `port` fields on `Request`
 - Bump `glisten` version
