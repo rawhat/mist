@@ -14,9 +14,8 @@ import gleam/pair
 import gleam/result
 import gleam/string
 import gleam/uri
-import glisten/handler.{type ClientIp}
-import glisten/socket.{type Socket}
-import glisten/socket/transport.{type Transport}
+import glisten.{type ClientIp, type Socket}
+import glisten/transport.{type Transport}
 import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/encoder
 
@@ -108,7 +107,7 @@ pub fn read_data(
   let timeout = 15_000
   use data <- result.then(
     socket
-    |> transport.receive_timeout(to_read, timeout)
+    |> transport.receive_timeout(transport, _, to_read, timeout)
     |> result.replace_error(error),
   )
   let next_buffer =
@@ -294,8 +293,8 @@ pub fn read_body(
   req: Request(Connection),
 ) -> Result(Request(BitArray), DecodeError) {
   let transport = case req.scheme {
-    http.Https -> transport.ssl()
-    http.Http -> transport.tcp()
+    http.Https -> transport.Ssl
+    http.Http -> transport.Tcp
   }
   case request.get_header(req, "transfer-encoding"), req.body.body {
     Ok("chunked"), Initial(rest) -> {
@@ -397,7 +396,7 @@ pub fn upgrade(
     resp
     |> add_default_headers
     |> encoder.to_bytes_builder
-    |> transport.send(socket, _)
+    |> transport.send(transport, socket, _)
     |> result.nil_error,
   )
 
@@ -441,7 +440,7 @@ pub fn handle_continue(req: Request(Connection)) -> Result(Nil, DecodeError) {
       response.new(100)
       |> response.set_body(bytes_builder.new())
       |> encoder.to_bytes_builder
-      |> req.body.transport.send(req.body.socket, _)
+      |> transport.send(req.body.transport, req.body.socket, _)
       |> result.replace_error(MalformedRequest)
     }
     False -> Ok(Nil)
