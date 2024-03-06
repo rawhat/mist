@@ -58,11 +58,10 @@ pub fn main() {
               let assert Ok(_) = mist.send_event(conn, event)
             })
 
-          process.sleep(2000)
+          process.sleep(30_000)
 
           repeatedly.stop(repeater)
 
-          io.println("we're done now!")
           mist.end_events(conn)
         }
         _ -> index_resp
