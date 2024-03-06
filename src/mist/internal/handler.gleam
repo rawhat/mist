@@ -9,10 +9,10 @@ import gleam/iterator.{type Iterator}
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
-import glisten/handler.{Close, Internal}
-import glisten/socket.{type Socket, type SocketReason, Badarg}
-import glisten/socket/transport.{type Transport}
-import glisten.{type Loop, type Message, Packet}
+import glisten/internal/handler.{Close, Internal}
+import glisten.{type Loop, type Message, type Socket, type SocketReason, Packet}
+import glisten/socket.{Badarg}
+import glisten/transport.{type Transport}
 import mist/internal/encoder
 import mist/internal/file
 import mist/internal/http.{
@@ -70,7 +70,7 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
           DiscardPacket -> Nil
           _ -> {
             logger.error(err)
-            let _ = conn.transport.close(conn.socket)
+            let _ = transport.close(conn.transport, conn.socket)
             Nil
           }
         }
@@ -126,8 +126,8 @@ fn log_and_error(
       |> response.prepend_header("content-length", "21")
       |> http.add_default_headers
       |> encoder.to_bytes_builder
-      |> transport.send(socket, _)
-      let _ = transport.close(socket)
+      |> transport.send(transport, socket, _)
+      let _ = transport.close(transport, socket)
       actor.Stop(process.Abnormal(dynamic.unsafe_coerce(msg)))
     }
   }
@@ -142,7 +142,7 @@ fn close_or_set_timer(
   // probably listen to them
   case response.get_header(resp, "connection") {
     Ok("close") -> {
-      let _ = conn.transport.close(conn.socket)
+      let _ = transport.close(conn.transport, conn.socket)
       stop_normal
     }
     _ -> {
@@ -162,7 +162,7 @@ fn handle_bytes_builder_body(
   |> response.set_body(body)
   |> http.add_default_headers
   |> encoder.to_bytes_builder
-  |> conn.transport.send(conn.socket, _)
+  |> transport.send(conn.transport, conn.socket, _)
 }
 
 fn int_to_hex(int: Int) -> String {
@@ -177,7 +177,7 @@ fn handle_chunked_body(
   let headers = [#("transfer-encoding", "chunked"), ..resp.headers]
   let initial_payload = encoder.response_builder(resp.status, headers)
 
-  conn.transport.send(conn.socket, initial_payload)
+  transport.send(conn.transport, conn.socket, initial_payload)
   |> result.then(fn(_ok) {
     body
     |> iterator.append(iterator.from_list([bytes_builder.new()]))
@@ -191,7 +191,7 @@ fn handle_chunked_body(
         |> bytes_builder.append_builder(chunk)
         |> bytes_builder.append_string("\r\n")
 
-      conn.transport.send(conn.socket, encoded)
+      transport.send(conn.transport, conn.socket, encoded)
     })
   })
   |> result.replace(Nil)
@@ -208,7 +208,7 @@ fn handle_file_body(
   |> fn(r: response.Response(BytesBuilder)) {
     encoder.response_builder(resp.status, r.headers)
   }
-  |> conn.transport.send(conn.socket, _)
+  |> transport.send(conn.transport, conn.socket, _)
   |> result.then(fn(_) {
     file.sendfile(
       conn.transport,

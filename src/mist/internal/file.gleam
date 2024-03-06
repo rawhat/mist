@@ -1,7 +1,7 @@
 import gleam/bytes_builder
 import gleam/result
-import glisten/socket.{type Socket, type SocketReason}
-import glisten/socket/transport.{type Transport, Ssl, Tcp}
+import glisten.{type Socket, type SocketReason}
+import glisten/transport.{type Transport, Ssl, Tcp}
 
 pub type FileDescriptor
 
@@ -48,7 +48,7 @@ pub fn sendfile(
       pread(file_descriptor, offset, bytes)
       |> result.map_error(FileErr)
       |> result.then(fn(bits) {
-        transport.send(socket, bytes_builder.from_bit_array(bits))
+        transport.send(transport, socket, bytes_builder.from_bit_array(bits))
         |> result.map_error(SocketErr)
       })
     }

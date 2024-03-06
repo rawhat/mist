@@ -13,8 +13,7 @@ import gleam/otp/actor
 import gleam/otp/supervisor
 import gleam/result
 import glisten
-import glisten/socket
-import glisten/socket/transport
+import glisten/transport
 import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/file
 import mist/internal/handler.{
@@ -198,7 +197,7 @@ fn do_stream_chunked(
 }
 
 fn fetch_chunks_until(
-  socket: socket.Socket,
+  socket: glisten.Socket,
   transport: transport.Transport,
   state: ChunkState,
   byte_size: Int,
@@ -497,18 +496,18 @@ pub type WebsocketConnection =
 pub fn send_binary_frame(
   connection: WebsocketConnection,
   frame: BitArray,
-) -> Result(Nil, socket.SocketReason) {
+) -> Result(Nil, glisten.SocketReason) {
   frame
   |> websocket.to_binary_frame
-  |> connection.transport.send(connection.socket, _)
+  |> transport.send(connection.transport, connection.socket, _)
 }
 
 /// Sends a text frame across the websocket.
 pub fn send_text_frame(
   connection: WebsocketConnection,
   frame: String,
-) -> Result(Nil, socket.SocketReason) {
+) -> Result(Nil, glisten.SocketReason) {
   frame
   |> websocket.to_text_frame
-  |> connection.transport.send(connection.socket, _)
+  |> transport.send(connection.transport, connection.socket, _)
 }
