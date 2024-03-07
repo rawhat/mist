@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.0-rc2
+
+- Second pass at Server-Sent Events
+    - This API more closely follows the `gleam/otp/actor` API
+
 ## v1.0.0-rc1
 
 - Parse `Host` header to set `host` and `port` fields on `Request`
