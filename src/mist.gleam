@@ -21,8 +21,8 @@ import mist/internal/encoder
 import mist/internal/file
 import mist/internal/handler.{
   type ResponseData as InternalResponseData, Bytes as InternalBytes,
-  Chunked as InternalChunked, CloseEvents as InternalCloseEvents,
-  File as InternalFile, Websocket as InternalWebsocket,
+  Chunked as InternalChunked, File as InternalFile,
+  ServerSentEvents as InternalServerSentEvents, Websocket as InternalWebsocket,
 }
 import mist/internal/http.{type Connection as InternalConnection}
 import mist/internal/websocket.{
@@ -50,7 +50,7 @@ pub type ResponseData {
   Chunked(Iterator(BytesBuilder))
   /// See `mist.send_file` to use this response type.
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
-  CloseEvents
+  ServerSentEvents(Selector(ProcessDown))
 }
 
 /// Potential errors when opening a file to send. This list is
@@ -351,7 +351,7 @@ fn convert_body_types(
     Bytes(data) -> InternalBytes(data)
     File(descriptor, offset, length) -> InternalFile(descriptor, offset, length)
     Chunked(iter) -> InternalChunked(iter)
-    CloseEvents -> InternalCloseEvents
+    ServerSentEvents(selector) -> InternalServerSentEvents(selector)
   }
   response.set_body(resp, new_body)
 }
@@ -526,7 +526,7 @@ pub opaque type SSEConnection {
 // Represents each event.  Only `data` is required.  The `event` name will
 // default to `message`.  If an `id` is provided, it will be included in the
 // event received by the client.
-pub type SSEEvent {
+pub opaque type SSEEvent {
   SSEEvent(id: Option(String), event: Option(String), data: StringBuilder)
 }
 
@@ -545,22 +545,21 @@ pub fn event_name(event: SSEEvent, name: String) -> SSEEvent {
   SSEEvent(..event, event: Some(name))
 }
 
-/// Sets up the connection for server-sent events.  The existing connection
-/// _must_ no longer be used.  After initializing this connection, the valid
-/// actions are `send_event` or `end_events`.
+/// Sets up the connection for server-sent events. The initial response provided
+/// here will have its headers included in the SSE setup. The body is discarded.
+/// The `init` and `loop` parameters follow the same shape as the
+/// `gleam/otp/actor` module.
 ///
-/// Here is an example of using it:
-/// ```gleam
-///   let assert Ok(sse_connection) =
-///     mist.start_sse(conn, response.new() |> response.add_header(...))
-///   let event = mist.event(data) |> mist.event_id("1234")
-///   let resp = mist.send_event(sse_connection, event)
-///   mist.end_events(sse_connection)
-///  ```
-pub fn init_server_sent_events(
-  conn: Connection,
-  resp: Response(Nil),
-) -> Result(SSEConnection, Nil) {
+/// NOTE:  There is no proper way within the spec for the server to "close" the
+/// SSE connection. There are ways around it.
+///
+/// See:  `examples/eventz` for a sample usage.
+pub fn server_sent_events(
+  request req: Request(Connection),
+  initial_response resp: Response(discard),
+  init init: fn() -> actor.InitResult(state, message),
+  loop loop: fn(message, SSEConnection, state) -> actor.Next(message, state),
+) -> Response(ResponseData) {
   let with_default_headers =
     resp
     |> response.set_header("content-type", "text/event-stream")
@@ -568,12 +567,32 @@ pub fn init_server_sent_events(
     |> response.set_header("connection", "keep-alive")
 
   transport.send(
-    conn.transport,
-    conn.socket,
+    req.body.transport,
+    req.body.socket,
     encoder.response_builder(200, with_default_headers.headers),
   )
-  |> result.replace(SSEConnection(conn))
   |> result.nil_error
+  |> result.then(fn(_nil) {
+    actor.start_spec(
+      actor.Spec(init: init, init_timeout: 1000, loop: fn(state, message) {
+        loop(state, SSEConnection(req.body), message)
+      }),
+    )
+    |> result.nil_error
+  })
+  |> result.map(fn(subj) {
+    let sse_process = process.subject_owner(subj)
+    let monitor = process.monitor_process(sse_process)
+    let selector =
+      process.new_selector()
+      |> process.selecting_process_down(monitor, function.identity)
+    response.new(200)
+    |> response.set_body(ServerSentEvents(selector))
+  })
+  |> result.lazy_unwrap(fn() {
+    response.new(400)
+    |> response.set_body(Bytes(bytes_builder.new()))
+  })
 }
 
 // This constructs an event from the provided type.  If `id` or `event` are
@@ -606,11 +625,4 @@ pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
   transport.send(conn.transport, conn.socket, message)
   |> result.replace(Nil)
   |> result.nil_error
-}
-
-// This completes the stream of server-sent events.  It will close the
-// connection to the client.
-pub fn end_events(_conn: SSEConnection) -> Response(ResponseData) {
-  response.new(204)
-  |> response.set_body(CloseEvents)
 }
