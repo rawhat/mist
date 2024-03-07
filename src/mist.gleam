@@ -360,7 +360,6 @@ fn convert_body_types(
 pub fn start_http(
   builder: Builder(Connection, ResponseData),
 ) -> Result(Subject(supervisor.Message), glisten.StartError) {
-  builder.handler
   fn(req) { convert_body_types(builder.handler(req)) }
   |> handler.with_func
   |> glisten.handler(fn() { #(handler.new_state(), None) }, _)
