@@ -25,7 +25,7 @@ pub type ResponseData {
   Bytes(BytesBuilder)
   Chunked(Iterator(BytesBuilder))
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
-  CloseEvents
+  ServerSentEvents(Selector(ProcessDown))
 }
 
 pub type Handler =
@@ -101,11 +101,9 @@ pub fn with_func(handler: Handler) -> Loop(user_message, State) {
             |> result.map(fn(_res) { close_or_set_timer(resp, conn, sender) })
             |> result.replace_error(stop_normal)
             |> result.unwrap_both
-          response.Response(body: Websocket(selector), ..) -> {
+          response.Response(body: Websocket(selector), ..)
+          | response.Response(body: ServerSentEvents(selector), ..) -> {
             let _resp = process.select_forever(selector)
-            actor.Stop(process.Normal)
-          }
-          response.Response(body: CloseEvents, ..) -> {
             actor.Stop(process.Normal)
           }
         }
