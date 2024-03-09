@@ -18,9 +18,8 @@ import gleam/pair
 import gleam/result
 import gleam/string
 import gleam/uri
-import glisten/handler.{type ClientIp}
-import glisten/socket.{type Socket}
-import glisten/socket/transport.{type Transport}
+import glisten.{type ClientIp, type Socket}
+import glisten/transport.{type Transport}
 import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/encoder
 import mist/internal/file
@@ -83,6 +82,7 @@ pub type DecodeError {
   // TODO:  better name?
   InvalidBody
   DiscardPacket
+  NoHostHeader
 }
 
 pub fn from_header(value: BitArray) -> String {
@@ -131,7 +131,7 @@ pub fn read_data(
   let timeout = 15_000
   use data <- result.then(
     socket
-    |> transport.receive_timeout(to_read, timeout)
+    |> transport.receive_timeout(transport, _, to_read, timeout)
     |> result.replace_error(error),
   )
   let next_buffer =
@@ -281,12 +281,32 @@ pub fn parse_request(
         |> result.replace_error(InvalidPath),
       )
       let #(path, query) = #(parsed.path, parsed.query)
+      let scheme = case conn.transport {
+        transport.Ssl(..) -> http.Https
+        transport.Tcp(..) -> http.Http
+      }
+      use host_header <- result.then(
+        dict.get(headers, "host")
+        |> result.replace_error(NoHostHeader),
+      )
+      let #(hostname, port) =
+        host_header
+        |> string.split_once(":")
+        |> result.unwrap(#(host_header, ""))
+      let port =
+        int.parse(port)
+        |> result.map_error(fn(_err) {
+          case scheme {
+            http.Https -> 443
+            http.Http -> 80
+          }
+        })
+        |> result.unwrap_both
       let req =
         request.new()
-        |> request.set_scheme(case conn.transport {
-          transport.Ssl(..) -> http.Https
-          transport.Tcp(..) -> http.Http
-        })
+        |> request.set_scheme(scheme)
+        |> request.set_host(hostname)
+        |> request.set_port(port)
         |> request.set_body(Connection(..conn, body: Initial(rest)))
         |> request.set_method(method)
         |> request.set_path(path)
@@ -327,8 +347,8 @@ pub fn read_body(
   req: Request(Connection),
 ) -> Result(Request(BitArray), DecodeError) {
   let transport = case req.scheme {
-    http.Https -> transport.ssl()
-    http.Http -> transport.tcp()
+    http.Https -> transport.Ssl
+    http.Http -> transport.Tcp
   }
   case request.get_header(req, "transfer-encoding"), req.body.body {
     Ok("chunked"), Initial(rest) -> {
@@ -368,11 +388,11 @@ pub fn read_body(
       |> result.replace_error(InvalidBody)
     }
     _, Stream(
-      selector: selector,
-      data: data,
-      remaining: remaining,
-      attempts: attempts,
-    ) if remaining > 0 -> {
+        selector: selector,
+        data: data,
+        remaining: remaining,
+        attempts: attempts,
+      ) if remaining > 0 -> {
       let res =
         selector
         |> process.select(1000)
@@ -451,7 +471,7 @@ pub fn upgrade(
     resp
     |> add_default_headers(True)
     |> encoder.to_bytes_builder
-    |> transport.send(socket, _)
+    |> transport.send(transport, socket, _)
     |> result.nil_error,
   )
 
@@ -505,7 +525,7 @@ pub fn handle_continue(req: Request(Connection)) -> Result(Nil, DecodeError) {
       response.new(100)
       |> response.set_body(bytes_builder.new())
       |> encoder.to_bytes_builder
-      |> req.body.transport.send(req.body.socket, _)
+      |> transport.send(req.body.transport, req.body.socket, _)
       |> result.replace_error(MalformedRequest)
     }
     False -> Ok(Nil)

@@ -8,9 +8,9 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
-import glisten/socket.{type Socket}
+import glisten.{type Socket}
 import glisten/socket/options
-import glisten/socket/transport.{type Transport}
+import glisten/transport.{type Transport}
 import mist/internal/logger
 
 pub type DataFrame {
@@ -112,7 +112,8 @@ fn frame_from_message(
               })
             }
             _ -> {
-              let assert Ok(data) = conn.transport.receive(conn.socket, 0)
+              let assert Ok(data) =
+                transport.receive(conn.transport, conn.socket, 0)
               frame_from_message(<<message:bits, data:bits>>, conn)
             }
           }
@@ -326,7 +327,11 @@ pub fn initialize_connection(
   |> result.map(fn(subj) {
     let websocket_pid = process.subject_owner(subj)
     let assert Ok(_) =
-      connection.transport.controlling_process(connection.socket, websocket_pid)
+      transport.controlling_process(
+        connection.transport,
+        connection.socket,
+        websocket_pid,
+      )
     set_active(connection)
     subj
   })
@@ -361,7 +366,8 @@ fn apply_frames(
     }
     [Control(CloseFrame(..)) as frame, ..], actor.Continue(state, _selector) -> {
       let _ =
-        connection.transport.send(
+        transport.send(
+          connection.transport,
           connection.socket,
           frame_to_bytes_builder(frame),
         )
@@ -369,7 +375,8 @@ fn apply_frames(
       actor.Stop(process.Normal)
     }
     [Control(PingFrame(length, payload)), ..], actor.Continue(state, _selector) -> {
-      connection.transport.send(
+      transport.send(
+        connection.transport,
         connection.socket,
         frame_to_bytes_builder(Control(PongFrame(length, payload))),
       )
@@ -444,7 +451,7 @@ pub fn aggregate_frames(
 
 fn set_active(connection: WebsocketConnection) -> Nil {
   let assert Ok(_) =
-    connection.transport.set_opts(connection.socket, [
+    transport.set_opts(connection.transport, connection.socket, [
       options.ActiveMode(options.Once),
     ])
 
