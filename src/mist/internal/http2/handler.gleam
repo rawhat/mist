@@ -1,5 +1,4 @@
 import gleam/bit_array
-import gleam/bytes_builder
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/http/response.{type Response}
@@ -144,7 +143,6 @@ pub fn call(
 }
 
 import gleam/erlang
-import gleam/string
 
 // TODO:  this should use the frame error types to actually do some shit with
 // the stream(s)
@@ -157,11 +155,13 @@ fn handle_frame(
   // io.println("handling frame:  " <> string.slice(erlang.format(frame), 0, 25))
   case state.fragment, frame {
     Some(frame.Header(
-      identifier: id1,
-      data: Continued(existing),
-      end_stream: end_stream,
-      priority: priority,
-    )), frame.Continuation(data: Complete(data), identifier: id2) if id1 == id2 -> {
+        identifier: id1,
+        data: Continued(existing),
+        end_stream: end_stream,
+        priority: priority,
+      )), frame.Continuation(data: Complete(data), identifier: id2)
+      if id1 == id2
+    -> {
       let complete_frame =
         frame.Header(
           identifier: id1,
@@ -177,11 +177,12 @@ fn handle_frame(
       )
     }
     Some(frame.Header(
-      identifier: id1,
-      data: Continued(existing),
-      end_stream: end_stream,
-      priority: priority,
-    )), frame.Continuation(data: Continued(data), identifier: id2) if id1 == id2 -> {
+        identifier: id1,
+        data: Continued(existing),
+        end_stream: end_stream,
+        priority: priority,
+      )), frame.Continuation(data: Continued(data), identifier: id2) if id1
+      == id2 -> {
       let next =
         frame.Header(
           identifier: id1,

@@ -628,11 +628,9 @@ pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
   |> result.nil_error
 }
 
-import gleam/erlang
-
 pub fn main() {
   let assert Ok(_server) =
-    new(fn(req) {
+    new(fn(_req) {
       // io.println("body is: " <> erlang.format(bit_array.byte_size(req.body)))
       response.new(200)
       // |> response.set_body(Bytes(bytes_builder.new()))

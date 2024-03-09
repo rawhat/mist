@@ -8,14 +8,14 @@ import gleam/int
 import gleam/iterator.{type Iterator}
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import glisten/handler.{Close, Internal}
+import glisten/internal/handler.{Close, Internal}
 import glisten/socket.{type Socket, type SocketReason, Badarg}
-import glisten/socket/transport.{type Transport}
+import glisten/transport.{type Transport}
 import mist/internal/encoder
 import mist/internal/file
 import mist/internal/http.{
   type Connection, type Handler, type ResponseData, Bytes, Chunked, File,
-  Websocket,
+  ServerSentEvents, Websocket,
 }
 import mist/internal/logger
 
@@ -37,7 +37,8 @@ pub fn call(
   |> result.map_error(log_and_error(_, conn.socket, conn.transport))
   |> result.then(fn(resp) {
     case resp {
-      response.Response(body: Websocket(selector), ..) -> {
+      response.Response(body: Websocket(selector), ..)
+      | response.Response(body: ServerSentEvents(selector), ..) -> {
         let _resp = process.select_forever(selector)
         Error(process.Normal)
       }
@@ -70,8 +71,8 @@ fn log_and_error(
       |> response.prepend_header("content-length", "21")
       |> http.add_default_headers(True)
       |> encoder.to_bytes_builder
-      |> transport.send(socket, _)
-      let _ = transport.close(socket)
+      |> transport.send(transport, socket, _)
+      let _ = transport.close(transport, socket)
       process.Abnormal(dynamic.unsafe_coerce(msg))
     }
   }
@@ -86,7 +87,7 @@ fn close_or_set_timer(
   // probably listen to them
   case response.get_header(resp, "connection") {
     Ok("close") -> {
-      let _ = conn.transport.close(conn.socket)
+      let _ = transport.close(conn.transport, conn.socket)
       Error(process.Normal)
     }
     _ -> {
@@ -105,7 +106,7 @@ fn handle_chunked_body(
   let headers = [#("transfer-encoding", "chunked"), ..resp.headers]
   let initial_payload = encoder.response_builder(resp.status, headers)
 
-  conn.transport.send(conn.socket, initial_payload)
+  transport.send(conn.transport, conn.socket, initial_payload)
   |> result.then(fn(_ok) {
     body
     |> iterator.append(iterator.from_list([bytes_builder.new()]))
@@ -119,7 +120,7 @@ fn handle_chunked_body(
         |> bytes_builder.append_builder(chunk)
         |> bytes_builder.append_string("\r\n")
 
-      conn.transport.send(conn.socket, encoded)
+      transport.send(conn.transport, conn.socket, encoded)
     })
   })
   |> result.replace(Nil)
@@ -137,9 +138,16 @@ fn handle_file_body(
   |> fn(r: response.Response(BytesBuilder)) {
     encoder.response_builder(resp.status, r.headers)
   }
-  |> conn.transport.send(conn.socket, _)
+  |> transport.send(conn.transport, conn.socket, _)
   |> result.then(fn(_) {
-    file.sendfile(file_descriptor, conn.socket, offset, length, [])
+    file.sendfile(
+      conn.transport,
+      file_descriptor,
+      conn.socket,
+      offset,
+      length,
+      [],
+    )
     |> result.map_error(fn(err) { logger.error(#("Failed to send file", err)) })
     |> result.replace_error(Badarg)
   })
@@ -155,7 +163,7 @@ fn handle_bytes_builder_body(
   |> response.set_body(body)
   |> http.add_default_headers(True)
   |> encoder.to_bytes_builder
-  |> conn.transport.send(conn.socket, _)
+  |> transport.send(conn.transport, conn.socket, _)
 }
 
 /// Creates a standard HTTP handler service to pass to `mist.serve`
