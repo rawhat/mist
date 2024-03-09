@@ -4,7 +4,12 @@ import gleam/http/response
 import gleam/option.{type Option, Some}
 import gleam/otp/actor
 import gleam/result
-import glisten.{type Loop, Packet, User}
+import glisten/handler.{Close, Internal}
+import glisten/socket.{type Socket, type SocketReason, Badarg}
+import glisten/socket/transport.{type Transport}
+import glisten.{type Loop, type Message, Packet}
+import mist/internal/encoder
+import mist/internal/file
 import mist/internal/http.{
   type Connection, type DecodeError, type Handler, Bytes, Chunked, Connection,
   DiscardPacket, File, Initial, Websocket,

@@ -1,7 +1,30 @@
 # Changelog
 
-## Unreleased
+## v1.0.0-rc2
 
+- Second pass at Server-Sent Events
+    - This API more closely follows the `gleam/otp/actor` API
+
+## v1.0.0-rc1
+
+- Parse `Host` header to set `host` and `port` fields on `Request`
+- Bump `glisten` version
+- Remove deprecated `function.compose` usage
+- Support sending files over SSL
+    - This does not use `sendfile` as that's not supported
+    - Currently, it will naively read the whole file into memory
+- Changed error type returned from `mist.start_https`
+    - This now checks for the presence of the key and certificate files
+- Bump `glisten` version again!
+- First pass at support for Server-Sent Events
+
+## v0.17.0
+
+- Bump dep versions to get access to `Subject` from `glisten.serve(_ssl)`
+
+## v0.16.0
+
+- Updated for Gleam v0.33.0.
 - Log error from `rescue` in WebSocket handlers
 - WebSocket `Text` frame is now a `String`, since the spec notes that this type
   of message must be valid UTF-8

@@ -1,6 +1,6 @@
 import gleam/bytes_builder.{type BytesBuilder}
 import gleam/bit_array
-import gleam/erlang/process.{type ProcessDown, type Selector}
+import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
 import gleam/function
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
@@ -8,20 +8,23 @@ import gleam/http.{type Scheme, Http, Https} as gleam_http
 import gleam/int
 import gleam/io
 import gleam/iterator.{type Iterator}
-import gleam/option.{type Option}
+import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
+import gleam/otp/supervisor
 import gleam/result
+import gleam/string_builder.{type StringBuilder}
 import glisten
-import glisten/socket
-import glisten/socket/transport
+import glisten/transport
 import mist/internal/buffer.{type Buffer, Buffer}
+import mist/internal/encoder
 import mist/internal/file
 import mist/internal/handler
 import mist/internal/http.{
   type Connection as InternalConnection,
   type ResponseData as InternalResponseData, Bytes as InternalBytes,
   Chunked as InternalChunked, File as InternalFile,
-  Websocket as InternalWebsocket,
+  ServerSentEvents as InternalServerSentEvents, Websocket as InternalWebsocket,
 }
 import mist/internal/websocket.{
   type HandlerMessage, type WebsocketConnection as InternalWebsocketConnection,
@@ -48,6 +51,7 @@ pub type ResponseData {
   Chunked(Iterator(BytesBuilder))
   /// See `mist.send_file` to use this response type.
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
+  ServerSentEvents(Selector(ProcessDown))
 }
 
 /// Potential errors when opening a file to send. This list is
@@ -198,7 +202,7 @@ fn do_stream_chunked(
 }
 
 fn fetch_chunks_until(
-  socket: socket.Socket,
+  socket: glisten.Socket,
   transport: transport.Transport,
   state: ChunkState,
   byte_size: Int,
@@ -348,6 +352,7 @@ fn convert_body_types(
     Bytes(data) -> InternalBytes(data)
     File(descriptor, offset, length) -> InternalFile(descriptor, offset, length)
     Chunked(iter) -> InternalChunked(iter)
+    ServerSentEvents(selector) -> InternalServerSentEvents(selector)
   }
   response.set_body(resp, new_body)
 }
@@ -355,18 +360,31 @@ fn convert_body_types(
 /// Start a `mist` service over HTTP with the provided builder.
 pub fn start_http(
   builder: Builder(Connection, ResponseData),
-) -> Result(Nil, glisten.StartError) {
-  builder.handler
-  |> function.compose(convert_body_types)
+) -> Result(Subject(supervisor.Message), glisten.StartError) {
+  fn(req) { convert_body_types(builder.handler(req)) }
   |> handler.with_func
   |> glisten.handler(handler.init, _)
   |> glisten.serve(builder.port)
-  |> result.map(fn(nil) {
+  |> result.map(fn(subj) {
     builder.after_start(builder.port, Http)
-    // TODO:  This should not be `Nil` but instead a subject that can receive
-    // messages, such as shutdown
-    nil
+    subj
   })
+}
+
+/// These are the types of errors raised by trying to read the certificate and
+/// key files.
+pub type CertificateError {
+  NoCertificate
+  NoKey
+  NoKeyOrCertificate
+}
+
+/// These are the possible errors raised when trying to start an Https server.
+/// If there are issues reading the certificate or key files, those will be
+/// returned.
+pub type HttpsError {
+  GlistenError(glisten.StartError)
+  CertificateError(CertificateError)
 }
 
 /// Start a `mist` service over HTTPS with the provided builder. This method
@@ -376,17 +394,27 @@ pub fn start_https(
   builder: Builder(Connection, ResponseData),
   certfile certfile: String,
   keyfile keyfile: String,
-) -> Result(Nil, glisten.StartError) {
-  builder.handler
-  |> function.compose(convert_body_types)
+) -> Result(Subject(supervisor.Message), HttpsError) {
+  let cert = file.open(bit_array.from_string(certfile))
+  let key = file.open(bit_array.from_string(keyfile))
+
+  let res = case cert, key {
+    Error(_), Error(_) -> Error(CertificateError(NoKeyOrCertificate))
+    Ok(_), Error(_) -> Error(CertificateError(NoKey))
+    Error(_), Ok(_) -> Error(CertificateError(NoCertificate))
+    Ok(_), Ok(_) -> Ok(Nil)
+  }
+
+  use _ <- result.then(res)
+
+  fn(req) { convert_body_types(builder.handler(req)) }
   |> handler.with_func
   |> glisten.handler(handler.init, _)
   |> glisten.serve_ssl(builder.port, certfile, keyfile)
-  |> result.map(fn(nil) {
+  |> result.map_error(GlistenError)
+  |> result.map(fn(subj) {
     builder.after_start(builder.port, Https)
-    // TODO:  This should not be `Nil` but instead a subject that can receive
-    // messages, such as shutdown
-    nil
+    subj
   })
 }
 
@@ -473,20 +501,131 @@ pub type WebsocketConnection =
 pub fn send_binary_frame(
   connection: WebsocketConnection,
   frame: BitArray,
-) -> Result(Nil, socket.SocketReason) {
+) -> Result(Nil, glisten.SocketReason) {
   frame
   |> websocket.to_binary_frame
-  |> connection.transport.send(connection.socket, _)
+  |> transport.send(connection.transport, connection.socket, _)
 }
 
 /// Sends a text frame across the websocket.
 pub fn send_text_frame(
   connection: WebsocketConnection,
   frame: String,
-) -> Result(Nil, socket.SocketReason) {
+) -> Result(Nil, glisten.SocketReason) {
   frame
   |> websocket.to_text_frame
-  |> connection.transport.send(connection.socket, _)
+  |> transport.send(connection.transport, connection.socket, _)
+}
+
+// Returned by `init_server_sent_events`. This type must be passed to
+// `send_event` since we need to enforce that the correct headers / data shapw
+// is provided.
+pub opaque type SSEConnection {
+  SSEConnection(Connection)
+}
+
+// Represents each event.  Only `data` is required.  The `event` name will
+// default to `message`.  If an `id` is provided, it will be included in the
+// event received by the client.
+pub opaque type SSEEvent {
+  SSEEvent(id: Option(String), event: Option(String), data: StringBuilder)
+}
+
+// Builder for generating the base event
+pub fn event(data: StringBuilder) -> SSEEvent {
+  SSEEvent(id: None, event: None, data: data)
+}
+
+// Adds an `id` to the event
+pub fn event_id(event: SSEEvent, id: String) -> SSEEvent {
+  SSEEvent(..event, id: Some(id))
+}
+
+// Sets the `event` name field
+pub fn event_name(event: SSEEvent, name: String) -> SSEEvent {
+  SSEEvent(..event, event: Some(name))
+}
+
+/// Sets up the connection for server-sent events. The initial response provided
+/// here will have its headers included in the SSE setup. The body is discarded.
+/// The `init` and `loop` parameters follow the same shape as the
+/// `gleam/otp/actor` module.
+///
+/// NOTE:  There is no proper way within the spec for the server to "close" the
+/// SSE connection. There are ways around it.
+///
+/// See:  `examples/eventz` for a sample usage.
+pub fn server_sent_events(
+  request req: Request(Connection),
+  initial_response resp: Response(discard),
+  init init: fn() -> actor.InitResult(state, message),
+  loop loop: fn(message, SSEConnection, state) -> actor.Next(message, state),
+) -> Response(ResponseData) {
+  let with_default_headers =
+    resp
+    |> response.set_header("content-type", "text/event-stream")
+    |> response.set_header("cache-control", "no-cache")
+    |> response.set_header("connection", "keep-alive")
+
+  transport.send(
+    req.body.transport,
+    req.body.socket,
+    encoder.response_builder(200, with_default_headers.headers),
+  )
+  |> result.nil_error
+  |> result.then(fn(_nil) {
+    actor.start_spec(
+      actor.Spec(init: init, init_timeout: 1000, loop: fn(state, message) {
+        loop(state, SSEConnection(req.body), message)
+      }),
+    )
+    |> result.nil_error
+  })
+  |> result.map(fn(subj) {
+    let sse_process = process.subject_owner(subj)
+    let monitor = process.monitor_process(sse_process)
+    let selector =
+      process.new_selector()
+      |> process.selecting_process_down(monitor, function.identity)
+    response.new(200)
+    |> response.set_body(ServerSentEvents(selector))
+  })
+  |> result.lazy_unwrap(fn() {
+    response.new(400)
+    |> response.set_body(Bytes(bytes_builder.new()))
+  })
+}
+
+// This constructs an event from the provided type.  If `id` or `event` are
+// provided, they are included in the message.  The data provided is split
+// across newlines, which I think is per the spec? The `Result` returned here
+// can be used to determine whether the event send has succeeded.
+pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
+  let SSEConnection(conn) = conn
+  let id =
+    event.id
+    |> option.map(fn(id) { "id: " <> id <> "\n" })
+    |> option.unwrap("")
+  let event_name =
+    event.event
+    |> option.map(fn(name) { "event: " <> name <> "\n" })
+    |> option.unwrap("")
+  let data =
+    event.data
+    |> string_builder.split("\n")
+    |> list.map(fn(row) { string_builder.prepend(row, "data: ") })
+    |> string_builder.join("\n")
+
+  let message =
+    data
+    |> string_builder.prepend(event_name)
+    |> string_builder.prepend(id)
+    |> string_builder.append("\n\n")
+    |> bytes_builder.from_string_builder
+
+  transport.send(conn.transport, conn.socket, message)
+  |> result.replace(Nil)
+  |> result.nil_error
 }
 
 import gleam/erlang

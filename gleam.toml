@@ -1,14 +1,14 @@
 name = "mist"
-version = "0.15.0"
+version = "1.0.0-rc2"
 
 licences = ["Apache-2.0"]
 description = "a misty Gleam web server"
 repository = { type = "github", user = "rawhat", repo = "mist" }
 target = "erlang"
-gleam = ">= 0.33.0"
+gleam = ">= 1.0.0"
 
 [dependencies]
-gleam_stdlib = "~> 0.34"
+gleam_stdlib = "~> 0.35 or ~> 1.0"
 gleam_erlang = "~> 0.24"
 gleam_http = "~> 3.5"
 gleam_otp = "~> 0.9"
