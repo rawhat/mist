@@ -1,4 +1,3 @@
-import gleam/bit_array
 import gleam/dynamic
 import gleam/erlang
 import gleam/erlang/process.{type Selector, type Subject}
@@ -53,8 +52,6 @@ pub type InternalState {
     to_remove: BitArray,
   )
 }
-
-import gleam/io
 
 pub fn new(
   handler: Handler,
@@ -142,7 +139,7 @@ pub fn new(
               ),
             )
           }
-          msg, _ -> {
+          _msg, _ -> {
             // io.println(
             //   "Discarding message: " <> string.slice(erlang.format(msg), 0, 50),
             // )

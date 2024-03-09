@@ -29,6 +29,7 @@ pub type ResponseData {
   Bytes(BytesBuilder)
   Chunked(Iterator(BytesBuilder))
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
+  ServerSentEvents(Selector(ProcessDown))
 }
 
 // TODO:
@@ -246,8 +247,6 @@ pub type ParsedRequest {
   Http1Request(request.Request(Connection))
   Upgrade(BitArray)
 }
-
-import gleam/io
 
 /// Turns the TCP message into an HTTP request
 pub fn parse_request(

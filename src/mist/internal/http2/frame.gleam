@@ -154,13 +154,15 @@ fn parse_data(
 ) -> Result(Frame, ConnectionError) {
   case <<flags:bits, payload:bits>> {
     <<
-      _unused:size(4),
-      padding:size(1),
-      _unused:size(2),
-      end_stream:size(1),
-      pad_length:size(padding)-unit(8),
-      data_and_padding:bits,
-    >> if identifier != 0 -> {
+        _unused:size(4),
+        padding:size(1),
+        _unused:size(2),
+        end_stream:size(1),
+        pad_length:size(padding)-unit(8),
+        data_and_padding:bits,
+      >>
+      if identifier != 0
+    -> {
       let data_length = case padding {
         1 -> length - pad_length
         0 -> length
@@ -189,19 +191,21 @@ fn parse_header(
 ) -> Result(Frame, ConnectionError) {
   case <<flags:bits, payload:bits>> {
     <<
-      _unused:size(2),
-      priority:size(1),
-      _unused:size(1),
-      padded:size(1),
-      end_headers:size(1),
-      _unused:size(1),
-      end_stream:size(1),
-      pad_length:size(padded)-unit(8),
-      exclusive:size(priority),
-      stream_dependency:size(priority)-unit(31),
-      weight:size(priority)-unit(8),
-      data_and_padding:bits,
-    >> if identifier != 0 && pad_length < length -> {
+        _unused:size(2),
+        priority:size(1),
+        _unused:size(1),
+        padded:size(1),
+        end_headers:size(1),
+        _unused:size(1),
+        end_stream:size(1),
+        pad_length:size(padded)-unit(8),
+        exclusive:size(priority),
+        stream_dependency:size(priority)-unit(31),
+        weight:size(priority)-unit(8),
+        data_and_padding:bits,
+      >>
+      if identifier != 0 && pad_length < length
+    -> {
       let data_length = case padded, priority {
         1, 1 -> length - pad_length - 6
         1, 0 -> length - pad_length - 1
@@ -217,6 +221,7 @@ fn parse_header(
               data: case end_headers {
                 1 -> Complete(data)
                 0 -> Continued(data)
+                _ -> panic as "Somehow a bit was set to neither 0 nor 1"
               },
               end_stream: { end_stream == 1 },
               identifier: stream_identifier(identifier),
@@ -252,11 +257,13 @@ fn parse_priority(
 ) -> Result(Frame, ConnectionError) {
   case length, <<flags:bits, payload:bits>> {
     5, <<
-      _unused:size(8),
-      exclusive:size(1),
-      dependency:size(31),
-      weight:size(8),
-    >> if identifier != 0 -> {
+        _unused:size(8),
+        exclusive:size(1),
+        dependency:size(31),
+        weight:size(8),
+      >>
+      if identifier != 0
+    -> {
       Ok(Priority(
         exclusive: exclusive == 1,
         identifier: stream_identifier(identifier),
@@ -294,7 +301,9 @@ fn parse_settings(
   payload: BitArray,
 ) -> Result(Frame, ConnectionError) {
   case length % 6, <<flags:bits, payload:bits>> {
-    0, <<_unused:size(7), ack:size(1), settings:bytes-size(length)>> if identifier == 0 -> {
+    0, <<_unused:size(7), ack:size(1), settings:bytes-size(length)>>
+      if identifier == 0
+    -> {
       use settings <- result.try(get_settings(settings, []))
       Ok(Settings(ack: ack == 1, settings: settings))
     }
@@ -312,16 +321,18 @@ fn parse_push_promise(
 ) -> Result(Frame, ConnectionError) {
   case <<flags:bits, payload:bits>> {
     <<
-      _unused:size(4),
-      padded:size(1),
-      end_headers:size(1),
-      _unused:size(2),
-      pad_length:size(padded)-unit(8),
-      _reserved:size(1),
-      promised_identifier:size(31),
-      data:bytes-size(length),
-      _padding:bytes-size(pad_length),
-    >> if identifier != 0 -> {
+        _unused:size(4),
+        padded:size(1),
+        end_headers:size(1),
+        _unused:size(2),
+        pad_length:size(padded)-unit(8),
+        _reserved:size(1),
+        promised_identifier:size(31),
+        data:bytes-size(length),
+        _padding:bytes-size(pad_length),
+      >>
+      if identifier != 0
+    -> {
       Ok(PushPromise(
         data: case end_headers == 1 {
           True -> Complete(data)
@@ -358,12 +369,14 @@ fn parse_go_away(
 ) -> Result(Frame, ConnectionError) {
   case <<flags:bits, payload:bits>> {
     <<
-      _unused:size(8),
-      _reserved:size(1),
-      last_stream_id:size(31),
-      error:size(32),
-      data:bytes-size(length),
-    >> if identifier == 0 -> {
+        _unused:size(8),
+        _reserved:size(1),
+        last_stream_id:size(31),
+        error:size(32),
+        data:bytes-size(length),
+      >>
+      if identifier == 0
+    -> {
       Ok(GoAway(
         data: data,
         error: get_error(error),
@@ -381,7 +394,9 @@ fn parse_window_update(
   payload: BitArray,
 ) -> Result(Frame, ConnectionError) {
   case length, <<flags:bits, payload:bits>> {
-    4, <<_unused:size(8), _reserved:size(1), window_size:size(31)>> if window_size != 0 -> {
+    4, <<_unused:size(8), _reserved:size(1), window_size:size(31)>>
+      if window_size != 0
+    -> {
       Ok(WindowUpdate(
         amount: window_size,
         identifier: stream_identifier(identifier),
@@ -400,11 +415,13 @@ fn parse_continuation(
 ) -> Result(Frame, ConnectionError) {
   case <<flags:bits, payload:bits>> {
     <<
-      _unused:size(5),
-      end_headers:size(1),
-      _unused:size(2),
-      data:bytes-size(length),
-    >> if identifier != 0 -> {
+        _unused:size(5),
+        end_headers:size(1),
+        _unused:size(2),
+        data:bytes-size(length),
+      >>
+      if identifier != 0
+    -> {
       Ok(Continuation(
         data: case end_headers == 1 {
           True -> Complete(data)
@@ -618,6 +635,7 @@ fn get_setting(identifier: Int, value: Int) -> Result(Setting, ConnectionError) 
         ServerPush(case value {
           0 -> Disabled
           1 -> Enabled
+          _ -> panic as "Somehow a bit was neither 0 nor 1"
         }),
       )
     3 -> Ok(MaxConcurrentStreams(value))

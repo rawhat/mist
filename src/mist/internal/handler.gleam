@@ -4,15 +4,11 @@ import gleam/http/response
 import gleam/option.{type Option, Some}
 import gleam/otp/actor
 import gleam/result
-import glisten/handler.{Close, Internal}
-import glisten/socket.{type Socket, type SocketReason, Badarg}
-import glisten/socket/transport.{type Transport}
-import glisten.{type Loop, type Message, Packet}
-import mist/internal/encoder
-import mist/internal/file
+import glisten/transport
+import glisten.{type Loop, Packet, User}
 import mist/internal/http.{
   type Connection, type DecodeError, type Handler, Bytes, Chunked, Connection,
-  DiscardPacket, File, Initial, Websocket,
+  DiscardPacket, File, Initial, ServerSentEvents, Websocket,
 }
 import mist/internal/http/handler as http_handler
 import mist/internal/http2/handler.{type Message, Send} as http2_handler
@@ -76,6 +72,8 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
             Error(process.Abnormal("WebSocket unsupported for HTTP/2"))
           Chunked(_iterator) ->
             Error(process.Abnormal("Chunked encoding not supported for HTTP/2"))
+          ServerSentEvents(_selector) ->
+            Error(process.Abnormal("Server-Sent Events unsupported for HTTP/2"))
         }
         |> result.map(fn(context) {
           // io.println("seems like we successfully sent?")
@@ -98,7 +96,7 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
             DiscardPacket -> process.Normal
             _ -> {
               logger.error(err)
-              let _ = conn.transport.close(conn.socket)
+              let _ = transport.close(conn.transport, conn.socket)
               process.Abnormal("Received invalid request")
             }
           }

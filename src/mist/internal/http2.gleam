@@ -7,7 +7,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import glisten/socket.{type Socket, type SocketReason}
-import glisten/socket/transport.{type Transport}
+import glisten/transport.{type Transport}
 import mist/internal/http2/frame.{
   type Frame, type PushState, type Setting, type StreamIdentifier, Complete,
   Data, Header,
@@ -81,7 +81,11 @@ fn send_headers(
       )
     let encoded = frame.encode(header_frame)
     case
-      conn.transport.send(conn.socket, bytes_builder.from_bit_array(encoded))
+      transport.send(
+        conn.transport,
+        conn.socket,
+        bytes_builder.from_bit_array(encoded),
+      )
     {
       Ok(_nil) -> Ok(new_context)
       Error(_reason) -> Error(process.Abnormal("Failed to send HTTP/2 headers"))
@@ -100,7 +104,11 @@ fn send_data(
   // io.println("gonna send data frame:  " <> erlang.format(data_frame))
   let encoded = frame.encode(data_frame)
 
-  conn.transport.send(conn.socket, bytes_builder.from_bit_array(encoded))
+  transport.send(
+    conn.transport,
+    conn.socket,
+    bytes_builder.from_bit_array(encoded),
+  )
   |> result.map_error(fn(err) {
     io.println("failed to send :(  " <> erlang.format(err))
   })
@@ -115,7 +123,7 @@ pub fn send_frame(
 ) -> Result(Nil, SocketReason) {
   let data = frame.encode(frame_to_send)
 
-  transport.send(socket, bytes_builder.from_bit_array(data))
+  transport.send(transport, socket, bytes_builder.from_bit_array(data))
 }
 
 pub fn send_bytes_builder(
