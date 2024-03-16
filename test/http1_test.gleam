@@ -164,7 +164,7 @@ pub fn it_supports_query_parameters() {
     |> request.set_query([
       #("something", "123"),
       #("another", "true"),
-      #("a-complicated-one", uri.percent_encode("is the thing")),
+      #("a-complicated-one", "is the thing"),
     ])
 
   let assert Ok(resp) = hackney.send(req)
@@ -191,8 +191,8 @@ pub fn it_handles_query_parameters_with_question_mark() {
 
   let expected =
     get_default_response()
-    |> response.set_header("content-length", "5")
-    |> response.set_body(bytes_builder.from_bit_array(<<"?=123":utf8>>))
+    |> response.set_header("content-length", "7")
+    |> response.set_body(bytes_builder.from_bit_array(<<"%3F=123":utf8>>))
 
   string_response_should_equal(resp, expected)
 }

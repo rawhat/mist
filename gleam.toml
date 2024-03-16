@@ -12,7 +12,7 @@ gleam_stdlib = "~> 0.35 or ~> 1.0"
 gleam_erlang = "~> 0.24"
 gleam_http = "~> 3.5"
 gleam_otp = "~> 0.9"
-glisten = { path = "../glisten" }
+glisten = "~> 1.0"
 hpack_erl = "~> 0.3"
 birl = "~> 1.3"
 
