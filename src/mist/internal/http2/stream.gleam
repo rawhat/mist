@@ -76,7 +76,6 @@ pub fn new(
       loop: fn(msg, state) {
         case msg, state.end {
           Ready, _ -> {
-            // io.println("hi we are ready: " <> erlang.format(identifier))
             let content_length =
               headers
               |> list.key_find("content-length")
@@ -101,7 +100,6 @@ pub fn new(
             |> make_request(headers, _)
             |> result.map(handler)
             |> result.map(fn(resp) {
-              // io.println("sending done...")
               process.send(state.data_subject, Done)
               actor.continue(
                 InternalState(..state, pending_response: Some(resp)),
@@ -115,13 +113,11 @@ pub fn new(
             |> result.unwrap_both
           }
           Done, True -> {
-            // io.println("we are done receiving...")
             let assert Some(resp) = state.pending_response
             send(resp)
             actor.continue(state)
           }
           Data(bits: bits, end: True), _ -> {
-            // io.println("we done!")
             process.send(state.data_subject, Done)
             actor.continue(
               InternalState(
@@ -140,13 +136,6 @@ pub fn new(
             )
           }
           _msg, _ -> {
-            // io.println(
-            //   "Discarding message: " <> string.slice(erlang.format(msg), 0, 50),
-            // )
-            // io.println(
-            //   "data is: " <> int.to_string(bit_array.byte_size(state.to_remove)),
-            // )
-            // io.println("GOT MESSAGE:  " <> erlang.format(msg))
             // TODO:  probably just discard this?
             actor.continue(state)
           }

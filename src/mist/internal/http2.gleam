@@ -1,4 +1,5 @@
 import gleam/bytes_builder.{type BytesBuilder}
+import gleam/erlang
 import gleam/erlang/process
 import gleam/http.{type Header} as _http
 import gleam/http/response.{type Response}
@@ -13,6 +14,7 @@ import mist/internal/http2/frame.{
   Data, Header,
 }
 import mist/internal/http.{type Connection}
+import logging
 
 pub type Http2Settings {
   Http2Settings(
@@ -57,9 +59,6 @@ pub fn update_settings(
   })
 }
 
-import gleam/erlang
-import gleam/io
-
 fn send_headers(
   context: HpackContext,
   conn: Connection,
@@ -67,10 +66,8 @@ fn send_headers(
   end_stream: Bool,
   stream_identifier: StreamIdentifier(Frame),
 ) -> Result(HpackContext, process.ExitReason) {
-  // io.println("going to encode:  " <> erlang.format(headers))
   hpack_encode(context, headers)
   |> result.then(fn(pair) {
-    // io.println("hi we encoded:  " <> erlang.format(pair))
     let assert #(headers, new_context) = pair
     let header_frame =
       Header(
@@ -101,7 +98,6 @@ fn send_data(
 ) -> Result(Nil, process.ExitReason) {
   let data_frame =
     Data(data: data, end_stream: end_stream, identifier: stream_identifier)
-  // io.println("gonna send data frame:  " <> erlang.format(data_frame))
   let encoded = frame.encode(data_frame)
 
   transport.send(
@@ -110,9 +106,9 @@ fn send_data(
     bytes_builder.from_bit_array(encoded),
   )
   |> result.map_error(fn(err) {
-    io.println("failed to send :(  " <> erlang.format(err))
+    logging.log(logging.Debug, "failed to send :(  " <> erlang.format(err))
+    process.Abnormal("Failed to send HTTP/2 data")
   })
-  |> result.replace_error(process.Abnormal("Failed to send HTTP/2 data"))
 }
 
 // TODO:  handle max frame size

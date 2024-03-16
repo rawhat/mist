@@ -4,6 +4,7 @@ import gleam/http/response
 import gleam/option.{type Option, Some}
 import gleam/otp/actor
 import gleam/result
+import gleam/string
 import glisten/transport
 import glisten.{type Loop, Packet, User}
 import mist/internal/http.{
@@ -13,7 +14,7 @@ import mist/internal/http.{
 import mist/internal/http/handler as http_handler
 import mist/internal/http2/handler.{type Message, Send} as http2_handler
 import mist/internal/http2
-import mist/internal/logger
+import logging
 
 pub type HandlerError {
   InvalidRequest(DecodeError)
@@ -59,7 +60,6 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
         ))
       }
       User(Send(id, resp)), Http2(state) -> {
-        // io.println("hi we gonna send")
         case resp.body {
           Bytes(bytes) -> {
             resp
@@ -76,7 +76,6 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
             Error(process.Abnormal("Server-Sent Events unsupported for HTTP/2"))
         }
         |> result.map(fn(context) {
-          // io.println("seems like we successfully sent?")
           Http2(http2_handler.send_hpack_context(state, context))
         })
         |> result.map_error(fn(err) {
@@ -95,7 +94,7 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
           case err {
             DiscardPacket -> process.Normal
             _ -> {
-              logger.error(err)
+              logging.log(logging.Error, string.inspect(err))
               let _ = transport.close(conn.transport, conn.socket)
               process.Abnormal("Received invalid request")
             }

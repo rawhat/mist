@@ -17,6 +17,7 @@ import mist/internal/http2/frame.{
 }
 import mist/internal/http2/stream.{Ready}
 import mist/internal/http2/flow_control
+import logging
 
 pub type Message {
   Send(identifier: StreamIdentifier(Frame), resp: Response(ResponseData))
@@ -124,8 +125,6 @@ pub fn call(
 ) -> Result(State, process.ExitReason) {
   case frame.decode(state.frame_buffer.data) {
     Ok(#(frame, rest)) -> {
-      // io.println("frame:  " <> erlang.format(frame))
-      // io.println("rest:  " <> erlang.format(rest))
       let new_state = State(..state, frame_buffer: buffer.new(rest))
       case handle_frame(frame, new_state, conn, handler) {
         Ok(updated) -> call(updated, conn, handler)
@@ -152,7 +151,6 @@ fn handle_frame(
   conn: Connection,
   handler: Handler,
 ) -> Result(State, process.ExitReason) {
-  // io.println("handling frame:  " <> string.slice(erlang.format(frame), 0, 25))
   case state.fragment, frame {
     Some(frame.Header(
         identifier: id1,
@@ -242,7 +240,6 @@ fn handle_frame(
         )
       let assert Ok(#(headers, context)) =
         http2.hpack_decode(state.receive_hpack_context, data)
-      // io.println("we got some headers:  " <> erlang.format(headers))
 
       let pending_content_length =
         headers
@@ -258,9 +255,7 @@ fn handle_frame(
           fn(resp) { process.send(state.self, Send(identifier, resp)) },
           end_stream,
         )
-      // io.println("initialized new stream")
       process.send(new_stream, Ready)
-      // io.println("sent ready")
 
       let stream_state =
         stream.State(
@@ -293,10 +288,6 @@ fn handle_frame(
         let assert #(new_stream, increment) = update
         let _ = case conn_window_increment > 0 {
           True -> {
-            // io.println(
-            //   "updating connection window increment to: "
-            //     <> int.to_string(conn_window_increment),
-            // )
             http2.send_frame(
               frame.WindowUpdate(
                 identifier: frame.stream_identifier(0),
@@ -310,10 +301,6 @@ fn handle_frame(
         }
         let _ = case increment > 0 {
           True -> {
-            // io.println(
-            //   "updating stream window increment to: "
-            //     <> int.to_string(increment),
-            // )
             http2.send_frame(
               frame.WindowUpdate(identifier: identifier, amount: increment),
               conn.socket,
@@ -349,12 +336,12 @@ fn handle_frame(
       ))
     }
     None, frame.GoAway(..) -> {
-      io.println("byeeee~~")
+      logging.log(logging.Debug, "byteeee~~")
       Error(process.Normal)
     }
     // TODO:  obviously fill these out
     _, frame -> {
-      io.println("Ignoring frame:  " <> erlang.format(frame))
+      logging.log(logging.Debug, "Ignoring frame: " <> erlang.format(frame))
       Ok(state)
     }
   }

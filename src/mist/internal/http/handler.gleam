@@ -8,6 +8,7 @@ import gleam/int
 import gleam/iterator.{type Iterator}
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import glisten/internal/handler.{Close, Internal}
 import glisten/socket.{type Socket, type SocketReason, Badarg}
 import glisten/transport.{type Transport}
@@ -17,7 +18,7 @@ import mist/internal/http.{
   type Connection, type Handler, type ResponseData, Bytes, Chunked, File,
   ServerSentEvents, Websocket,
 }
-import mist/internal/logger
+import logging
 
 pub type State {
   State(idle_timer: Option(process.Timer))
@@ -63,7 +64,7 @@ fn log_and_error(
 ) -> process.ExitReason {
   case error {
     Exited(msg) | Thrown(msg) | Errored(msg) -> {
-      logger.error(error)
+      logging.log(logging.Error, string.inspect(error))
       response.new(500)
       |> response.set_body(
         bytes_builder.from_bit_array(<<"Internal Server Error":utf8>>),
@@ -148,8 +149,10 @@ fn handle_file_body(
       length,
       [],
     )
-    |> result.map_error(fn(err) { logger.error(#("Failed to send file", err)) })
-    |> result.replace_error(Badarg)
+    |> result.map_error(fn(err) {
+      logging.log(logging.Error, "Failed to send file: " <> string.inspect(err))
+      Badarg
+    })
   })
   |> result.replace(Nil)
 }

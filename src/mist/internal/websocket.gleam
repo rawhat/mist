@@ -11,7 +11,7 @@ import gleam/result
 import glisten.{type Socket}
 import glisten/socket/options
 import glisten/transport.{type Transport}
-import mist/internal/logger
+import logging
 
 pub type DataFrame {
   TextFrame(payload_length: Int, payload: BitArray)
@@ -268,7 +268,7 @@ pub fn initialize_connection(
               }
             })
             |> result.lazy_unwrap(fn() {
-              logger.error(#("Received a malformed WebSocket frame"))
+              logging.log(logging.Error, "Received a malformed WebSocket frame")
               on_close(state.user)
               actor.Stop(process.Abnormal(
                 "WebSocket received a malformed message",
@@ -298,7 +298,8 @@ pub fn initialize_connection(
               }
             })
             |> result.map_error(fn(err) {
-              logger.error(
+              logging.log(
+                logging.Error,
                 "Caught error in websocket handler: " <> erlang.format(err),
               )
             })
@@ -313,7 +314,7 @@ pub fn initialize_connection(
           }
           // TODO:  do we need to send something back for this?
           Invalid -> {
-            logger.error(#("Received a malformed WebSocket frame"))
+            logging.log(logging.Error, "Received a malformed WebSocket frame")
             on_close(state.user)
             actor.Stop(process.Abnormal(
               "WebSocket received a malformed message",
@@ -413,7 +414,8 @@ fn apply_frames(
           actor.Stop(reason)
         }
         Error(reason) -> {
-          logger.error(
+          logging.log(
+            logging.Error,
             "Caught error in websocket handler: " <> erlang.format(reason),
           )
           on_close(state)

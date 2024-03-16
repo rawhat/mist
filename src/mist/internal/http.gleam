@@ -325,7 +325,6 @@ pub fn parse_request(
       10:int,
       data:bits,
     >>)) -> {
-      // io.debug(#("we got some data", data))
       Ok(Upgrade(data))
     }
     _ -> Error(DiscardPacket)

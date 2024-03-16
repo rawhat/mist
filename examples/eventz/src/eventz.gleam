@@ -98,6 +98,7 @@ pub fn main() {
       }
     }
     |> mist.new
+    |> mist.port(4001)
     |> mist.start_http
 
   process.sleep_forever()
