@@ -627,25 +627,3 @@ pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
   |> result.replace(Nil)
   |> result.nil_error
 }
-
-pub fn main() {
-  let assert Ok(_server) =
-    new(fn(_req) {
-      // io.println("body is: " <> erlang.format(bit_array.byte_size(req.body)))
-      response.new(200)
-      // |> response.set_body(Bytes(bytes_builder.new()))
-      |> response.set_body(Bytes(bytes_builder.from_string("hello, world!")))
-    })
-    // |> read_request_body(
-    //   bytes_limit: 4_000_000,
-    //   failure_response: response.new(413)
-    //   |> response.set_body(Bytes(bytes_builder.new())),
-    // )
-    |> port(1234)
-    |> start_https(
-      certfile: "/home/alex/gleams/mist/domain.crt",
-      keyfile: "/home/alex/gleams/mist/domain.key",
-    )
-
-  process.sleep_forever()
-}
