@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Internal API refactor along with (absolutely not ready) initial HTTP/2
+"support" included but disabled
+- Bumped some dependency versions
+
 ## v1.0.0-rc2
 
 - Second pass at Server-Sent Events
