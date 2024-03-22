@@ -3,7 +3,6 @@ import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/http/response.{type Response}
 import gleam/int
-import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -62,60 +61,31 @@ pub fn upgrade(
   let initial_settings = http2.default_settings()
   let settings_frame = frame.Settings(ack: False, settings: [])
 
-  // frame.HeaderTableSize(initial_settings.header_table_size),
-  // frame.ServerPush(initial_settings.server_push),
-  // frame.MaxConcurrentStreams(initial_settings.max_concurrent_streams),
-  // frame.InitialWindowSize(initial_settings.initial_window_size),
-  // frame.MaxFrameSize(initial_settings.max_frame_size),
   let assert Ok(_nil) =
     http2.send_frame(settings_frame, conn.socket, conn.transport)
 
-  Ok(State(
-    fragment: None,
-    frame_buffer: buffer.new(data),
-    pending_sends: [],
-    receive_hpack_context: http2.hpack_new_context(
-      initial_settings.header_table_size,
-    ),
-    receive_window_size: 65_535,
-    self: self,
-    send_hpack_context: http2.hpack_new_context(
-      initial_settings.header_table_size,
-    ),
-    send_window_size: 65_535,
-    settings: initial_settings,
-    streams: dict.new(),
-  ))
-  // frame.decode(data)
-  // |> result.map_error(fn(_err) { process.Abnormal("Missing first frame") })
-  // |> result.then(fn(pair) {
-  //   let assert #(frame, rest) = pair
-  //   case frame {
-  //     Settings(settings: settings, ..) -> {
-  //       let http2_settings = http2.update_settings(initial_settings, settings)
-  //       Ok(State(
-  //         fragment: None,
-  //         frame_buffer: buffer.new(rest),
-  //         pending_sends: [],
-  //         receive_hpack_context: http2.hpack_new_context(
-  //           http2_settings.header_table_size,
-  //         ),
-  //         receive_window_size: 65_535,
-  //         self: self,
-  //         send_hpack_context: http2.hpack_new_context(
-  //           http2_settings.header_table_size,
-  //         ),
-  //         send_window_size: 65_535,
-  //         settings: http2_settings,
-  //         streams: dict.new(),
-  //       ))
-  //     }
-  //     _ -> {
-  //       let assert Ok(_) = conn.transport.close(conn.socket)
-  //       Error(process.Abnormal("SETTINGS frame must be sent first"))
-  //     }
-  //   }
-  // })
+  // TODO:  actually return this to support HTTP/2
+  let _resp =
+    State(
+      fragment: None,
+      frame_buffer: buffer.new(data),
+      pending_sends: [],
+      receive_hpack_context: http2.hpack_new_context(
+        initial_settings.header_table_size,
+      ),
+      receive_window_size: 65_535,
+      self: self,
+      send_hpack_context: http2.hpack_new_context(
+        initial_settings.header_table_size,
+      ),
+      send_window_size: 65_535,
+      settings: initial_settings,
+      streams: dict.new(),
+    )
+
+  logging.log(logging.Error, "HTTP/2 currently not supported")
+
+  Error(process.Abnormal("HTTP/2 currently not supported"))
 }
 
 pub fn call(
@@ -328,7 +298,6 @@ fn handle_frame(
     }
     // TODO:  update any settings from this
     _, frame.Settings(..) -> {
-      // io.println("got some settings...")
       http2.send_frame(frame.settings_ack(), conn.socket, conn.transport)
       |> result.replace(state)
       |> result.replace_error(process.Abnormal(
@@ -345,8 +314,4 @@ fn handle_frame(
       Ok(state)
     }
   }
-}
-
-fn do_pending_sends() -> todo_type {
-  todo
 }

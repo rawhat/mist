@@ -102,8 +102,6 @@ pub type ConnectionError {
   Unsupported(Int)
 }
 
-import gleam/io
-
 pub fn decode(frame: BitArray) -> Result(#(Frame, BitArray), ConnectionError) {
   case frame {
     <<

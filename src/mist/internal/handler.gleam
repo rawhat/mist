@@ -39,9 +39,6 @@ pub fn init() -> #(State, Option(Selector(Message))) {
   #(new_state(subj), Some(selector))
 }
 
-import gleam/erlang
-import gleam/io
-
 pub fn with_func(handler: Handler) -> Loop(Message, State) {
   fn(msg, state: State, conn: glisten.Connection(Message)) {
     let sender = conn.subject
@@ -66,7 +63,8 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
             |> response.set_body(bytes)
             |> http2.send_bytes_builder(conn, state.send_hpack_context, id)
           }
-          File(..) -> todo as "Need to implement file support"
+          File(..) ->
+            Error(process.Abnormal("File sending unsupported over HTTP/2"))
           // TODO:  properly error in some fashion for these
           Websocket(_selector) ->
             Error(process.Abnormal("WebSocket unsupported for HTTP/2"))
@@ -79,7 +77,10 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
           Http2(http2_handler.send_hpack_context(state, context))
         })
         |> result.map_error(fn(err) {
-          io.println("=== OH NO, ERROR:  " <> erlang.format(err))
+          logging.log(
+            logging.Debug,
+            "Error sending HTTP/2 data: " <> string.inspect(err),
+          )
           err
         })
       }
