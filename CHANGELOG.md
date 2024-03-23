@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.0.0
 
 - Internal API refactor along with (absolutely not ready) initial HTTP/2
 "support" included but disabled
