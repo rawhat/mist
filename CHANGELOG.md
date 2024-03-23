@@ -5,6 +5,7 @@
 - Internal API refactor along with (absolutely not ready) initial HTTP/2
 "support" included but disabled
 - Bumped some dependency versions
+- Fix performance regression with `Date: ` header
 
 ## v1.0.0-rc2
 
