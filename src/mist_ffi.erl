@@ -69,6 +69,6 @@ ets_lookup_element(Table, Key, Position) ->
   try
     {ok, ets:lookup_element(Table, Key, Position)}
   catch
-    badarg ->
+    error:badarg ->
       {error, nil}
   end.

@@ -6,7 +6,7 @@ import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist.{type Charlist}
-import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
+import gleam/erlang/process.{type ProcessDown, type Selector}
 import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response, Response}
@@ -21,7 +21,7 @@ import gleam/uri
 import glisten.{type ClientIp, type Socket}
 import glisten/transport.{type Transport}
 import mist/internal/buffer.{type Buffer, Buffer}
-import mist/internal/clock.{type ClockMessage}
+import mist/internal/clock
 import mist/internal/encoder
 import mist/internal/file
 
@@ -47,7 +47,6 @@ pub type Connection {
     socket: Socket,
     transport: Transport,
     client_ip: ClientIp,
-    clock: Subject(ClockMessage),
   )
 }
 

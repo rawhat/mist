@@ -53,7 +53,7 @@ pub fn get_date() -> String {
   case ets_lookup_element(MistClock, DateHeader, 2) {
     Ok(value) -> value
     _ -> {
-      logging.log(logging.Debug, "Failed to lookup date, re-calculating")
+      logging.log(logging.Warning, "Failed to lookup date, re-calculating")
       date()
     }
   }

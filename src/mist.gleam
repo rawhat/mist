@@ -13,10 +13,12 @@ import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/supervisor
 import gleam/result
+import gleam/string
 import gleam/string_builder.{type StringBuilder}
 import glisten
 import glisten/transport
 import mist/internal/buffer.{type Buffer, Buffer}
+import mist/internal/clock
 import mist/internal/encoder
 import mist/internal/file
 import mist/internal/handler
@@ -357,17 +359,51 @@ fn convert_body_types(
   response.set_body(resp, new_body)
 }
 
+fn convert_glisten_error(err: glisten.StartError) -> actor.StartError {
+  case err {
+    glisten.AcceptorTimeout -> actor.InitTimeout
+    glisten.AcceptorFailed(reason) -> actor.InitFailed(reason)
+    glisten.AcceptorCrashed(reason) -> actor.InitCrashed(reason)
+    glisten.ListenerClosed ->
+      actor.InitFailed(process.Abnormal("Listener socket closed"))
+    glisten.ListenerTimeout ->
+      actor.InitFailed(process.Abnormal("Listener startup timed out"))
+    glisten.SystemError(reason) ->
+      actor.InitFailed(process.Abnormal(
+        "Socket error: " <> string.inspect(reason),
+      ))
+  }
+}
+
 /// Start a `mist` service over HTTP with the provided builder.
 pub fn start_http(
   builder: Builder(Connection, ResponseData),
 ) -> Result(Subject(supervisor.Message), glisten.StartError) {
-  fn(req) { convert_body_types(builder.handler(req)) }
-  |> handler.with_func
-  |> glisten.handler(handler.init, _)
-  |> glisten.serve(builder.port)
-  |> result.map(fn(subj) {
-    builder.after_start(builder.port, Http)
-    subj
+  let clock = supervisor.worker(fn(_argument) { clock.start() })
+  let glisten_pool =
+    supervisor.supervisor(fn(_argument) {
+      fn(req) { convert_body_types(builder.handler(req)) }
+      |> handler.with_func
+      |> glisten.handler(handler.init, _)
+      |> glisten.serve(builder.port)
+      |> result.map(fn(subj) {
+        builder.after_start(builder.port, Http)
+        subj
+      })
+      |> result.map_error(convert_glisten_error)
+    })
+
+  supervisor.start(fn(children) {
+    children
+    |> supervisor.add(clock)
+    |> supervisor.add(glisten_pool)
+  })
+  |> result.map_error(fn(err) {
+    case err {
+      actor.InitTimeout -> glisten.AcceptorTimeout
+      actor.InitFailed(reason) -> glisten.AcceptorFailed(reason)
+      actor.InitCrashed(reason) -> glisten.AcceptorCrashed(reason)
+    }
   })
 }
 
@@ -407,15 +443,33 @@ pub fn start_https(
 
   use _ <- result.then(res)
 
-  fn(req) { convert_body_types(builder.handler(req)) }
-  |> handler.with_func
-  |> glisten.handler(handler.init, _)
-  |> glisten.serve_ssl(builder.port, certfile, keyfile)
-  |> result.map_error(GlistenError)
-  |> result.map(fn(subj) {
-    builder.after_start(builder.port, Https)
-    subj
+  let clock = supervisor.worker(fn(_argument) { clock.start() })
+
+  let glisten_pool =
+    supervisor.supervisor(fn(_argument) {
+      fn(req) { convert_body_types(builder.handler(req)) }
+      |> handler.with_func
+      |> glisten.handler(handler.init, _)
+      |> glisten.serve_ssl(builder.port, certfile, keyfile)
+      |> result.map(fn(subj) {
+        builder.after_start(builder.port, Https)
+        subj
+      })
+      |> result.map_error(convert_glisten_error)
+    })
+  supervisor.start(fn(children) {
+    children
+    |> supervisor.add(clock)
+    |> supervisor.add(glisten_pool)
   })
+  |> result.map_error(fn(err) {
+    case err {
+      actor.InitTimeout -> glisten.AcceptorTimeout
+      actor.InitFailed(reason) -> glisten.AcceptorFailed(reason)
+      actor.InitCrashed(reason) -> glisten.AcceptorCrashed(reason)
+    }
+  })
+  |> result.map_error(GlistenError)
 }
 
 /// These are the types of messages that a websocket handler may receive.

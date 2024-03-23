@@ -1,4 +1,6 @@
 import gleam/bytes_builder
+import gleam/dict.{type Dict}
+import gleam/erlang/atom.{type Atom}
 import gleam/erlang/process
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
@@ -10,7 +12,15 @@ import gleam/result
 import gleam/string
 import mist.{type Connection, type ResponseData}
 
+@external(erlang, "logger", "update_primary_config")
+fn logger_update_primary_config(config: Dict(Atom, Atom)) -> Result(Nil, any)
+
 pub fn main() {
+  logger_update_primary_config(
+    dict.from_list([
+      #(atom.create_from_string("level"), atom.create_from_string("debug")),
+    ]),
+  )
   // These values are for the Websocket process initialized below
   let selector = process.new_selector()
   let state = Nil

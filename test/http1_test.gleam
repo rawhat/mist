@@ -3,14 +3,12 @@ import gleam/bit_array
 import gleam/http
 import gleam/http/request
 import gleam/http/response.{type Response, Response}
-import gleam/hackney
 import gleam/string
 import gleam/uri
 import gleam/option.{Some}
 import gleeunit/should
 import scaffold.{
-  bitstring_response_should_equal, make_request, open_server,
-  string_response_should_equal,
+  bitstring_response_should_equal, make_request, string_response_should_equal,
 }
 
 pub type Fixture {
@@ -25,20 +23,6 @@ pub type Instantiator {
   Inparallel
 }
 
-pub fn set_up_echo_server_test_() {
-  #(Setup, fn() { open_server(8888) }, [
-    it_echoes_with_data,
-    it_supports_large_header_fields,
-    it_supports_patch_requests,
-    it_rejects_large_requests,
-    it_supports_chunked_encoding,
-    it_supports_query_parameters,
-    it_handles_query_parameters_with_question_mark,
-    it_doesnt_mangle_query,
-    it_supports_expect_continue_header,
-  ])
-}
-
 fn get_default_response() -> Response(BytesBuilder) {
   response.new(200)
   |> response.prepend_header("user-agent", "hackney/1.20.1")
@@ -49,15 +33,14 @@ fn get_default_response() -> Response(BytesBuilder) {
   |> response.set_body(bytes_builder.from_bit_array(<<"hello, world!":utf8>>))
 }
 
-pub fn it_echoes_with_data() {
+pub fn it_echoes_with_data_test() {
   let req = make_request("/", "hello, world!")
-
-  let assert Ok(resp) = hackney.send(req)
+  let resp = scaffold.with_server(8888, scaffold.default_handler, req)
 
   string_response_should_equal(resp, get_default_response())
 }
 
-pub fn it_supports_large_header_fields() {
+pub fn it_supports_large_header_fields_test() {
   let big_request =
     make_request("/", "")
     |> request.prepend_header(
@@ -91,27 +74,27 @@ pub fn it_supports_large_header_fields() {
     |> response.prepend_header("host", "localhost:8888")
     |> response.set_body(bytes_builder.from_bit_array(<<>>))
 
-  let assert Ok(resp) = hackney.send(big_request)
+  let resp = scaffold.with_server(8888, scaffold.default_handler, big_request)
 
   string_response_should_equal(resp, expected)
 }
 
-pub fn it_supports_patch_requests() {
+pub fn it_supports_patch_requests_test() {
   let req =
     make_request("/", "hello, world!")
     |> request.set_method(http.Patch)
 
-  let assert Ok(resp) = hackney.send(req)
+  let resp = scaffold.with_server(8888, scaffold.default_handler, req)
 
   string_response_should_equal(resp, get_default_response())
 }
 
-pub fn it_rejects_large_requests() {
+pub fn it_rejects_large_requests_test() {
   let req =
     string.repeat("a", 4_000_001)
     |> make_request("/", _)
 
-  let assert Ok(resp) = hackney.send(req)
+  let resp = scaffold.with_server(8888, scaffold.default_handler, req)
 
   let expected =
     response.new(413)
@@ -130,7 +113,7 @@ fn stream_request(
   body body: BitArray,
 ) -> Result(#(Int, List(#(String, String)), BitArray), Nil)
 
-pub fn it_supports_chunked_encoding() {
+pub fn it_supports_chunked_encoding_test() {
   let req =
     string.repeat("a", 10_000)
     |> bit_array.from_string
@@ -142,6 +125,9 @@ pub fn it_supports_chunked_encoding() {
     req
     |> request.to_uri
     |> uri.to_string
+
+  use <- scaffold.open_server(8888, scaffold.default_handler)
+
   let assert Ok(#(status, headers, body)) =
     stream_request(req.method, path, req.headers, req.body)
   let actual = response.Response(status, headers, body)
@@ -157,7 +143,7 @@ pub fn it_supports_chunked_encoding() {
   bitstring_response_should_equal(actual, expected)
 }
 
-pub fn it_supports_query_parameters() {
+pub fn it_supports_query_parameters_test() {
   let req =
     make_request("/", "hello, world!")
     |> request.set_method(http.Get)
@@ -167,7 +153,7 @@ pub fn it_supports_query_parameters() {
       #("a-complicated-one", "is the thing"),
     ])
 
-  let assert Ok(resp) = hackney.send(req)
+  let resp = scaffold.with_server(8888, scaffold.default_handler, req)
 
   let expected =
     get_default_response()
@@ -181,13 +167,13 @@ pub fn it_supports_query_parameters() {
   string_response_should_equal(resp, expected)
 }
 
-pub fn it_handles_query_parameters_with_question_mark() {
+pub fn it_handles_query_parameters_with_question_mark_test() {
   let req =
     make_request("/", "hello, world!")
     |> request.set_method(http.Get)
     |> request.set_query([#("?", "123")])
 
-  let assert Ok(resp) = hackney.send(req)
+  let resp = scaffold.with_server(8888, scaffold.default_handler, req)
 
   let expected =
     get_default_response()
@@ -197,13 +183,13 @@ pub fn it_handles_query_parameters_with_question_mark() {
   string_response_should_equal(resp, expected)
 }
 
-pub fn it_doesnt_mangle_query() {
+pub fn it_doesnt_mangle_query_test() {
   let req =
     make_request("/", "hello, world!")
     |> request.set_method(http.Get)
   let req = request.Request(..req, query: Some("test"))
 
-  let assert Ok(resp) = hackney.send(req)
+  let resp = scaffold.with_server(8888, scaffold.default_handler, req)
 
   let expected =
     get_default_response()
@@ -213,14 +199,14 @@ pub fn it_doesnt_mangle_query() {
   string_response_should_equal(resp, expected)
 }
 
-pub fn it_supports_expect_continue_header() {
+pub fn it_supports_expect_continue_header_test() {
   let req =
     string.repeat("a", 1000)
     |> make_request("/", _)
     |> request.set_method(http.Post)
     |> request.prepend_header("expect", "100-continue")
 
-  let assert Ok(resp) = hackney.send(req)
+  let resp = scaffold.with_server(8888, scaffold.default_handler, req)
 
   let expected_body =
     string.repeat("a", 1000)
@@ -240,15 +226,15 @@ pub fn it_supports_expect_continue_header() {
 }
 
 pub fn it_sends_back_chunked_responses_test() {
-  let _server = scaffold.chunked_echo_server(8889, 100)
-
   let req =
     string.repeat("a", 1000)
     |> make_request("/", _)
-    |> request.set_host("localhost:8889")
+    |> request.set_host("localhost:8888")
     |> request.set_method(http.Post)
 
-  let assert Ok(resp) = hackney.send(req)
+  let handler = scaffold.chunked_echo_server(100)
+
+  let resp = scaffold.with_server(8888, handler, req)
 
   should.equal(resp.status, 200)
   should.equal(resp.body, string.repeat("a", 1000))
