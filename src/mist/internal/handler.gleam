@@ -30,7 +30,7 @@ pub fn new_state(subj: Subject(Message)) -> State {
   Http1(http_handler.initial_state(), subj)
 }
 
-pub fn init() -> #(State, Option(Selector(Message))) {
+pub fn init(_conn) -> #(State, Option(Selector(Message))) {
   let subj = process.new_subject()
   let selector =
     process.new_selector()
