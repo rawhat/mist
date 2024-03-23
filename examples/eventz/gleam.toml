@@ -19,6 +19,7 @@ gleam_erlang = "~> 0.24"
 gleam_http = "~> 3.5"
 gleam_otp = "~> 0.9"
 repeatedly = "~> 2.1"
+logging = "~> 1.0"
 
 [dev-dependencies]
 gleeunit = "~> 1.0"

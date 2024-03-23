@@ -5,7 +5,9 @@ import gleam/http/request
 import gleam/http/response
 import gleam/int
 import gleam/otp/actor
+import gleam/string
 import gleam/string_builder
+import logging
 import mist
 import repeatedly
 
@@ -46,6 +48,8 @@ pub type Event {
 }
 
 pub fn main() {
+  logging.configure()
+
   let index_resp =
     response.new(200)
     |> response.set_body(mist.Bytes(bytes_builder.from_string(index_html)))
@@ -77,10 +81,15 @@ pub fn main() {
                   let event =
                     mist.event(string_builder.from_string(int.to_string(value)))
                   case mist.send_event(conn, event) {
-                    Ok(_) ->
+                    Ok(_) -> {
+                      logging.log(
+                        logging.Info,
+                        "Sent event: " <> string.inspect(event),
+                      )
                       actor.continue(
                         EventState(..state, count: state.count + 1),
                       )
+                    }
                     Error(_) -> {
                       repeatedly.stop(state.repeater)
                       actor.Stop(process.Normal)
