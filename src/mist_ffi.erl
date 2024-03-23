@@ -1,7 +1,7 @@
 -module(mist_ffi).
 
 -export([binary_match/2, decode_packet/3, file_open/1, string_to_int/2, hpack_decode/2,
-         hpack_encode/2, hpack_new_max_table_size/2]).
+         hpack_encode/2, hpack_new_max_table_size/2, ets_lookup_element/3]).
 
 decode_packet(Type, Packet, Opts) ->
   case erlang:decode_packet(Type, Packet, Opts) of
@@ -64,3 +64,11 @@ hpack_encode(Context, Headers) ->
 
 hpack_new_max_table_size(Context, Size) ->
   hpack:new_max_table_size(Size, Context).
+
+ets_lookup_element(Table, Key, Position) ->
+  try
+    {ok, ets:lookup_element(Table, Key, Position)}
+  catch
+    badarg ->
+      {error, nil}
+  end.

@@ -1,4 +1,4 @@
-import birl
+// import birl
 import gleam/bit_array
 import gleam/bool
 import gleam/bytes_builder.{type BytesBuilder}
@@ -6,7 +6,7 @@ import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist.{type Charlist}
-import gleam/erlang/process.{type ProcessDown, type Selector}
+import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
 import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response, Response}
@@ -21,6 +21,7 @@ import gleam/uri
 import glisten.{type ClientIp, type Socket}
 import glisten/transport.{type Transport}
 import mist/internal/buffer.{type Buffer, Buffer}
+import mist/internal/clock.{type ClockMessage}
 import mist/internal/encoder
 import mist/internal/file
 
@@ -46,6 +47,7 @@ pub type Connection {
     socket: Socket,
     transport: Transport,
     client_ip: ClientIp,
+    clock: Subject(ClockMessage),
   )
 }
 
@@ -489,7 +491,7 @@ pub fn add_default_headers(
   }
   let defaults = {
     case response.get_header(resp, "date") {
-      Error(_nil) -> [#("date", birl.to_http(birl.now())), ..defaults]
+      Error(_nil) -> [#("date", clock.get_date()), ..defaults]
       _ -> defaults
     }
   }
