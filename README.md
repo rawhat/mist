@@ -9,9 +9,9 @@ To follow along with the example below, you can create a new project and add the
 dependencies as follows:
 
 ```sh
-gleam new <your_project>
-cd <your_project>
-gleam add mist gleam_erlang gleam_http gleam_otp
+$ gleam new <your_project>
+$ cd <your_project>
+$ gleam add mist gleam_erlang gleam_http gleam_otp
 ```
 
 The main entrypoints for your application are `mist.start_http` and
