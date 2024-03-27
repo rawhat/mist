@@ -10,7 +10,7 @@ A glistening Gleam web server.
 This package can be added to your Gleam project:
 
 ```sh
-gleam add mist gleam_otp gleam_erlang
+gleam add mist gleam_otp gleam_http gleam_erlang
 ```
 
 and its documentation can be found at <https://hexdocs.pm/mist>.
