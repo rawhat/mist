@@ -3,19 +3,16 @@
 [![Package Version](https://img.shields.io/hexpm/v/mist)](https://hex.pm/packages/mist)
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/mist/)
 
-A glistening Gleam web server.
+## A glistening Gleam web server.
 
-## Installation
-
-This package can be added to your Gleam project:
+To follow along with the example below, you can create a new project and add the
+dependencies as follows:
 
 ```sh
-gleam add mist
+gleam new <your_project>
+cd <your_project>
+gleam add mist gleam_erlang gleam_http gleam_otp
 ```
-
-and its documentation can be found at <https://hexdocs.pm/mist>.
-
-## Usage
 
 The main entrypoints for your application are `mist.start_http` and
 `mist.start_https`. The argument to these functions is generated from the
