@@ -61,7 +61,6 @@ pub type ParsedFrame {
 
 fn frame_from_message(
   message: BitArray,
-  conn: WebsocketConnection,
 ) -> Result(#(ParsedFrame, BitArray), FrameParseError) {
   case message {
     <<
@@ -111,11 +110,7 @@ fn frame_from_message(
                 }
               })
             }
-            _ -> {
-              let assert Ok(data) =
-                transport.receive(conn.transport, conn.socket, 0)
-              frame_from_message(<<message:bits, data:bits>>, conn)
-            }
+            _ -> Error(NeedMoreData(message))
           }
         }
         _ -> Error(InvalidFrame)
@@ -245,7 +240,7 @@ pub fn initialize_connection(
         case msg {
           Valid(SocketMessage(data)) -> {
             let #(frames, rest) =
-              get_messages(<<state.buffer:bits, data:bits>>, connection, [])
+              get_messages(<<state.buffer:bits, data:bits>>, [])
             frames
             |> aggregate_frames(None, [])
             |> result.map(fn(frames) {
@@ -341,12 +336,11 @@ pub fn initialize_connection(
 
 fn get_messages(
   data: BitArray,
-  conn: WebsocketConnection,
   frames: List(ParsedFrame),
 ) -> #(List(ParsedFrame), BitArray) {
-  case frame_from_message(data, conn) {
+  case frame_from_message(data) {
     Ok(#(frame, <<>>)) -> #(list.reverse([frame, ..frames]), <<>>)
-    Ok(#(frame, rest)) -> get_messages(rest, conn, [frame, ..frames])
+    Ok(#(frame, rest)) -> get_messages(rest, [frame, ..frames])
     Error(NeedMoreData(rest)) -> #(frames, rest)
     Error(InvalidFrame) -> #(frames, data)
   }
