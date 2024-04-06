@@ -133,28 +133,44 @@ fn handle_file_body(
   conn: Connection,
 ) -> Result(Nil, SocketReason) {
   let assert File(file_descriptor, offset, length) = body
-  resp
-  |> response.prepend_header("content-length", int.to_string(length - offset))
-  |> response.set_body(bytes_builder.new())
-  |> fn(r: response.Response(BytesBuilder)) {
-    encoder.response_builder(resp.status, r.headers)
-  }
-  |> transport.send(conn.transport, conn.socket, _)
-  |> result.then(fn(_) {
-    file.sendfile(
-      conn.transport,
-      file_descriptor,
-      conn.socket,
-      offset,
-      length,
-      [],
-    )
-    |> result.map_error(fn(err) {
-      logging.log(logging.Error, "Failed to send file: " <> string.inspect(err))
-      Badarg
+  let return =
+    resp
+    |> response.prepend_header("content-length", int.to_string(length - offset))
+    |> response.set_body(bytes_builder.new())
+    |> fn(r: response.Response(BytesBuilder)) {
+      encoder.response_builder(resp.status, r.headers)
+    }
+    |> transport.send(conn.transport, conn.socket, _)
+    |> result.then(fn(_) {
+      file.sendfile(
+        conn.transport,
+        file_descriptor,
+        conn.socket,
+        offset,
+        length,
+        [],
+      )
+      |> result.map_error(fn(err) {
+        logging.log(
+          logging.Error,
+          "Failed to send file: " <> string.inspect(err),
+        )
+        Badarg
+      })
     })
-  })
-  |> result.replace(Nil)
+    |> result.replace(Nil)
+
+  case file.close(file_descriptor) {
+    Ok(_nil) -> Nil
+    Error(reason) -> {
+      logging.log(
+        logging.Error,
+        "Failed to close file: " <> string.inspect(reason),
+      )
+    }
+  }
+
+  return
 }
 
 fn handle_bytes_builder_body(

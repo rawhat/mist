@@ -76,3 +76,6 @@ pub fn open(file: BitArray) -> Result(FileDescriptor, FileError)
 
 @external(erlang, "filelib", "file_size")
 fn size(path: BitArray) -> Int
+
+@external(erlang, "mist_ffi", "file_close")
+pub fn close(file: FileDescriptor) -> Result(Nil, FileError)

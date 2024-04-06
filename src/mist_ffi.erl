@@ -1,7 +1,8 @@
 -module(mist_ffi).
 
 -export([binary_match/2, decode_packet/3, file_open/1, string_to_int/2, hpack_decode/2,
-         hpack_encode/2, hpack_new_max_table_size/2, ets_lookup_element/3]).
+         hpack_encode/2, hpack_new_max_table_size/2, ets_lookup_element/3, get_path_and_query/1,
+         file_close/1]).
 
 decode_packet(Type, Packet, Opts) ->
   case erlang:decode_packet(Type, Packet, Opts) of
@@ -49,6 +50,20 @@ file_open(Path) ->
       {error, unknown_file_error}
   end.
 
+file_close(File) ->
+  case file:close(File) of
+    ok ->
+      {ok, nil};
+    {error, enoent} ->
+      {error, no_entry};
+    {error, eacces} ->
+      {error, no_access};
+    {error, eisdir} ->
+      {error, is_dir};
+    _ ->
+      {error, unknown_file_error}
+  end.
+
 hpack_decode(Context, Bin) ->
   case hpack:decode(Bin, Context) of
     {ok, {Headers, NewContext}} ->
@@ -71,4 +86,19 @@ ets_lookup_element(Table, Key, Position) ->
   catch
     error:badarg ->
       {error, nil}
+  end.
+
+get_path_and_query(String) ->
+  case uri_string:parse(String) of
+    {error, Value, Term} ->
+      {error, {Value, Term}};
+    UriMap ->
+      Query =
+        case maps:find(query, UriMap) of
+          {ok, Value} ->
+            {ok, Value};
+          error ->
+            {error, nil}
+        end,
+      {ok, {maps:get(path, UriMap), Query}}
   end.

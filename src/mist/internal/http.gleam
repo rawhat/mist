@@ -1,4 +1,3 @@
-// import birl
 import gleam/bit_array
 import gleam/bool
 import gleam/bytes_builder.{type BytesBuilder}
@@ -17,13 +16,13 @@ import gleam/option.{type Option}
 import gleam/pair
 import gleam/result
 import gleam/string
-import gleam/uri
 import glisten.{type ClientIp, type Socket}
 import glisten/transport.{type Transport}
 import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/clock
 import mist/internal/encoder
 import mist/internal/file
+import mist/internal/telemetry
 
 pub type ResponseData {
   Websocket(Selector(ProcessDown))
@@ -99,7 +98,11 @@ pub fn parse_headers(
   transport: Transport,
   headers: Dict(String, String),
 ) -> Result(#(Dict(String, String), BitArray), DecodeError) {
-  case decode_packet(HttphBin, bs, []) {
+  let packet = {
+    use <- telemetry.span([telemetry.Mist, telemetry.DecodePacket], dict.new())
+    decode_packet(HttphBin, bs, [])
+  }
+  case packet {
     Ok(BinaryData(HttpHeader(_, _field, field, value), rest)) -> {
       let field = from_header(field)
       let assert Ok(value) = bit_array.to_string(value)
@@ -128,6 +131,7 @@ pub fn read_data(
   buffer: Buffer,
   error: DecodeError,
 ) -> Result(BitArray, DecodeError) {
+  use <- telemetry.span([telemetry.Mist, telemetry.ReadData], dict.new())
   // TODO:  don't hard-code these, probably
   let to_read = int.min(buffer.remaining, 1_000_000)
   let timeout = 15_000
@@ -249,70 +253,111 @@ pub type ParsedRequest {
   Upgrade(BitArray)
 }
 
+import gleam/io
+
 /// Turns the TCP message into an HTTP request
 pub fn parse_request(
   bs: BitArray,
   conn: Connection,
 ) -> Result(ParsedRequest, DecodeError) {
-  case decode_packet(HttpBin, bs, []) {
+  use <- telemetry.span([telemetry.Mist, telemetry.ParseRequest2], dict.new())
+  let packet = {
+    use <- telemetry.span([telemetry.Mist, telemetry.DecodePacket], dict.new())
+    decode_packet(HttpBin, bs, [])
+  }
+  case packet {
     Ok(BinaryData(HttpRequest(http_method, AbsPath(path), _version), rest)) -> {
-      use method <- result.then(
-        http_method
-        |> atom.from_dynamic
-        |> result.map(atom.to_string)
-        |> result.or(dynamic.string(http_method))
-        |> result.nil_error
-        |> result.then(http.parse_method)
-        |> result.replace_error(UnknownMethod),
-      )
-      use #(headers, rest) <- result.then(parse_headers(
-        rest,
-        conn.socket,
-        conn.transport,
-        dict.new(),
-      ))
+      use method <-
+        {
+          use <- telemetry.span(
+            [telemetry.Mist, telemetry.ParseMethod],
+            dict.new(),
+          )
+          result.then(
+            http_method
+              |> atom.from_dynamic
+              |> result.map(atom.to_string)
+              |> result.or(dynamic.string(http_method))
+              |> result.nil_error
+              |> result.then(http.parse_method)
+              |> result.replace_error(UnknownMethod),
+            _,
+          )
+        }
+      use #(headers, rest) <-
+        {
+          use <- telemetry.span(
+            [telemetry.Mist, telemetry.ParseHeaders],
+            dict.new(),
+          )
+          result.then(
+            parse_headers(rest, conn.socket, conn.transport, dict.new()),
+            _,
+          )
+        }
+      use <- telemetry.span([telemetry.Mist, telemetry.ParseRest], dict.new())
       use path <- result.then(
         path
         |> bit_array.to_string
         |> result.replace_error(InvalidPath),
       )
-      use parsed <- result.then(
-        uri.parse(path)
-        |> result.replace_error(InvalidPath),
-      )
-      let #(path, query) = #(parsed.path, parsed.query)
+      use #(path, query) <-
+        {
+          use <- telemetry.span(
+            [telemetry.Mist, telemetry.ParsePath],
+            dict.new(),
+          )
+          result.try(
+            get_path_and_query(path)
+              |> result.replace_error(InvalidPath),
+            _,
+          )
+        }
       let scheme = case conn.transport {
         transport.Ssl(..) -> http.Https
         transport.Tcp(..) -> http.Http
       }
-      use host_header <- result.then(
-        dict.get(headers, "host")
-        |> result.replace_error(NoHostHeader),
+      use host_header <- result.then({
+        use <- telemetry.span([telemetry.Mist, telemetry.ParseHost], dict.new())
+        use host_header <- result.then(
+          dict.get(headers, "host")
+          |> result.replace_error(NoHostHeader),
+        )
+        Ok(host_header)
+      })
+      let #(hostname, port) = {
+        use <- telemetry.span([telemetry.Mist, telemetry.ParsePort], dict.new())
+        let #(hostname, port) =
+          host_header
+          |> string.split_once(":")
+          |> result.unwrap(#(host_header, ""))
+        let port =
+          int.parse(port)
+          |> result.map_error(fn(_err) {
+            case scheme {
+              http.Https -> 443
+              http.Http -> 80
+            }
+          })
+          |> result.unwrap_both
+        #(hostname, port)
+      }
+      use <- telemetry.span(
+        [telemetry.Mist, telemetry.BuildRequest],
+        dict.new(),
       )
-      let #(hostname, port) =
-        host_header
-        |> string.split_once(":")
-        |> result.unwrap(#(host_header, ""))
-      let port =
-        int.parse(port)
-        |> result.map_error(fn(_err) {
-          case scheme {
-            http.Https -> 443
-            http.Http -> 80
-          }
-        })
-        |> result.unwrap_both
       let req =
-        request.new()
-        |> request.set_scheme(scheme)
-        |> request.set_host(hostname)
-        |> request.set_port(port)
-        |> request.set_body(Connection(..conn, body: Initial(rest)))
-        |> request.set_method(method)
-        |> request.set_path(path)
-      Ok(Http1Request(
-        request.Request(..req, query: query, headers: dict.to_list(headers)),
-      ))
+        request.Request(
+          body: Connection(..conn, body: Initial(rest)),
+          headers: dict.to_list(headers),
+          host: hostname,
+          method: method,
+          path: path,
+          port: option.Some(port),
+          query: option.from_result(query),
+          scheme: scheme,
+        )
+      Ok(Http1Request(req))
     }
     // "\r\nSM\r\n\r\n"
     Ok(Http2Upgrade(<<
@@ -555,3 +600,8 @@ fn string_to_int(string string: Charlist, base base: Int) -> Result(Int, Nil)
 
 @external(erlang, "binary", "split")
 fn binary_split(source: BitArray, pattern: BitArray) -> List(BitArray)
+
+@external(erlang, "mist_ffi", "get_path_and_query")
+fn get_path_and_query(
+  str: String,
+) -> Result(#(String, Result(String, Nil)), #(value, term))

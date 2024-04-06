@@ -28,6 +28,7 @@ import mist/internal/http.{
   Chunked as InternalChunked, File as InternalFile,
   ServerSentEvents as InternalServerSentEvents, Websocket as InternalWebsocket,
 }
+import mist/internal/telemetry
 import mist/internal/websocket.{
   type HandlerMessage, type WebsocketConnection as InternalWebsocketConnection,
   BinaryFrame, Data, Internal, TextFrame, User,
@@ -680,4 +681,8 @@ pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
   transport.send(conn.transport, conn.socket, message)
   |> result.replace(Nil)
   |> result.nil_error
+}
+
+pub fn configure_logger() {
+  telemetry.attach_many("mist-logger", telemetry.events, telemetry.log)
 }
