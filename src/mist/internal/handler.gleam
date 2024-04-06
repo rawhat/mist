@@ -1,4 +1,3 @@
-import gleam/dict
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/function
 import gleam/http/response
@@ -15,7 +14,6 @@ import mist/internal/http.{
 import mist/internal/http/handler as http_handler
 import mist/internal/http2/handler.{type Message, Send} as http2_handler
 import mist/internal/http2
-import mist/internal/telemetry
 import logging
 
 pub type HandlerError {
@@ -91,16 +89,8 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
           Some(t) -> process.cancel_timer(t)
           _ -> process.TimerNotFound
         }
-
-        let res = {
-          use <- telemetry.span(
-            [telemetry.Mist, telemetry.ParseRequest],
-            dict.new(),
-          )
-          http.parse_request(msg, conn)
-        }
-
-        res
+        msg
+        |> http.parse_request(conn)
         |> result.map_error(fn(err) {
           case err {
             DiscardPacket -> process.Normal
@@ -113,24 +103,14 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
         })
         |> result.then(fn(req) {
           case req {
-            http.Http1Request(req) -> {
-              use <- telemetry.span(
-                [telemetry.Mist, telemetry.Http1Handler],
-                dict.new(),
-              )
+            http.Http1Request(req) ->
               http_handler.call(req, handler, conn, sender)
               |> result.map(fn(new_state) {
                 Http1(state: new_state, self: self)
               })
-            }
-            http.Upgrade(data) -> {
-              use <- telemetry.span(
-                [telemetry.Mist, telemetry.HttpUpgrade],
-                dict.new(),
-              )
+            http.Upgrade(data) ->
               http2_handler.upgrade(data, conn, self)
               |> result.map(Http2)
-            }
           }
         })
       }

@@ -10,7 +10,6 @@ import gleam/option.{None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
-import glisten
 import mist.{type Connection, type ResponseData}
 import logging
 
@@ -24,8 +23,6 @@ pub fn main() {
       #(atom.create_from_string("level"), atom.create_from_string("debug")),
     ]),
   )
-  // glisten.configure_logger()
-  // mist.configure_logger()
   // These values are for the Websocket process initialized below
   let selector = process.new_selector()
   let state = Nil

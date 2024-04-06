@@ -15,7 +15,6 @@ version = "1.0.0"
 [dependencies]
 gleam_stdlib = "~> 0.34 or ~> 1.0"
 mist = { path = "../.." }
-glisten = { path = "../../../glisten" }
 gleam_erlang = "~> 0.24"
 gleam_http = "~> 3.5"
 gleam_otp = "~> 0.9"

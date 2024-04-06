@@ -22,7 +22,6 @@ import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/clock
 import mist/internal/encoder
 import mist/internal/file
-import mist/internal/telemetry
 
 pub type ResponseData {
   Websocket(Selector(ProcessDown))
@@ -98,11 +97,7 @@ pub fn parse_headers(
   transport: Transport,
   headers: Dict(String, String),
 ) -> Result(#(Dict(String, String), BitArray), DecodeError) {
-  let packet = {
-    use <- telemetry.span([telemetry.Mist, telemetry.DecodePacket], dict.new())
-    decode_packet(HttphBin, bs, [])
-  }
-  case packet {
+  case decode_packet(HttphBin, bs, []) {
     Ok(BinaryData(HttpHeader(_, _field, field, value), rest)) -> {
       let field = from_header(field)
       let assert Ok(value) = bit_array.to_string(value)
@@ -131,7 +126,6 @@ pub fn read_data(
   buffer: Buffer,
   error: DecodeError,
 ) -> Result(BitArray, DecodeError) {
-  use <- telemetry.span([telemetry.Mist, telemetry.ReadData], dict.new())
   // TODO:  don't hard-code these, probably
   let to_read = int.min(buffer.remaining, 1_000_000)
   let timeout = 15_000
@@ -253,99 +247,58 @@ pub type ParsedRequest {
   Upgrade(BitArray)
 }
 
-import gleam/io
-
 /// Turns the TCP message into an HTTP request
 pub fn parse_request(
   bs: BitArray,
   conn: Connection,
 ) -> Result(ParsedRequest, DecodeError) {
-  use <- telemetry.span([telemetry.Mist, telemetry.ParseRequest2], dict.new())
-  let packet = {
-    use <- telemetry.span([telemetry.Mist, telemetry.DecodePacket], dict.new())
-    decode_packet(HttpBin, bs, [])
-  }
-  case packet {
+  case decode_packet(HttpBin, bs, []) {
     Ok(BinaryData(HttpRequest(http_method, AbsPath(path), _version), rest)) -> {
-      use method <-
-        {
-          use <- telemetry.span(
-            [telemetry.Mist, telemetry.ParseMethod],
-            dict.new(),
-          )
-          result.then(
-            http_method
-              |> atom.from_dynamic
-              |> result.map(atom.to_string)
-              |> result.or(dynamic.string(http_method))
-              |> result.nil_error
-              |> result.then(http.parse_method)
-              |> result.replace_error(UnknownMethod),
-            _,
-          )
-        }
-      use #(headers, rest) <-
-        {
-          use <- telemetry.span(
-            [telemetry.Mist, telemetry.ParseHeaders],
-            dict.new(),
-          )
-          result.then(
-            parse_headers(rest, conn.socket, conn.transport, dict.new()),
-            _,
-          )
-        }
-      use <- telemetry.span([telemetry.Mist, telemetry.ParseRest], dict.new())
+      use method <- result.then(
+        http_method
+        |> atom.from_dynamic
+        |> result.map(atom.to_string)
+        |> result.or(dynamic.string(http_method))
+        |> result.nil_error
+        |> result.then(http.parse_method)
+        |> result.replace_error(UnknownMethod),
+      )
+      use #(headers, rest) <- result.then(parse_headers(
+        rest,
+        conn.socket,
+        conn.transport,
+        dict.new(),
+      ))
       use path <- result.then(
         path
         |> bit_array.to_string
         |> result.replace_error(InvalidPath),
       )
-      use #(path, query) <-
-        {
-          use <- telemetry.span(
-            [telemetry.Mist, telemetry.ParsePath],
-            dict.new(),
-          )
-          result.try(
-            get_path_and_query(path)
-              |> result.replace_error(InvalidPath),
-            _,
-          )
-        }
+      use #(path, query) <- result.try(
+        get_path_and_query(path)
+        |> result.replace_error(InvalidPath),
+      )
       let scheme = case conn.transport {
         transport.Ssl(..) -> http.Https
         transport.Tcp(..) -> http.Http
       }
-      use host_header <- result.then({
-        use <- telemetry.span([telemetry.Mist, telemetry.ParseHost], dict.new())
-        use host_header <- result.then(
-          dict.get(headers, "host")
-          |> result.replace_error(NoHostHeader),
-        )
-        Ok(host_header)
-      })
-      let #(hostname, port) = {
-        use <- telemetry.span([telemetry.Mist, telemetry.ParsePort], dict.new())
-        let #(hostname, port) =
-          host_header
-          |> string.split_once(":")
-          |> result.unwrap(#(host_header, ""))
-        let port =
-          int.parse(port)
-          |> result.map_error(fn(_err) {
-            case scheme {
-              http.Https -> 443
-              http.Http -> 80
-            }
-          })
-          |> result.unwrap_both
-        #(hostname, port)
-      }
-      use <- telemetry.span(
-        [telemetry.Mist, telemetry.BuildRequest],
-        dict.new(),
+      use host_header <- result.then(
+        dict.get(headers, "host")
+        |> result.replace_error(NoHostHeader),
       )
+      let #(hostname, port) =
+        host_header
+        |> string.split_once(":")
+        |> result.unwrap(#(host_header, ""))
+      let port =
+        int.parse(port)
+        |> result.map_error(fn(_err) {
+          case scheme {
+            http.Https -> 443
+            http.Http -> 80
+          }
+        })
+        |> result.unwrap_both
       let req =
         request.Request(
           body: Connection(..conn, body: Initial(rest)),

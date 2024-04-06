@@ -139,3 +139,7 @@ pub fn attach(
     Nil,
   config: Nil,
 ) -> Nil
+
+pub fn configure_logger() {
+  attach_many("mist-logger", events, log)
+}
