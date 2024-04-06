@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Don't pull or `let assert` from websocket when more data is needed
+
 ## v1.0.0
 
 - Internal API refactor along with (absolutely not ready) initial HTTP/2
