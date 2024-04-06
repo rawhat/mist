@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Don't pull or `let assert` from websocket when more data is needed
+- Don't use `uri.parse` because it's a bit slow
+- Don't use the `request.set_<property>` methods, because I'm already setting
+basically everything and they are kinda slow
 
 ## v1.0.0
 
