@@ -6,6 +6,7 @@
 - Don't use `uri.parse` because it's a bit slow
 - Don't use the `request.set_<property>` methods, because I'm already setting
 basically everything and they are kinda slow
+- Support `permessage-deflate` WebSocket extension
 
 ## v1.0.0
 
