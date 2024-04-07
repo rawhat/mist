@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/bytes_builder.{type BytesBuilder}
 import gleam/bit_array
 import gleam/dynamic
@@ -11,6 +12,7 @@ import gleam/result
 import glisten.{type Socket}
 import glisten/socket/options
 import glisten/transport.{type Transport}
+import mist/internal/websocket/compression.{type Compression, type Context}
 import logging
 
 pub type DataFrame {
@@ -59,18 +61,41 @@ pub type ParsedFrame {
   Incomplete(Frame)
 }
 
+fn inflate(
+  compressed: Bool,
+  context: Option(Context),
+  data: BitArray,
+) -> Result(#(Int, BitArray), FrameParseError) {
+  case compressed, context {
+    True, Some(context) -> {
+      let data = compression.inflate(context, data)
+      let length = bit_array.byte_size(data)
+      Ok(#(length, data))
+    }
+    True, None -> Error(InvalidFrame)
+    _, _ -> Ok(#(bit_array.byte_size(data), data))
+  }
+}
+
 fn frame_from_message(
   message: BitArray,
+  context: Option(Context),
 ) -> Result(#(ParsedFrame, BitArray), FrameParseError) {
   case message {
     <<
       complete:1,
-      _reserved:3,
+      compressed:1,
+      _reserved:2,
       opcode:int-size(4),
       1:1,
       payload_length:int-size(7),
       rest:bits,
     >> -> {
+      let compressed = compressed == 1
+      use <- bool.guard(
+        when: compressed && option.is_none(context),
+        return: Error(InvalidFrame),
+      )
       let payload_size = case payload_length {
         126 -> 16
         127 -> 64
@@ -94,9 +119,21 @@ fn frame_from_message(
               let data =
                 unmask_data(payload, [mask1, mask2, mask3, mask4], 0, <<>>)
               case opcode {
-                0 -> Ok(Continuation(payload_length, data))
-                1 -> Ok(Data(TextFrame(payload_length, data)))
-                2 -> Ok(Data(BinaryFrame(payload_length, data)))
+                0 -> {
+                  data
+                  |> inflate(compressed, context, _)
+                  |> result.map(fn(p) { Continuation(p.0, p.1) })
+                }
+                1 -> {
+                  data
+                  |> inflate(compressed, context, _)
+                  |> result.map(fn(p) { Data(TextFrame(p.0, p.1)) })
+                }
+                2 -> {
+                  data
+                  |> inflate(compressed, context, _)
+                  |> result.map(fn(p) { Data(BinaryFrame(p.0, p.1)) })
+                }
                 8 -> Ok(Control(CloseFrame(payload_length, data)))
                 9 -> Ok(Control(PingFrame(payload_length, data)))
                 10 -> Ok(Control(PongFrame(payload_length, data)))
@@ -120,14 +157,17 @@ fn frame_from_message(
   }
 }
 
-pub fn frame_to_bytes_builder(frame: Frame) -> BytesBuilder {
+pub fn compressed_frame_to_bytes_builder(
+  frame: Frame,
+  context: Context,
+) -> BytesBuilder {
   case frame {
-    Data(TextFrame(payload_length, payload)) ->
-      make_frame(1, payload_length, payload)
+    Data(TextFrame(_payload_length, payload)) ->
+      make_compressed_frame(1, payload, context)
+    Data(BinaryFrame(_payload_length, payload)) ->
+      make_compressed_frame(2, payload, context)
     Control(CloseFrame(payload_length, payload)) ->
       make_frame(8, payload_length, payload)
-    Data(BinaryFrame(payload_length, payload)) ->
-      make_frame(2, payload_length, payload)
     Control(PongFrame(payload_length, payload)) ->
       make_frame(10, payload_length, payload)
     Control(PingFrame(payload_length, payload)) ->
@@ -136,26 +176,65 @@ pub fn frame_to_bytes_builder(frame: Frame) -> BytesBuilder {
   }
 }
 
-fn make_frame(opcode: Int, length: Int, payload: BitArray) -> BytesBuilder {
-  let length_section = case length {
+pub fn frame_to_bytes_builder(frame: Frame) -> BytesBuilder {
+  case frame {
+    Data(TextFrame(payload_length, payload)) ->
+      make_frame(1, payload_length, payload)
+    Data(BinaryFrame(payload_length, payload)) ->
+      make_frame(2, payload_length, payload)
+    Control(CloseFrame(payload_length, payload)) ->
+      make_frame(8, payload_length, payload)
+    Control(PongFrame(payload_length, payload)) ->
+      make_frame(10, payload_length, payload)
+    Control(PingFrame(payload_length, payload)) ->
+      make_frame(9, payload_length, payload)
+    Continuation(length, payload) -> make_frame(0, length, payload)
+  }
+}
+
+fn make_length(length: Int) -> BitArray {
+  case length {
     length if length > 65_535 -> <<127:7, length:int-size(64)>>
     length if length >= 126 -> <<126:7, length:int-size(16)>>
     _length -> <<length:7>>
   }
+}
 
+fn make_compressed_frame(
+  opcode: Int,
+  payload: BitArray,
+  context: Context,
+) -> BytesBuilder {
+  let data = compression.deflate(context, payload)
+  let length = bit_array.byte_size(data)
+  let length_section = make_length(length)
+  <<1:1, 1:1, 0:2, opcode:4, 0:1, length_section:bits, data:bits>>
+  |> bytes_builder.from_bit_array
+}
+
+fn make_frame(opcode: Int, length: Int, payload: BitArray) -> BytesBuilder {
+  let length_section = make_length(length)
   <<1:1, 0:3, opcode:4, 0:1, length_section:bits, payload:bits>>
   |> bytes_builder.from_bit_array
 }
 
-pub fn to_text_frame(data: String) -> BytesBuilder {
+pub fn to_text_frame(data: String, context: Option(Context)) -> BytesBuilder {
   let msg = bit_array.from_string(data)
   let size = bit_array.byte_size(msg)
-  frame_to_bytes_builder(Data(TextFrame(size, msg)))
+  let frame = Data(TextFrame(size, msg))
+  case context {
+    Some(context) -> compressed_frame_to_bytes_builder(frame, context)
+    _ -> frame_to_bytes_builder(frame)
+  }
 }
 
-pub fn to_binary_frame(data: BitArray) -> BytesBuilder {
+pub fn to_binary_frame(data: BitArray, context: Option(Context)) -> BytesBuilder {
   let size = bit_array.byte_size(data)
-  frame_to_bytes_builder(Data(BinaryFrame(size, data)))
+  let frame = Data(BinaryFrame(size, data))
+  case context {
+    Some(context) -> compressed_frame_to_bytes_builder(frame, context)
+    _ -> frame_to_bytes_builder(frame)
+  }
 }
 
 pub type ValidMessage(user_message) {
@@ -170,7 +249,11 @@ pub type WebsocketMessage(user_message) {
 }
 
 pub type WebsocketConnection {
-  WebsocketConnection(socket: Socket, transport: Transport)
+  WebsocketConnection(
+    socket: Socket,
+    transport: Transport,
+    deflate: Option(Context),
+  )
 }
 
 pub type HandlerMessage(user_message) {
@@ -179,7 +262,11 @@ pub type HandlerMessage(user_message) {
 }
 
 pub type WebsocketState(state) {
-  WebsocketState(buffer: BitArray, user: state)
+  WebsocketState(
+    buffer: BitArray,
+    user: state,
+    permessage_deflate: Option(Compression),
+  )
 }
 
 pub type Handler(state, message) =
@@ -213,14 +300,28 @@ fn message_selector() -> Selector(WebsocketMessage(user_message)) {
   })
 }
 
+pub fn has_deflate(extensions: List(String)) -> Bool {
+  list.any(extensions, fn(str) { str == "permessage-deflate" })
+}
+
 pub fn initialize_connection(
   on_init: fn(WebsocketConnection) -> #(state, Option(Selector(user_message))),
   on_close: fn(state) -> Nil,
   handler: Handler(state, user_message),
   socket: Socket,
   transport: Transport,
+  extensions: List(String),
 ) -> Result(Subject(WebsocketMessage(user_message)), Nil) {
-  let connection = WebsocketConnection(socket: socket, transport: transport)
+  let compression = case has_deflate(extensions) {
+    True -> Some(compression.init())
+    False -> None
+  }
+  let connection =
+    WebsocketConnection(
+      socket: socket,
+      transport: transport,
+      deflate: option.map(compression, fn(compression) { compression.deflate }),
+    )
   actor.start_spec(
     actor.Spec(
       init: fn() {
@@ -233,14 +334,27 @@ pub fn initialize_connection(
             |> process.merge_selector(message_selector())
           _ -> message_selector()
         }
-        actor.Ready(WebsocketState(buffer: <<>>, user: initial_state), selector)
+        actor.Ready(
+          WebsocketState(
+            buffer: <<>>,
+            user: initial_state,
+            permessage_deflate: compression,
+          ),
+          selector,
+        )
       },
       init_timeout: 500,
       loop: fn(msg, state) {
         case msg {
           Valid(SocketMessage(data)) -> {
             let #(frames, rest) =
-              get_messages(<<state.buffer:bits, data:bits>>, [])
+              get_messages(
+                <<state.buffer:bits, data:bits>>,
+                [],
+                option.map(state.permessage_deflate, fn(compression) {
+                  compression.inflate
+                }),
+              )
             frames
             |> aggregate_frames(None, [])
             |> result.map(fn(frames) {
@@ -255,7 +369,7 @@ pub fn initialize_connection(
               case next {
                 actor.Continue(user_state, selector) -> {
                   actor.Continue(
-                    WebsocketState(buffer: rest, user: user_state),
+                    WebsocketState(..state, buffer: rest, user: user_state),
                     selector,
                   )
                 }
@@ -328,6 +442,14 @@ pub fn initialize_connection(
         connection.socket,
         websocket_pid,
       )
+    case compression {
+      Some(compression) -> {
+        compression.set_controlling_process(compression.deflate, websocket_pid)
+        compression.set_controlling_process(compression.inflate, websocket_pid)
+        Nil
+      }
+      _ -> Nil
+    }
     set_active(connection)
     subj
   })
@@ -337,10 +459,11 @@ pub fn initialize_connection(
 fn get_messages(
   data: BitArray,
   frames: List(ParsedFrame),
+  context: Option(Context),
 ) -> #(List(ParsedFrame), BitArray) {
-  case frame_from_message(data) {
+  case frame_from_message(data, context) {
     Ok(#(frame, <<>>)) -> #(list.reverse([frame, ..frames]), <<>>)
-    Ok(#(frame, rest)) -> get_messages(rest, [frame, ..frames])
+    Ok(#(frame, rest)) -> get_messages(rest, [frame, ..frames], context)
     Error(NeedMoreData(rest)) -> #(frames, rest)
     Error(InvalidFrame) -> #(frames, data)
   }

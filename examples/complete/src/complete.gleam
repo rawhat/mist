@@ -16,6 +16,15 @@ import logging
 @external(erlang, "logger", "update_primary_config")
 fn logger_update_primary_config(config: Dict(Atom, Atom)) -> Result(Nil, any)
 
+const index = "<html lang='en'>
+  <head>
+    <title>Mist Example</title>
+  </head>
+  <body>
+    Hello, world!
+  </body>
+</html>"
+
 pub fn main() {
   logging.configure()
   logger_update_primary_config(
@@ -34,6 +43,9 @@ pub fn main() {
   let assert Ok(_) =
     fn(req: Request(Connection)) -> Response(ResponseData) {
       case request.path_segments(req) {
+        [] ->
+          response.new(200)
+          |> response.set_body(mist.Bytes(bytes_builder.from_string(index)))
         ["ws"] ->
           mist.websocket(
             request: req,

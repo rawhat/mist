@@ -22,6 +22,7 @@ import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/clock
 import mist/internal/encoder
 import mist/internal/file
+import mist/internal/websocket
 
 pub type ResponseData {
   Websocket(Selector(ProcessDown))
@@ -31,14 +32,6 @@ pub type ResponseData {
   ServerSentEvents(Selector(ProcessDown))
 }
 
-// TODO:
-//  i think this will need to grow _some_ way to block on reading the body
-//  for http/2 data frames... i'm not sure exactly how to do that at the
-//  moment
-//
-//  current thoughts:
-//    - provide a subject here for reading the body?
-//      - perhaps as a variant to the `Body`?
 pub type Connection {
   Connection(
     body: Body,
@@ -429,6 +422,7 @@ fn parse_websocket_key(key: String) -> String {
 
 pub fn upgrade_socket(
   req: Request(Connection),
+  extensions: List(String),
 ) -> Result(Response(BytesBuilder), Request(Connection)) {
   use _upgrade <- result.then(
     request.get_header(req, "upgrade")
@@ -443,24 +437,37 @@ pub fn upgrade_socket(
     |> result.replace_error(req),
   )
 
+  let permessage_deflate = websocket.has_deflate(extensions)
+
   let accept_key = parse_websocket_key(key)
 
-  response.new(101)
-  |> response.set_body(bytes_builder.new())
-  |> response.prepend_header("Upgrade", "websocket")
-  |> response.prepend_header("Connection", "Upgrade")
-  |> response.prepend_header("Sec-WebSocket-Accept", accept_key)
-  |> Ok
+  let resp =
+    response.new(101)
+    |> response.set_body(bytes_builder.new())
+    |> response.prepend_header("upgrade", "websocket")
+    |> response.prepend_header("connection", "Upgrade")
+    |> response.prepend_header("sec-websocket-accept", accept_key)
+
+  case permessage_deflate {
+    True ->
+      Ok(response.prepend_header(
+        resp,
+        "sec-websocket-extensions",
+        "permessage-deflate",
+      ))
+    False -> Ok(resp)
+  }
 }
 
 // TODO: improve this error type
 pub fn upgrade(
   socket: Socket,
   transport: Transport,
+  extensions: List(String),
   req: Request(Connection),
 ) -> Result(Nil, Nil) {
   use resp <- result.then(
-    upgrade_socket(req)
+    upgrade_socket(req, extensions)
     |> result.nil_error,
   )
 

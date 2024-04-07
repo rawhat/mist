@@ -520,10 +520,16 @@ pub fn websocket(
     |> result.map(handler(state, connection, _))
     |> result.unwrap(actor.continue(state))
   }
+  let extensions =
+    request
+    |> request.get_header("sec-websocket-extensions")
+    |> result.map(fn(header) { string.split(header, ";") })
+    |> result.unwrap([])
+
   let socket = request.body.socket
   let transport = request.body.transport
   request
-  |> http.upgrade(socket, transport, _)
+  |> http.upgrade(socket, transport, extensions, _)
   |> result.then(fn(_nil) {
     websocket.initialize_connection(
       on_init,
@@ -531,6 +537,7 @@ pub fn websocket(
       handler,
       socket,
       transport,
+      extensions,
     )
   })
   |> result.map(fn(subj) {
@@ -557,7 +564,7 @@ pub fn send_binary_frame(
   frame: BitArray,
 ) -> Result(Nil, glisten.SocketReason) {
   frame
-  |> websocket.to_binary_frame
+  |> websocket.to_binary_frame(connection.deflate)
   |> transport.send(connection.transport, connection.socket, _)
 }
 
@@ -567,7 +574,7 @@ pub fn send_text_frame(
   frame: String,
 ) -> Result(Nil, glisten.SocketReason) {
   frame
-  |> websocket.to_text_frame
+  |> websocket.to_text_frame(connection.deflate)
   |> transport.send(connection.transport, connection.socket, _)
 }
 
