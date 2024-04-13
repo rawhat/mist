@@ -464,8 +464,8 @@ fn get_messages(
   case frame_from_message(data, context) {
     Ok(#(frame, <<>>)) -> #(list.reverse([frame, ..frames]), <<>>)
     Ok(#(frame, rest)) -> get_messages(rest, [frame, ..frames], context)
-    Error(NeedMoreData(rest)) -> #(frames, rest)
-    Error(InvalidFrame) -> #(frames, data)
+    Error(NeedMoreData(rest)) -> #(list.reverse(frames), rest)
+    Error(InvalidFrame) -> #(list.reverse(frames), data)
   }
 }
 
