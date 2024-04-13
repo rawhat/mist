@@ -462,7 +462,7 @@ fn get_messages(
   context: Option(Context),
 ) -> #(List(ParsedFrame), BitArray) {
   case frame_from_message(data, context) {
-    Ok(#(frame, <<>>)) -> #(list.reverse([frame, ..frames]), <<>>)
+    Ok(#(frame, <<>>)) ->  #(list.append(frames, [frame]), <<>>)
     Ok(#(frame, rest)) -> get_messages(rest, [frame, ..frames], context)
     Error(NeedMoreData(rest)) -> #(frames, rest)
     Error(InvalidFrame) -> #(frames, data)
