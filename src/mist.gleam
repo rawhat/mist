@@ -1,10 +1,10 @@
-import gleam/bytes_builder.{type BytesBuilder}
 import gleam/bit_array
+import gleam/bytes_builder.{type BytesBuilder}
 import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
 import gleam/function
+import gleam/http.{type Scheme, Http, Https} as gleam_http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
-import gleam/http.{type Scheme, Http, Https} as gleam_http
 import gleam/int
 import gleam/io
 import gleam/iterator.{type Iterator}
@@ -379,31 +379,13 @@ fn convert_glisten_error(err: glisten.StartError) -> actor.StartError {
 pub fn start_http(
   builder: Builder(Connection, ResponseData),
 ) -> Result(Subject(supervisor.Message), glisten.StartError) {
-  let clock = supervisor.worker(fn(_argument) { clock.start() })
-  let glisten_pool =
-    supervisor.supervisor(fn(_argument) {
-      fn(req) { convert_body_types(builder.handler(req)) }
-      |> handler.with_func
-      |> glisten.handler(handler.init, _)
-      |> glisten.serve(builder.port)
-      |> result.map(fn(subj) {
-        builder.after_start(builder.port, Http)
-        subj
-      })
-      |> result.map_error(convert_glisten_error)
-    })
-
-  supervisor.start(fn(children) {
-    children
-    |> supervisor.add(clock)
-    |> supervisor.add(glisten_pool)
-  })
-  |> result.map_error(fn(err) {
-    case err {
-      actor.InitTimeout -> glisten.AcceptorTimeout
-      actor.InitFailed(reason) -> glisten.AcceptorFailed(reason)
-      actor.InitCrashed(reason) -> glisten.AcceptorCrashed(reason)
-    }
+  fn(req) { convert_body_types(builder.handler(req)) }
+  |> handler.with_func
+  |> glisten.handler(handler.init, _)
+  |> glisten.serve(builder.port)
+  |> result.map(fn(subj) {
+    builder.after_start(builder.port, Http)
+    subj
   })
 }
 
@@ -443,31 +425,13 @@ pub fn start_https(
 
   use _ <- result.then(res)
 
-  let clock = supervisor.worker(fn(_argument) { clock.start() })
-
-  let glisten_pool =
-    supervisor.supervisor(fn(_argument) {
-      fn(req) { convert_body_types(builder.handler(req)) }
-      |> handler.with_func
-      |> glisten.handler(handler.init, _)
-      |> glisten.serve_ssl(builder.port, certfile, keyfile)
-      |> result.map(fn(subj) {
-        builder.after_start(builder.port, Https)
-        subj
-      })
-      |> result.map_error(convert_glisten_error)
-    })
-  supervisor.start(fn(children) {
-    children
-    |> supervisor.add(clock)
-    |> supervisor.add(glisten_pool)
-  })
-  |> result.map_error(fn(err) {
-    case err {
-      actor.InitTimeout -> glisten.AcceptorTimeout
-      actor.InitFailed(reason) -> glisten.AcceptorFailed(reason)
-      actor.InitCrashed(reason) -> glisten.AcceptorCrashed(reason)
-    }
+  fn(req) { convert_body_types(builder.handler(req)) }
+  |> handler.with_func
+  |> glisten.handler(handler.init, _)
+  |> glisten.serve_ssl(builder.port, certfile, keyfile)
+  |> result.map(fn(subj) {
+    builder.after_start(builder.port, Https)
+    subj
   })
   |> result.map_error(GlistenError)
 }
