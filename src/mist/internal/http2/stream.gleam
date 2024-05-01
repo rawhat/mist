@@ -16,8 +16,8 @@ import gleam/uri
 import mist/internal/http.{
   type Connection, type Handler, type ResponseData, Connection, Stream,
 }
-import mist/internal/http2/frame.{type Frame, type StreamIdentifier}
 import mist/internal/http2/flow_control
+import mist/internal/http2/frame.{type Frame, type StreamIdentifier}
 
 pub type Message {
   Ready
@@ -199,7 +199,7 @@ pub fn make_request(
 }
 
 pub fn receive_data(state: State, size: Int) -> #(State, Int) {
-  let assert #(new_window_size, increment) =
+  let #(new_window_size, increment) =
     flow_control.compute_receive_window(state.receive_window_size, size)
 
   let new_state =
