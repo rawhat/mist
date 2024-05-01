@@ -13,7 +13,7 @@ pub fn stream_identifier(value: Int) -> StreamIdentifier(Frame) {
 }
 
 pub fn get_stream_identifier(identifier: StreamIdentifier(phantom)) -> Int {
-  let assert StreamIdentifier(value) = identifier
+  let StreamIdentifier(value) = identifier
   value
 }
 
@@ -153,13 +153,13 @@ fn parse_data(
 ) -> Result(Frame, ConnectionError) {
   case <<flags:bits, payload:bits>> {
     <<
-        _unused:size(4),
-        padding:size(1),
-        _unused:size(2),
-        end_stream:size(1),
-        pad_length:size(padding)-unit(8),
-        data_and_padding:bits,
-      >>
+      _unused:size(4),
+      padding:size(1),
+      _unused:size(2),
+      end_stream:size(1),
+      pad_length:size(padding)-unit(8),
+      data_and_padding:bits,
+    >>
       if identifier != 0
     -> {
       let data_length = case padding {
@@ -190,19 +190,19 @@ fn parse_header(
 ) -> Result(Frame, ConnectionError) {
   case <<flags:bits, payload:bits>> {
     <<
-        _unused:size(2),
-        priority:size(1),
-        _unused:size(1),
-        padded:size(1),
-        end_headers:size(1),
-        _unused:size(1),
-        end_stream:size(1),
-        pad_length:size(padded)-unit(8),
-        exclusive:size(priority),
-        stream_dependency:size(priority)-unit(31),
-        weight:size(priority)-unit(8),
-        data_and_padding:bits,
-      >>
+      _unused:size(2),
+      priority:size(1),
+      _unused:size(1),
+      padded:size(1),
+      end_headers:size(1),
+      _unused:size(1),
+      end_stream:size(1),
+      pad_length:size(padded)-unit(8),
+      exclusive:size(priority),
+      stream_dependency:size(priority)-unit(31),
+      weight:size(priority)-unit(8),
+      data_and_padding:bits,
+    >>
       if identifier != 0 && pad_length < length
     -> {
       let data_length = case padded, priority {
@@ -255,7 +255,8 @@ fn parse_priority(
   payload: BitArray,
 ) -> Result(Frame, ConnectionError) {
   case length, <<flags:bits, payload:bits>> {
-    5, <<
+    5,
+      <<
         _unused:size(8),
         exclusive:size(1),
         dependency:size(31),
@@ -320,16 +321,16 @@ fn parse_push_promise(
 ) -> Result(Frame, ConnectionError) {
   case <<flags:bits, payload:bits>> {
     <<
-        _unused:size(4),
-        padded:size(1),
-        end_headers:size(1),
-        _unused:size(2),
-        pad_length:size(padded)-unit(8),
-        _reserved:size(1),
-        promised_identifier:size(31),
-        data:bytes-size(length),
-        _padding:bytes-size(pad_length),
-      >>
+      _unused:size(4),
+      padded:size(1),
+      end_headers:size(1),
+      _unused:size(2),
+      pad_length:size(padded)-unit(8),
+      _reserved:size(1),
+      promised_identifier:size(31),
+      data:bytes-size(length),
+      _padding:bytes-size(pad_length),
+    >>
       if identifier != 0
     -> {
       Ok(PushPromise(
@@ -368,12 +369,12 @@ fn parse_go_away(
 ) -> Result(Frame, ConnectionError) {
   case <<flags:bits, payload:bits>> {
     <<
-        _unused:size(8),
-        _reserved:size(1),
-        last_stream_id:size(31),
-        error:size(32),
-        data:bytes-size(length),
-      >>
+      _unused:size(8),
+      _reserved:size(1),
+      last_stream_id:size(31),
+      error:size(32),
+      data:bytes-size(length),
+    >>
       if identifier == 0
     -> {
       Ok(GoAway(
@@ -414,11 +415,11 @@ fn parse_continuation(
 ) -> Result(Frame, ConnectionError) {
   case <<flags:bits, payload:bits>> {
     <<
-        _unused:size(5),
-        end_headers:size(1),
-        _unused:size(2),
-        data:bytes-size(length),
-      >>
+      _unused:size(5),
+      end_headers:size(1),
+      _unused:size(2),
+      data:bytes-size(length),
+    >>
       if identifier != 0
     -> {
       Ok(Continuation(

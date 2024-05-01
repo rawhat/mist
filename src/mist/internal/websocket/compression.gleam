@@ -3,7 +3,7 @@ import gleam/bytes_builder.{type BytesBuilder}
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/process.{type Pid}
 
-pub opaque type Context
+pub type Context
 
 type Flush {
   Sync

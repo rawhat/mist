@@ -1,28 +1,28 @@
+import gleam/bit_array
 import gleam/bool
 import gleam/bytes_builder.{type BytesBuilder}
 import gleam/erlang
 import gleam/erlang/process.{type Selector}
+import gleam/hackney
 import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response, Response}
+import gleam/int
+import gleam/iterator
 import gleam/list
+import gleam/option
 import gleam/otp/actor
 import gleam/result
 import gleam/set
-import gleeunit/should
-import mist/internal/handler
-import mist/internal/http.{type Connection} as mhttp
-import mist
-import gleam/bit_array
 import gleam/string
-import gleam/iterator
-import gleam/option
-import gleam/hackney
-import gleam/int
+import gleeunit/should
+import glisten
 import glisten/internal/handler as glisten_handler
 import glisten/tcp
 import glisten/transport.{Tcp}
-import glisten
+import mist
+import mist/internal/handler
+import mist/internal/http.{type Connection} as mhttp
 
 pub fn with_server(
   at port: Int,
@@ -210,7 +210,7 @@ fn compare_headers_and_status(actual: Response(a), expected: Response(b)) {
     actual.headers
     |> set.from_list
     |> set.filter(fn(pair) {
-      let assert #(key, _value) = pair
+      let #(key, _value) = pair
       key != "date"
     })
 

@@ -6,17 +6,17 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import logging
 import mist/internal/buffer.{type Buffer}
 import mist/internal/http.{
   type Connection, type Handler, type ResponseData, Connection, Initial,
 }
 import mist/internal/http2.{type HpackContext, type Http2Settings, Http2Settings}
+import mist/internal/http2/flow_control
 import mist/internal/http2/frame.{
   type Frame, type StreamIdentifier, Complete, Continued, Settings,
 }
 import mist/internal/http2/stream.{Ready}
-import mist/internal/http2/flow_control
-import logging
 
 pub type Message {
   Send(identifier: StreamIdentifier(Frame), resp: Response(ResponseData))
@@ -123,11 +123,12 @@ fn handle_frame(
 ) -> Result(State, process.ExitReason) {
   case state.fragment, frame {
     Some(frame.Header(
-        identifier: id1,
-        data: Continued(existing),
-        end_stream: end_stream,
-        priority: priority,
-      )), frame.Continuation(data: Complete(data), identifier: id2)
+      identifier: id1,
+      data: Continued(existing),
+      end_stream: end_stream,
+      priority: priority,
+    )),
+      frame.Continuation(data: Complete(data), identifier: id2)
       if id1 == id2
     -> {
       let complete_frame =
@@ -145,12 +146,12 @@ fn handle_frame(
       )
     }
     Some(frame.Header(
-        identifier: id1,
-        data: Continued(existing),
-        end_stream: end_stream,
-        priority: priority,
-      )), frame.Continuation(data: Continued(data), identifier: id2) if id1
-      == id2 -> {
+      identifier: id1,
+      data: Continued(existing),
+      end_stream: end_stream,
+      priority: priority,
+    )),
+      frame.Continuation(data: Continued(data), identifier: id2) if id1 == id2 -> {
       let next =
         frame.Header(
           identifier: id1,
@@ -241,7 +242,7 @@ fn handle_frame(
     }
     None, frame.Data(identifier: identifier, data: data, end_stream: end_stream) -> {
       let data_size = bit_array.byte_size(data)
-      let assert #(conn_receive_window_size, conn_window_increment) =
+      let #(conn_receive_window_size, conn_window_increment) =
         flow_control.compute_receive_window(
           state.receive_window_size,
           data_size,
@@ -255,7 +256,7 @@ fn handle_frame(
       |> result.replace_error(process.Abnormal("Stream failed to receive data"))
       // TODO:  handle end of stream?
       |> result.map(fn(update) {
-        let assert #(new_stream, increment) = update
+        let #(new_stream, increment) = update
         let _ = case conn_window_increment > 0 {
           True -> {
             http2.send_frame(
