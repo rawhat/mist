@@ -9,12 +9,12 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import glisten/socket.{type Socket, type SocketReason}
 import glisten/transport.{type Transport}
+import logging
+import mist/internal/http.{type Connection}
 import mist/internal/http2/frame.{
   type Frame, type PushState, type Setting, type StreamIdentifier, Complete,
   Data, Header,
 }
-import mist/internal/http.{type Connection}
-import logging
 
 pub type Http2Settings {
   Http2Settings(
@@ -68,7 +68,7 @@ fn send_headers(
 ) -> Result(HpackContext, process.ExitReason) {
   hpack_encode(context, headers)
   |> result.then(fn(pair) {
-    let assert #(headers, new_context) = pair
+    let #(headers, new_context) = pair
     let header_frame =
       Header(
         data: Complete(headers),

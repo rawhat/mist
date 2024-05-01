@@ -12,13 +12,13 @@ import gleam/string
 import glisten/internal/handler.{Close, Internal}
 import glisten/socket.{type Socket, type SocketReason, Badarg}
 import glisten/transport.{type Transport}
+import logging
 import mist/internal/encoder
 import mist/internal/file
 import mist/internal/http.{
   type Connection, type Handler, type ResponseData, Bytes, Chunked, File,
   ServerSentEvents, Websocket,
 }
-import logging
 
 pub type State {
   State(idle_timer: Option(process.Timer))
@@ -65,14 +65,15 @@ fn log_and_error(
   case error {
     Exited(msg) | Thrown(msg) | Errored(msg) -> {
       logging.log(logging.Error, string.inspect(error))
-      response.new(500)
-      |> response.set_body(
-        bytes_builder.from_bit_array(<<"Internal Server Error":utf8>>),
-      )
-      |> response.prepend_header("content-length", "21")
-      |> http.add_default_headers(True)
-      |> encoder.to_bytes_builder
-      |> transport.send(transport, socket, _)
+      let assert Ok(_) =
+        response.new(500)
+        |> response.set_body(
+          bytes_builder.from_bit_array(<<"Internal Server Error":utf8>>),
+        )
+        |> response.prepend_header("content-length", "21")
+        |> http.add_default_headers(True)
+        |> encoder.to_bytes_builder
+        |> transport.send(transport, socket, _)
       let _ = transport.close(transport, socket)
       process.Abnormal(dynamic.unsafe_coerce(msg))
     }
