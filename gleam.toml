@@ -8,8 +8,7 @@ target = "erlang"
 gleam = ">= 1.0.0"
 
 [erlang]
-# application_start_module = "mist/internal/clock"
-application_start_module = "mist_clock"
+application_start_module = "mist@internal@clock"
 
 [dependencies]
 gleam_stdlib = "~> 0.35 or ~> 1.0"
