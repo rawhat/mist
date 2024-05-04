@@ -7,6 +7,7 @@
 - Don't use the `request.set_<property>` methods, because I'm already setting
 basically everything and they are kinda slow
 - Support `permessage-deflate` WebSocket extension
+- Use `erlang` application start module for clock
 
 ## v1.0.0
 
