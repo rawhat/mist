@@ -65,7 +65,7 @@ fn log_and_error(
   case error {
     Exited(msg) | Thrown(msg) | Errored(msg) -> {
       logging.log(logging.Error, string.inspect(error))
-      let assert Ok(_) =
+      let _ =
         response.new(500)
         |> response.set_body(
           bytes_builder.from_bit_array(<<"Internal Server Error":utf8>>),

@@ -1,10 +1,10 @@
-import gleam/bytes_builder.{type BytesBuilder}
 import gleam/bit_array
+import gleam/bytes_builder.{type BytesBuilder}
 import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
 import gleam/function
+import gleam/http.{type Scheme, Http, Https} as gleam_http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
-import gleam/http.{type Scheme, Http, Https} as gleam_http
 import gleam/int
 import gleam/io
 import gleam/iterator.{type Iterator}

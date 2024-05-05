@@ -1,11 +1,11 @@
-import gleam/bytes_builder.{type BytesBuilder}
 import gleam/bit_array
+import gleam/bytes_builder.{type BytesBuilder}
 import gleam/http
 import gleam/http/request
 import gleam/http/response.{type Response, Response}
+import gleam/option.{Some}
 import gleam/string
 import gleam/uri
-import gleam/option.{Some}
 import gleeunit/should
 import scaffold.{
   bitstring_response_should_equal, make_request, string_response_should_equal,

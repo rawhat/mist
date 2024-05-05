@@ -5,16 +5,16 @@ import gleam/option.{type Option, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
-import glisten/transport
 import glisten.{type Loop, Packet, User}
+import glisten/transport
+import logging
 import mist/internal/http.{
   type Connection, type DecodeError, type Handler, Bytes, Chunked, Connection,
   DiscardPacket, File, Initial, ServerSentEvents, Websocket,
 }
 import mist/internal/http/handler as http_handler
-import mist/internal/http2/handler.{type Message, Send} as http2_handler
 import mist/internal/http2
-import logging
+import mist/internal/http2/handler.{type Message, Send} as http2_handler
 
 pub type HandlerError {
   InvalidRequest(DecodeError)
