@@ -1,6 +1,6 @@
+import gleam/bit_array
 import gleam/bool
 import gleam/bytes_builder.{type BytesBuilder}
-import gleam/bit_array
 import gleam/dynamic
 import gleam/erlang.{rescue}
 import gleam/erlang/atom
@@ -12,8 +12,8 @@ import gleam/result
 import glisten.{type Socket}
 import glisten/socket/options
 import glisten/transport.{type Transport}
-import mist/internal/websocket/compression.{type Compression, type Context}
 import logging
+import mist/internal/websocket/compression.{type Compression, type Context}
 
 pub type DataFrame {
   TextFrame(payload_length: Int, payload: BitArray)

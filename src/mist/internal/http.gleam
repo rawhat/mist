@@ -377,7 +377,8 @@ pub fn read_body(
       |> result.map(request.set_body(req, _))
       |> result.replace_error(InvalidBody)
     }
-    _, Stream(
+    _,
+      Stream(
         selector: selector,
         data: data,
         remaining: remaining,
