@@ -10,8 +10,8 @@ import gleam/option.{None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
-import mist.{type Connection, type ResponseData}
 import logging
+import mist.{type Connection, type ResponseData}
 
 @external(erlang, "logger", "update_primary_config")
 fn logger_update_primary_config(config: Dict(Atom, Atom)) -> Result(Nil, any)
