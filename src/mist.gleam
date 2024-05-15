@@ -511,9 +511,11 @@ pub fn send_binary_frame(
   connection: WebsocketConnection,
   frame: BitArray,
 ) -> Result(Nil, glisten.SocketReason) {
-  frame
-  |> gramps_websocket.to_binary_frame(connection.deflate, None)
-  |> transport.send(connection.transport, connection.socket, _)
+  process.try_call(
+    connection.self,
+    fn(reply) { websocket.Valid(websocket.SendBinary(frame, reply)) },
+    1000,
+  )
 }
 
 /// Sends a text frame across the websocket.
@@ -521,9 +523,11 @@ pub fn send_text_frame(
   connection: WebsocketConnection,
   frame: String,
 ) -> Result(Nil, glisten.SocketReason) {
-  frame
-  |> gramps_websocket.to_text_frame(connection.deflate, None)
-  |> transport.send(connection.transport, connection.socket, _)
+  process.try_call(
+    connection.self,
+    fn(reply) { websocket.Valid(websocket.SendText(frame, reply)) },
+    1000,
+  )
 }
 
 // Returned by `init_server_sent_events`. This type must be passed to
