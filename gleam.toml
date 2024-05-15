@@ -11,14 +11,15 @@ gleam = ">= 1.0.0"
 application_start_module = "mist@internal@clock"
 
 [dependencies]
-gleam_stdlib = "~> 0.35 or ~> 1.0"
+birl = "~> 1.3"
 gleam_erlang = "~> 0.24"
 gleam_http = "~> 3.5"
 gleam_otp = "~> 0.9"
-hpack_erl = "~> 0.3"
-birl = "~> 1.3"
-logging = "~> 1.0"
+gleam_stdlib = "~> 0.35 or ~> 1.0"
 glisten = "~> 2.0"
+gramps = { path = "../gramps" }
+hpack_erl = "~> 0.3"
+logging = "~> 1.0"
 
 [dev-dependencies]
 gleeunit = "~> 1.0"

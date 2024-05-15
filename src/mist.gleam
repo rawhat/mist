@@ -17,6 +17,7 @@ import gleam/string
 import gleam/string_builder.{type StringBuilder}
 import glisten
 import glisten/transport
+import gramps/websocket.{BinaryFrame, Data, TextFrame} as gramps_websocket
 import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/encoder
 import mist/internal/file
@@ -29,7 +30,7 @@ import mist/internal/http.{
 }
 import mist/internal/websocket.{
   type HandlerMessage, type WebsocketConnection as InternalWebsocketConnection,
-  BinaryFrame, Data, Internal, TextFrame, User,
+  Internal, User,
 }
 
 /// Re-exported type that represents the default `Request` body type. See
@@ -511,7 +512,7 @@ pub fn send_binary_frame(
   frame: BitArray,
 ) -> Result(Nil, glisten.SocketReason) {
   frame
-  |> websocket.to_binary_frame(connection.deflate)
+  |> gramps_websocket.to_binary_frame(connection.deflate, None)
   |> transport.send(connection.transport, connection.socket, _)
 }
 
@@ -521,7 +522,7 @@ pub fn send_text_frame(
   frame: String,
 ) -> Result(Nil, glisten.SocketReason) {
   frame
-  |> websocket.to_text_frame(connection.deflate)
+  |> gramps_websocket.to_text_frame(connection.deflate, None)
   |> transport.send(connection.transport, connection.socket, _)
 }
 

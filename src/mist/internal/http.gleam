@@ -18,11 +18,11 @@ import gleam/result
 import gleam/string
 import glisten.{type ClientIp, type Socket}
 import glisten/transport.{type Transport}
+import gramps/websocket
 import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/clock
 import mist/internal/encoder
 import mist/internal/file
-import mist/internal/websocket
 
 pub type ResponseData {
   Websocket(Selector(ProcessDown))

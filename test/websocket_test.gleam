@@ -1,9 +1,7 @@
 import gleam/bit_array
 import gleam/option.{None}
 import gleeunit/should
-import mist/internal/websocket.{
-  Complete, Continuation, Data, Incomplete, TextFrame,
-}
+import gramps/websocket.{Complete, Continuation, Data, Incomplete, TextFrame}
 
 pub fn it_should_combine_continuation_frames_test() {
   let one = <<"Hello":utf8>>
