@@ -361,17 +361,37 @@ fn convert_body_types(
   response.set_body(resp, new_body)
 }
 
+pub type Port {
+  Assigned
+  Provided(Int)
+}
+
+pub opaque type Server {
+  Server(supervisor: Subject(supervisor.Message))
+}
+
 /// Start a `mist` service over HTTP with the provided builder.
 pub fn start_http(
   builder: Builder(Connection, ResponseData),
-) -> Result(Subject(supervisor.Message), glisten.StartError) {
+) -> Result(Server, glisten.StartError) {
   fn(req) { convert_body_types(builder.handler(req)) }
   |> handler.with_func
   |> glisten.handler(handler.init, _)
   |> glisten.serve(builder.port)
-  |> result.map(fn(subj) {
-    builder.after_start(builder.port, Http)
-    subj
+  |> result.map(fn(server) {
+    case glisten.get_port(server) {
+      Ok(port) -> {
+        builder.after_start(port, Http)
+        Server(glisten.get_supervisor(server))
+      }
+      Error(reason) -> {
+        logging.log(
+          logging.Error,
+          "Failed to read port from socket: " <> string.inspect(reason),
+        )
+        panic
+      }
+    }
   })
 }
 
@@ -398,7 +418,7 @@ pub fn start_https(
   builder: Builder(Connection, ResponseData),
   certfile certfile: String,
   keyfile keyfile: String,
-) -> Result(Subject(supervisor.Message), HttpsError) {
+) -> Result(Server, HttpsError) {
   let cert = file.open(bit_array.from_string(certfile))
   let key = file.open(bit_array.from_string(keyfile))
 
@@ -415,9 +435,20 @@ pub fn start_https(
   |> handler.with_func
   |> glisten.handler(handler.init, _)
   |> glisten.serve_ssl(builder.port, certfile, keyfile)
-  |> result.map(fn(subj) {
-    builder.after_start(builder.port, Https)
-    subj
+  |> result.map(fn(server) {
+    case glisten.get_port(server) {
+      Ok(port) -> {
+        builder.after_start(port, Https)
+        Server(glisten.get_supervisor(server))
+      }
+      Error(reason) -> {
+        logging.log(
+          logging.Error,
+          "Failed to read port from socket: " <> string.inspect(reason),
+        )
+        panic
+      }
+    }
   })
   |> result.map_error(GlistenError)
 }
