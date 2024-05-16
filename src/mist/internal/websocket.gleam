@@ -20,8 +20,6 @@ pub type ValidMessage(user_message) {
   SocketMessage(BitArray)
   SocketClosedMessage
   UserMessage(user_message)
-  SendText(text: String, reply: Subject(Result(Nil, glisten.SocketReason)))
-  SendBinary(data: BitArray, reply: Subject(Result(Nil, glisten.SocketReason)))
 }
 
 pub type WebsocketMessage(user_message) {
@@ -33,7 +31,7 @@ pub type WebsocketConnection {
   WebsocketConnection(
     socket: Socket,
     transport: Transport,
-    self: Subject(ValidMessage),
+    deflate: Option(Context),
   )
 }
 
@@ -133,32 +131,6 @@ pub fn initialize_connection(
             }),
           )
         case msg {
-          Valid(SendText(text, reply)) -> {
-            let res =
-              text
-              |> websocket.to_text_frame(
-                option.map(state.permessage_deflate, fn(compression) {
-                  compression.deflate
-                }),
-                None,
-              )
-              |> transport.send(connection.transport, connection.socket, _)
-            process.send(reply, res)
-            actor.continue(state)
-          }
-          Valid(SendBinary(data, reply)) -> {
-            let res =
-              data
-              |> websocket.to_binary_frame(
-                option.map(state.permessage_deflate, fn(compression) {
-                  compression.deflate
-                }),
-                None,
-              )
-              |> transport.send(connection.transport, connection.socket, _)
-            process.send(reply, res)
-            actor.continue(state)
-          }
           Valid(SocketMessage(data)) -> {
             let #(frames, rest) =
               get_messages(

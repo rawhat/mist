@@ -1,5 +1,6 @@
 import gleam/bit_array
 import gleam/bytes_builder.{type BytesBuilder}
+import gleam/erlang.{rescue}
 import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
 import gleam/function
 import gleam/http.{type Scheme, Http, Https} as gleam_http
@@ -18,6 +19,7 @@ import gleam/string_builder.{type StringBuilder}
 import glisten
 import glisten/transport
 import gramps/websocket.{BinaryFrame, Data, TextFrame} as gramps_websocket
+import logging
 import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/encoder
 import mist/internal/file
@@ -511,11 +513,23 @@ pub fn send_binary_frame(
   connection: WebsocketConnection,
   frame: BitArray,
 ) -> Result(Nil, glisten.SocketReason) {
-  process.try_call(
-    connection.self,
-    fn(reply) { websocket.Valid(websocket.SendBinary(frame, reply)) },
-    1000,
-  )
+  let binary_frame =
+    rescue(fn() {
+      gramps_websocket.to_binary_frame(frame, connection.deflate, None)
+    })
+  case binary_frame {
+    Ok(binary_frame) -> {
+      transport.send(connection.transport, connection.socket, binary_frame)
+    }
+    Error(reason) -> {
+      logging.log(
+        logging.Error,
+        "Cannot send messages from a different process than the WebSocket: "
+          <> string.inspect(reason),
+      )
+      panic as "Exiting while sending WebSocket message from non-owning process"
+    }
+  }
 }
 
 /// Sends a text frame across the websocket.
@@ -523,11 +537,23 @@ pub fn send_text_frame(
   connection: WebsocketConnection,
   frame: String,
 ) -> Result(Nil, glisten.SocketReason) {
-  process.try_call(
-    connection.self,
-    fn(reply) { websocket.Valid(websocket.SendText(frame, reply)) },
-    1000,
-  )
+  let text_frame =
+    rescue(fn() {
+      gramps_websocket.to_text_frame(frame, connection.deflate, None)
+    })
+  case text_frame {
+    Ok(text_frame) -> {
+      transport.send(connection.transport, connection.socket, text_frame)
+    }
+    Error(reason) -> {
+      logging.log(
+        logging.Error,
+        "Cannot send messages from a different process than the WebSocket: "
+          <> string.inspect(reason),
+      )
+      panic as "Exiting while sending WebSocket message from non-owning process"
+    }
+  }
 }
 
 // Returned by `init_server_sent_events`. This type must be passed to
