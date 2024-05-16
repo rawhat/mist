@@ -17,7 +17,7 @@ gleam_http = "~> 3.5"
 gleam_otp = "~> 0.9"
 gleam_stdlib = "~> 0.35 or ~> 1.0"
 glisten = "~> 2.0"
-gramps = { path = "../gramps" }
+gramps = "~> 2.0"
 hpack_erl = "~> 0.3"
 logging = "~> 1.0"
 

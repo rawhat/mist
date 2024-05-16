@@ -527,7 +527,7 @@ pub fn send_binary_frame(
         "Cannot send messages from a different process than the WebSocket: "
           <> string.inspect(reason),
       )
-      panic as "Exiting while sending WebSocket message from non-owning process"
+      panic as "Exiting due to sending WebSocket message from non-owning process"
     }
   }
 }
@@ -551,7 +551,7 @@ pub fn send_text_frame(
         "Cannot send messages from a different process than the WebSocket: "
           <> string.inspect(reason),
       )
-      panic as "Exiting while sending WebSocket message from non-owning process"
+      panic as "Exiting due to sending WebSocket message from non-owning process"
     }
   }
 }
