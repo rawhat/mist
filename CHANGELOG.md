@@ -8,6 +8,7 @@
 basically everything and they are kinda slow
 - Support `permessage-deflate` WebSocket extension
 - Use `erlang` application start module for clock
+- Pull some stuff out of `mist` into `gramps` and use its updated API
 
 ## v1.0.0
 
