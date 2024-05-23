@@ -2,6 +2,7 @@ import gleam/bytes_builder.{type BytesBuilder}
 import gleam/dynamic
 import gleam/erlang.{Errored, Exited, Thrown, rescue}
 import gleam/erlang/process.{type Subject}
+import gleam/http as ghttp
 import gleam/http/request.{type Request}
 import gleam/http/response
 import gleam/int
@@ -35,7 +36,7 @@ pub fn call(
   sender: Subject(handler.Message(user_message)),
 ) -> Result(State, process.ExitReason) {
   rescue(fn() { handler(req) })
-  |> result.map_error(log_and_error(_, conn.socket, conn.transport))
+  |> result.map_error(log_and_error(_, conn.socket, conn.transport, req))
   |> result.then(fn(resp) {
     case resp {
       response.Response(body: Websocket(selector), ..)
@@ -45,7 +46,7 @@ pub fn call(
       }
       response.Response(body: body, ..) as resp -> {
         case body {
-          Bytes(body) -> handle_bytes_builder_body(resp, body, conn)
+          Bytes(body) -> handle_bytes_builder_body(resp, body, conn, req)
           Chunked(body) -> handle_chunked_body(resp, body, conn)
           File(..) -> handle_file_body(resp, body, conn)
           _ -> panic as "This shouldn't ever happen 🤞"
@@ -61,9 +62,12 @@ fn log_and_error(
   error: erlang.Crash,
   socket: Socket,
   transport: Transport,
+  req: Request(Connection),
 ) -> process.ExitReason {
   case error {
-    Exited(msg) | Thrown(msg) | Errored(msg) -> {
+    Exited(msg)
+    | Thrown(msg)
+    | Errored(msg) -> {
       logging.log(logging.Error, string.inspect(error))
       let _ =
         response.new(500)
@@ -71,7 +75,7 @@ fn log_and_error(
           bytes_builder.from_bit_array(<<"Internal Server Error":utf8>>),
         )
         |> response.prepend_header("content-length", "21")
-        |> http.add_default_headers(True)
+        |> http.add_default_headers(True, req.method == ghttp.Head)
         |> encoder.to_bytes_builder
         |> transport.send(transport, socket, _)
       let _ = transport.close(transport, socket)
@@ -178,10 +182,11 @@ fn handle_bytes_builder_body(
   resp: response.Response(ResponseData),
   body: BytesBuilder,
   conn: Connection,
+  req: Request(Connection),
 ) -> Result(Nil, SocketReason) {
   resp
   |> response.set_body(body)
-  |> http.add_default_headers(True)
+  |> http.add_default_headers(True, req.method == ghttp.Head)
   |> encoder.to_bytes_builder
   |> transport.send(conn.transport, conn.socket, _)
 }

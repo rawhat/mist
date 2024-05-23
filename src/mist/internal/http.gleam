@@ -223,7 +223,8 @@ fn read_chunk(
           }
       }
     }
-    <<>> as data, _ | data, Error(Nil) -> {
+    <<>> as data, _
+    | data, Error(Nil) -> {
       use next <- result.then(read_data(
         socket,
         transport,
@@ -383,7 +384,9 @@ pub fn read_body(
         data: data,
         remaining: remaining,
         attempts: attempts,
-      ) if remaining > 0 -> {
+      )
+      if remaining > 0
+    -> {
       let res =
         selector
         |> process.select(1000)
@@ -474,7 +477,7 @@ pub fn upgrade(
 
   use _sent <- result.then(
     resp
-    |> add_default_headers(True)
+    |> add_default_headers(True, req.method == http.Head)
     |> encoder.to_bytes_builder
     |> transport.send(transport, socket, _)
     |> result.nil_error,
@@ -486,35 +489,61 @@ pub fn upgrade(
 pub fn add_default_headers(
   resp: Response(BytesBuilder),
   keep_alive: Bool,
+  is_head_response: Bool,
 ) -> Response(BytesBuilder) {
   let body_size = bytes_builder.byte_size(resp.body)
 
-  let defaults = [#("content-length", int.to_string(body_size))]
-  let defaults = {
-    use <- bool.guard(when: !keep_alive, return: defaults)
-    [#("connection", "keep-alive"), ..defaults]
+  let include_content_length = case resp.status {
+    n if n >= 100 && n <= 199 -> False
+    n if n == 204 -> False
+    n if n == 304 -> False
+    _ -> True
   }
-  let defaults = {
+
+  let #(_existing, headers) =
+    resp.headers
+    |> list.key_pop("content-length")
+    |> result.lazy_unwrap(fn() { #("", resp.headers) })
+
+  let headers = case include_content_length, is_head_response {
+    True, True -> resp.headers
+    True, False -> {
+      [#("content-length", int.to_string(body_size)), ..resp.headers]
+    }
+    False, _ -> headers
+  }
+
+  let existing = list.key_pop(headers, "connection")
+  let keep_alive_header = #("connection", "keep-alive")
+  let headers = case keep_alive, existing {
+    False, Ok(#(connection, headers)) -> [
+      #("connection", connection),
+      ..headers
+    ]
+    False, _ -> headers
+    _, Ok(#("keep-alive", headers)) -> [keep_alive_header, ..headers]
+    True, _ -> [keep_alive_header, ..headers]
+  }
+  let headers = {
     case response.get_header(resp, "date") {
-      Error(_nil) -> [#("date", clock.get_date()), ..defaults]
-      _ -> defaults
+      Error(_nil) -> [#("date", clock.get_date()), ..headers]
+      _ -> headers
     }
   }
 
-  let headers =
-    dict.from_list(defaults)
-    |> list.fold(
-      resp.headers,
-      _,
-      fn(defaults, tup) {
-        let #(key, value) = tup
-        dict.insert(defaults, key, value)
-      },
-    )
-    |> dict.to_list
+  io.debug(#(
+    "building headers with",
+    keep_alive,
+    "and response",
+    resp,
+    "and got",
+    headers,
+  ))
 
   Response(..resp, headers: headers)
 }
+
+import gleam/io
 
 fn is_continue(req: Request(Connection)) -> Bool {
   req.headers
