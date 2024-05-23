@@ -158,12 +158,24 @@ pub fn initialize_connection(
                     selector,
                   )
                 }
-                actor.Stop(reason) -> actor.Stop(reason)
+                actor.Stop(reason) -> {
+                  let _ =
+                    option.map(state.permessage_deflate, fn(contexts) {
+                      compression.close(contexts.deflate)
+                      compression.close(contexts.inflate)
+                    })
+                  actor.Stop(reason)
+                }
               }
             })
             |> result.lazy_unwrap(fn() {
               logging.log(logging.Error, "Received a malformed WebSocket frame")
               on_close(state.user)
+              let _ =
+                option.map(state.permessage_deflate, fn(contexts) {
+                  compression.close(contexts.deflate)
+                  compression.close(contexts.inflate)
+                })
               actor.Stop(process.Abnormal(
                 "WebSocket received a malformed message",
               ))
@@ -186,6 +198,11 @@ pub fn initialize_connection(
                   )
                 }
                 actor.Stop(reason) -> {
+                  let _ =
+                    option.map(state.permessage_deflate, fn(contexts) {
+                      compression.close(contexts.deflate)
+                      compression.close(contexts.inflate)
+                    })
                   on_close(state.user)
                   actor.Stop(reason)
                 }
@@ -198,17 +215,32 @@ pub fn initialize_connection(
               )
             })
             |> result.lazy_unwrap(fn() {
+              let _ =
+                option.map(state.permessage_deflate, fn(contexts) {
+                  compression.close(contexts.deflate)
+                  compression.close(contexts.inflate)
+                })
               on_close(state.user)
               actor.Stop(process.Abnormal("Crash in user websocket handler"))
             })
           }
           Valid(SocketClosedMessage) -> {
+            let _ =
+              option.map(state.permessage_deflate, fn(contexts) {
+                compression.close(contexts.deflate)
+                compression.close(contexts.inflate)
+              })
             on_close(state.user)
             actor.Stop(process.Normal)
           }
           // TODO:  do we need to send something back for this?
           Invalid -> {
             logging.log(logging.Error, "Received a malformed WebSocket frame")
+            let _ =
+              option.map(state.permessage_deflate, fn(contexts) {
+                compression.close(contexts.deflate)
+                compression.close(contexts.inflate)
+              })
             on_close(state.user)
             actor.Stop(process.Abnormal(
               "WebSocket received a malformed message",
