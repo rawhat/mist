@@ -516,12 +516,8 @@ pub fn add_default_headers(
   let existing = list.key_pop(headers, "connection")
   let keep_alive_header = #("connection", "keep-alive")
   let headers = case keep_alive, existing {
-    False, Ok(#(connection, headers)) -> [
-      #("connection", connection),
-      ..headers
-    ]
+    _, Ok(#(connection, headers)) -> [#("connection", connection), ..headers]
     False, _ -> headers
-    _, Ok(#("keep-alive", headers)) -> [keep_alive_header, ..headers]
     True, _ -> [keep_alive_header, ..headers]
   }
   let headers = {
@@ -531,19 +527,8 @@ pub fn add_default_headers(
     }
   }
 
-  io.debug(#(
-    "building headers with",
-    keep_alive,
-    "and response",
-    resp,
-    "and got",
-    headers,
-  ))
-
   Response(..resp, headers: headers)
 }
-
-import gleam/io
 
 fn is_continue(req: Request(Connection)) -> Bool {
   req.headers

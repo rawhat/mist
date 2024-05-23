@@ -89,8 +89,6 @@ pub fn it_supports_patch_requests_test() {
   string_response_should_equal(resp, get_default_response())
 }
 
-import gleam/io
-
 pub fn it_rejects_large_requests_test() {
   let req =
     string.repeat("a", 4_000_001)
@@ -103,8 +101,6 @@ pub fn it_rejects_large_requests_test() {
     |> response.set_body(bytes_builder.from_bit_array(<<>>))
     |> response.prepend_header("content-length", "0")
     |> response.prepend_header("connection", "close")
-
-  io.debug(#("got a resp", resp))
 
   string_response_should_equal(resp, expected)
 }
