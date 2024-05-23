@@ -127,11 +127,10 @@ pub fn send_bytes_builder(
   conn: Connection,
   context: HpackContext,
   id: StreamIdentifier(Frame),
-  method: ghttp.Method,
 ) -> Result(HpackContext, process.ExitReason) {
   let resp =
     resp
-    |> http.add_default_headers(False, method == ghttp.Head)
+    |> http.add_default_headers(False, False)
 
   let headers = [#(":status", int.to_string(resp.status)), ..resp.headers]
 
