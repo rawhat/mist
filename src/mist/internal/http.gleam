@@ -223,8 +223,7 @@ fn read_chunk(
           }
       }
     }
-    <<>> as data, _
-    | data, Error(Nil) -> {
+    <<>> as data, _ | data, Error(Nil) -> {
       use next <- result.then(read_data(
         socket,
         transport,
@@ -384,9 +383,7 @@ pub fn read_body(
         data: data,
         remaining: remaining,
         attempts: attempts,
-      )
-      if remaining > 0
-    -> {
+      ) if remaining > 0 -> {
       let res =
         selector
         |> process.select(1000)
