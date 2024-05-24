@@ -1,7 +1,7 @@
 import gleam/bytes_builder.{type BytesBuilder}
 import gleam/erlang
 import gleam/erlang/process
-import gleam/http.{type Header} as ghttp
+import gleam/http.{type Header} as _ghttp
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/list
@@ -138,12 +138,16 @@ pub fn send_bytes_builder(
     0 -> send_headers(context, conn, headers, True, id)
     _ -> {
       send_headers(context, conn, headers, False, id)
-      |> result.then(fn(context) {
-        // TODO:  this should be broken up by window size
-        // TODO:  fix end_stream
-        send_data(conn, bytes_builder.to_bit_array(resp.body), id, True)
-        |> result.replace(context)
-      })
+      |> result.then(
+        fn(
+          context,
+          // TODO:  this should be broken up by window size
+          // TODO:  fix end_stream
+        ) {
+          send_data(conn, bytes_builder.to_bit_array(resp.body), id, True)
+          |> result.replace(context)
+        },
+      )
     }
   }
 }

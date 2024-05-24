@@ -45,6 +45,8 @@ pub fn main() {
       case request.path_segments(req) {
         [] ->
           response.new(200)
+          |> response.prepend_header("my-value", "abc")
+          |> response.prepend_header("my-value", "123")
           |> response.set_body(mist.Bytes(bytes_builder.from_string(index)))
         ["ws"] ->
           mist.websocket(
@@ -78,7 +80,8 @@ fn handle_ws_message(state, conn, message) {
       let assert Ok(_) = mist.send_text_frame(conn, "pong")
       actor.continue(state)
     }
-    mist.Text(_) | mist.Binary(_) -> {
+    mist.Text(_)
+    | mist.Binary(_) -> {
       actor.continue(state)
     }
     mist.Custom(Broadcast(text)) -> {

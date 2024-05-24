@@ -1,5 +1,4 @@
 import gleam/bytes_builder.{type BytesBuilder}
-import gleam/dynamic
 import gleam/erlang.{Errored, Exited, Thrown, rescue}
 import gleam/erlang/process.{type Subject}
 import gleam/http as ghttp
@@ -65,7 +64,9 @@ fn log_and_error(
   req: Request(Connection),
 ) -> process.ExitReason {
   case error {
-    Exited(msg) | Thrown(msg) | Errored(msg) -> {
+    Exited(msg)
+    | Thrown(msg)
+    | Errored(msg) -> {
       logging.log(logging.Error, string.inspect(error))
       let _ =
         response.new(500)
@@ -77,7 +78,7 @@ fn log_and_error(
         |> encoder.to_bytes_builder
         |> transport.send(transport, socket, _)
       let _ = transport.close(transport, socket)
-      process.Abnormal(dynamic.unsafe_coerce(msg))
+      process.Abnormal(string.inspect(msg))
     }
   }
 }

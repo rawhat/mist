@@ -239,8 +239,3 @@ pub fn it_sends_back_chunked_responses_test() {
   should.equal(resp.status, 200)
   should.equal(resp.body, string.repeat("a", 1000))
 }
-
-pub fn it_allows_multiple_headers_test() {
-  // TODO:  fix
-  should.equal(False, True)
-}
