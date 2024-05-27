@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.1.0
 
 - Don't pull or `let assert` from websocket when more data is needed
 - Don't use `uri.parse` because it's a bit slow
