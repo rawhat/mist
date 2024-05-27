@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.2.0
 
 - Bump gleam version requirement
 - Use `erlang` application start module for clock
