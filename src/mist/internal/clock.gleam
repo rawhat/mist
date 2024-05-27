@@ -1,9 +1,7 @@
 import birl
-import gleam/erlang/atom
-import gleam/erlang/process.{type Pid}
+import gleam/erlang/process.{type Subject}
 import gleam/function
 import gleam/otp/actor
-import gleam/result
 import logging
 
 pub type ClockMessage {
@@ -25,7 +23,7 @@ pub type EtsOpts {
   ReadConcurrency(Bool)
 }
 
-pub fn start(_type, _args) -> Result(Pid, actor.StartError) {
+pub fn start() -> Result(Subject(ClockMessage), actor.StartError) {
   actor.start_spec(
     actor.Spec(
       init: fn() {
@@ -49,11 +47,6 @@ pub fn start(_type, _args) -> Result(Pid, actor.StartError) {
       },
     ),
   )
-  |> result.map(process.subject_owner)
-}
-
-pub fn stop(_state) {
-  atom.create_from_string("ok")
 }
 
 pub fn get_date() -> String {
