@@ -382,31 +382,13 @@ fn convert_glisten_error(err: glisten.StartError) -> actor.StartError {
 pub fn start_http(
   builder: Builder(Connection, ResponseData),
 ) -> Result(Subject(supervisor.Message), glisten.StartError) {
-  let clock = supervisor.worker(fn(_argument) { clock.start() })
-  let glisten_pool =
-    supervisor.supervisor(fn(_argument) {
-      fn(req) { convert_body_types(builder.handler(req)) }
-      |> handler.with_func
-      |> glisten.handler(handler.init, _)
-      |> glisten.serve(builder.port)
-      |> result.map(fn(subj) {
-        builder.after_start(builder.port, Http)
-        subj
-      })
-      |> result.map_error(convert_glisten_error)
-    })
-
-  supervisor.start(fn(children) {
-    children
-    |> supervisor.add(clock)
-    |> supervisor.add(glisten_pool)
-  })
-  |> result.map_error(fn(err) {
-    case err {
-      actor.InitTimeout -> glisten.AcceptorTimeout
-      actor.InitFailed(reason) -> glisten.AcceptorFailed(reason)
-      actor.InitCrashed(reason) -> glisten.AcceptorCrashed(reason)
-    }
+  fn(req) { convert_body_types(builder.handler(req)) }
+  |> handler.with_func
+  |> glisten.handler(handler.init, _)
+  |> glisten.serve(builder.port)
+  |> result.map(fn(subj) {
+    builder.after_start(builder.port, Http)
+    subj
   })
 }
 
@@ -446,31 +428,13 @@ pub fn start_https(
 
   use _ <- result.then(res)
 
-  let clock = supervisor.worker(fn(_argument) { clock.start() })
-
-  let glisten_pool =
-    supervisor.supervisor(fn(_argument) {
-      fn(req) { convert_body_types(builder.handler(req)) }
-      |> handler.with_func
-      |> glisten.handler(handler.init, _)
-      |> glisten.serve_ssl(builder.port, certfile, keyfile)
-      |> result.map(fn(subj) {
-        builder.after_start(builder.port, Https)
-        subj
-      })
-      |> result.map_error(convert_glisten_error)
-    })
-  supervisor.start(fn(children) {
-    children
-    |> supervisor.add(clock)
-    |> supervisor.add(glisten_pool)
-  })
-  |> result.map_error(fn(err) {
-    case err {
-      actor.InitTimeout -> glisten.AcceptorTimeout
-      actor.InitFailed(reason) -> glisten.AcceptorFailed(reason)
-      actor.InitCrashed(reason) -> glisten.AcceptorCrashed(reason)
-    }
+  fn(req) { convert_body_types(builder.handler(req)) }
+  |> handler.with_func
+  |> glisten.handler(handler.init, _)
+  |> glisten.serve_ssl(builder.port, certfile, keyfile)
+  |> result.map(fn(subj) {
+    builder.after_start(builder.port, Https)
+    subj
   })
   |> result.map_error(GlistenError)
 }

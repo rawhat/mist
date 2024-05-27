@@ -7,6 +7,10 @@ repository = { type = "github", user = "rawhat", repo = "mist" }
 target = "erlang"
 gleam = ">= 1.2.0"
 
+[erlang]
+# application_start_module = "mist/internal/clock"
+application_start_module = "mist_clock"
+
 [dependencies]
 birl = "~> 1.3"
 gleam_erlang = "~> 0.24"
