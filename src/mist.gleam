@@ -21,7 +21,6 @@ import glisten/transport
 import gramps/websocket.{BinaryFrame, Data, TextFrame} as gramps_websocket
 import logging
 import mist/internal/buffer.{type Buffer, Buffer}
-import mist/internal/clock
 import mist/internal/encoder
 import mist/internal/file
 import mist/internal/handler
@@ -360,22 +359,6 @@ fn convert_body_types(
     ServerSentEvents(selector) -> InternalServerSentEvents(selector)
   }
   response.set_body(resp, new_body)
-}
-
-fn convert_glisten_error(err: glisten.StartError) -> actor.StartError {
-  case err {
-    glisten.AcceptorTimeout -> actor.InitTimeout
-    glisten.AcceptorFailed(reason) -> actor.InitFailed(reason)
-    glisten.AcceptorCrashed(reason) -> actor.InitCrashed(reason)
-    glisten.ListenerClosed ->
-      actor.InitFailed(process.Abnormal("Listener socket closed"))
-    glisten.ListenerTimeout ->
-      actor.InitFailed(process.Abnormal("Listener startup timed out"))
-    glisten.SystemError(reason) ->
-      actor.InitFailed(process.Abnormal(
-        "Socket error: " <> string.inspect(reason),
-      ))
-  }
 }
 
 /// Start a `mist` service over HTTP with the provided builder.
