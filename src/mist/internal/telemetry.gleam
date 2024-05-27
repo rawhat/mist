@@ -33,22 +33,13 @@ pub type Event {
 }
 
 pub const events = [
-  [Mist, ParseRequest, Stop],
-  [Mist, ParseRequest2, Stop],
-  [Mist, Http1Handler, Stop],
-  [Mist, HttpUpgrade, Stop],
-  [Mist, Http2Handler, Stop],
-  [Mist, DecodePacket, Stop],
-  [Mist, ConvertPath, Stop],
-  [Mist, ParseMethod, Stop],
-  [Mist, ParseHeaders, Stop],
-  [Mist, ParseRest, Stop],
-  [Mist, ParsePath, Stop],
-  [Mist, ParseTransport, Stop],
-  [Mist, ParseHost, Stop],
-  [Mist, ParsePort, Stop],
-  [Mist, BuildRequest, Stop],
-  [Mist, ReadData, Stop],
+  [Mist, ParseRequest, Stop], [Mist, ParseRequest2, Stop],
+  [Mist, Http1Handler, Stop], [Mist, HttpUpgrade, Stop],
+  [Mist, Http2Handler, Stop], [Mist, DecodePacket, Stop],
+  [Mist, ConvertPath, Stop], [Mist, ParseMethod, Stop],
+  [Mist, ParseHeaders, Stop], [Mist, ParseRest, Stop], [Mist, ParsePath, Stop],
+  [Mist, ParseTransport, Stop], [Mist, ParseHost, Stop], [Mist, ParsePort, Stop],
+  [Mist, BuildRequest, Stop], [Mist, ReadData, Stop],
 ]
 
 type TimeUnit {

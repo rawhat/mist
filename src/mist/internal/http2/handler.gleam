@@ -151,7 +151,9 @@ fn handle_frame(
       end_stream: end_stream,
       priority: priority,
     )),
-      frame.Continuation(data: Continued(data), identifier: id2) if id1 == id2 -> {
+      frame.Continuation(data: Continued(data), identifier: id2)
+      if id1 == id2
+    -> {
       let next =
         frame.Header(
           identifier: id1,
@@ -240,7 +242,8 @@ fn handle_frame(
       let streams = dict.insert(state.streams, identifier, stream_state)
       Ok(State(..state, receive_hpack_context: context, streams: streams))
     }
-    None, frame.Data(identifier: identifier, data: data, end_stream: end_stream) -> {
+    None, frame.Data(identifier: identifier, data: data, end_stream: end_stream)
+    -> {
       let data_size = bit_array.byte_size(data)
       let #(conn_receive_window_size, conn_window_increment) =
         flow_control.compute_receive_window(
