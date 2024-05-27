@@ -5,7 +5,7 @@ licences = ["Apache-2.0"]
 description = "a misty Gleam web server"
 repository = { type = "github", user = "rawhat", repo = "mist" }
 target = "erlang"
-gleam = ">= 1.0.0"
+gleam = ">= 1.2.0"
 
 [dependencies]
 birl = "~> 1.3"
