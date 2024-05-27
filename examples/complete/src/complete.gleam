@@ -27,11 +27,12 @@ const index = "<html lang='en'>
 
 pub fn main() {
   logging.configure()
-  logger_update_primary_config(
-    dict.from_list([
-      #(atom.create_from_string("level"), atom.create_from_string("debug")),
-    ]),
-  )
+  let _ =
+    logger_update_primary_config(
+      dict.from_list([
+        #(atom.create_from_string("level"), atom.create_from_string("debug")),
+      ]),
+    )
   // These values are for the Websocket process initialized below
   let selector = process.new_selector()
   let state = Nil
@@ -80,8 +81,7 @@ fn handle_ws_message(state, conn, message) {
       let assert Ok(_) = mist.send_text_frame(conn, "pong")
       actor.continue(state)
     }
-    mist.Text(_)
-    | mist.Binary(_) -> {
+    mist.Text(_) | mist.Binary(_) -> {
       actor.continue(state)
     }
     mist.Custom(Broadcast(text)) -> {

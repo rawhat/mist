@@ -64,9 +64,7 @@ fn log_and_error(
   req: Request(Connection),
 ) -> process.ExitReason {
   case error {
-    Exited(msg)
-    | Thrown(msg)
-    | Errored(msg) -> {
+    Exited(msg) | Thrown(msg) | Errored(msg) -> {
       logging.log(logging.Error, string.inspect(error))
       let _ =
         response.new(500)
