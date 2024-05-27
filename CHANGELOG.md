@@ -7,7 +7,6 @@
 - Don't use the `request.set_<property>` methods, because I'm already setting
 basically everything and they are kinda slow
 - Support `permessage-deflate` WebSocket extension
-- Use `erlang` application start module for clock
 - Pull some stuff out of `mist` into `gramps` and use its updated API
 - Allow returning multiple headers with the same name
     - Currently there are no checks on which headers you do this with
