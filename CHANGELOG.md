@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Return `Server` type from `start_*` methods to get OS-assigned port.  Will
+also eventually provide graceful shutdown options
+
 ## v1.2.0
 
 - Bump gleam version requirement
