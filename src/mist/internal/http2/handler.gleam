@@ -209,7 +209,6 @@ fn handle_frame(
           body: Initial(<<>>),
           socket: conn.socket,
           transport: conn.transport,
-          client_ip: conn.client_ip,
         )
       let assert Ok(#(headers, context)) =
         http2.hpack_decode(state.receive_hpack_context, data)

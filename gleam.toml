@@ -16,10 +16,10 @@ gleam_erlang = "~> 0.24"
 gleam_http = "~> 3.5"
 gleam_otp = "~> 0.9"
 gleam_stdlib = "~> 0.35 or ~> 1.0"
-glisten = ">= 3.0.0 and < 4.0.0"
 gramps = "~> 2.0"
 hpack_erl = "~> 0.3"
 logging = "~> 1.0"
+glisten = ">= 4.0.0 and < 5.0.0"
 
 [dev-dependencies]
 gleeunit = "~> 1.0"

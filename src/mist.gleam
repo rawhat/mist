@@ -43,6 +43,28 @@ import mist/internal/websocket.{
 pub type Connection =
   InternalConnection
 
+/// When accessing client information, these are the possible shapes of the IP
+/// addresses. A best effort will be made to determine whether IPv4 is most
+/// relevant.
+pub type IpAddress {
+  IpV4(Int, Int, Int, Int)
+  IpV6(Int, Int, Int, Int, Int, Int, Int, Int)
+}
+
+/// Tries to get the IP address and port of a connected client.
+pub fn get_client_info(conn: Connection) -> Result(#(IpAddress, Int), Nil) {
+  transport.peername(conn.transport, conn.socket)
+  |> result.map(fn(pair) {
+    case pair {
+      #(transport.IpV4(a, b, c, d), port) -> #(IpV4(a, b, c, d), port)
+      #(transport.IpV6(a, b, c, d, e, f, g, h), port) -> #(
+        IpV6(a, b, c, d, e, f, g, h),
+        port,
+      )
+    }
+  })
+}
+
 /// The response body type. This allows `mist` to handle these different cases
 /// for you. `Bytes` is the regular data return. `Websocket` will upgrade the
 /// socket to websockets, but should not be used directly. See the
@@ -370,14 +392,28 @@ pub opaque type Server {
   Server(supervisor: Subject(supervisor.Message))
 }
 
+pub fn get_supervisor(server: Server) -> Subject(supervisor.Message) {
+  server.supervisor
+}
+
 /// Start a `mist` service over HTTP with the provided builder.
 pub fn start_http(
+  builder: Builder(Connection, ResponseData),
+) -> Result(Subject(supervisor.Message), glisten.StartError) {
+  start_http_server(builder)
+  |> result.map(get_supervisor)
+}
+
+/// See the documentation for `start_http`.  For now, you almost certainly
+/// want to use that.  In the future, this will allow access to things like
+/// OS-provided ports, graceful shutdown, etc.
+pub fn start_http_server(
   builder: Builder(Connection, ResponseData),
 ) -> Result(Server, glisten.StartError) {
   fn(req) { convert_body_types(builder.handler(req)) }
   |> handler.with_func
   |> glisten.handler(handler.init, _)
-  |> glisten.serve(builder.port)
+  |> glisten.start_server(builder.port)
   |> result.map(fn(server) {
     case glisten.get_port(server) {
       Ok(port) -> {
@@ -418,6 +454,18 @@ pub fn start_https(
   builder: Builder(Connection, ResponseData),
   certfile certfile: String,
   keyfile keyfile: String,
+) -> Result(Subject(supervisor.Message), HttpsError) {
+  start_https_server(builder, certfile, keyfile)
+  |> result.map(get_supervisor)
+}
+
+/// See the documentation for `start_https`.  For now, you almost certainly
+/// want to use that.  In the future, this will allow access to things like
+/// OS-provided ports, graceful shutdown, etc.
+pub fn start_https_server(
+  builder: Builder(Connection, ResponseData),
+  certfile certfile: String,
+  keyfile keyfile: String,
 ) -> Result(Server, HttpsError) {
   let cert = file.open(bit_array.from_string(certfile))
   let key = file.open(bit_array.from_string(keyfile))
@@ -434,7 +482,7 @@ pub fn start_https(
   fn(req) { convert_body_types(builder.handler(req)) }
   |> handler.with_func
   |> glisten.handler(handler.init, _)
-  |> glisten.serve_ssl(builder.port, certfile, keyfile)
+  |> glisten.start_ssl_server(builder.port, certfile, keyfile)
   |> result.map(fn(server) {
     case glisten.get_port(server) {
       Ok(port) -> {

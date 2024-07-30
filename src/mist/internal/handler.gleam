@@ -47,7 +47,6 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
         body: Initial(<<>>),
         socket: conn.socket,
         transport: conn.transport,
-        client_ip: conn.client_ip,
       )
 
     case msg, state {

@@ -15,7 +15,7 @@ import gleam/option.{type Option}
 import gleam/pair
 import gleam/result
 import gleam/string
-import glisten.{type ClientIp, type Socket}
+import glisten.{type Socket}
 import glisten/transport.{type Transport}
 import gramps/websocket
 import mist/internal/buffer.{type Buffer, Buffer}
@@ -32,12 +32,7 @@ pub type ResponseData {
 }
 
 pub type Connection {
-  Connection(
-    body: Body,
-    socket: Socket,
-    transport: Transport,
-    client_ip: ClientIp,
-  )
+  Connection(body: Body, socket: Socket, transport: Transport)
 }
 
 pub type Handler =

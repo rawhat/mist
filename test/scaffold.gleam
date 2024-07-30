@@ -114,13 +114,7 @@ fn convert_loop(
   loop: glisten.Loop(user_message, data),
 ) -> glisten_handler.Loop(user_message, data) {
   fn(msg, data, conn: glisten_handler.Connection(user_message)) {
-    let conn =
-      glisten.Connection(
-        conn.client_ip,
-        conn.socket,
-        conn.transport,
-        conn.sender,
-      )
+    let conn = glisten.Connection(conn.socket, conn.transport, conn.sender)
     case msg {
       glisten_handler.Packet(msg) -> {
         case loop(glisten.Packet(msg), data, conn) {
