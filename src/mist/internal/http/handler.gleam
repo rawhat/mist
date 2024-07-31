@@ -33,9 +33,16 @@ pub fn call(
   handler: Handler,
   conn: Connection,
   sender: Subject(handler.Message(user_message)),
+  version: http.HttpVersion,
 ) -> Result(State, process.ExitReason) {
   rescue(fn() { handler(req) })
-  |> result.map_error(log_and_error(_, conn.socket, conn.transport, req))
+  |> result.map_error(log_and_error(
+    _,
+    conn.socket,
+    conn.transport,
+    req,
+    version,
+  ))
   |> result.then(fn(resp) {
     case resp {
       response.Response(body: Websocket(selector), ..)
@@ -45,13 +52,14 @@ pub fn call(
       }
       response.Response(body: body, ..) as resp -> {
         case body {
-          Bytes(body) -> handle_bytes_builder_body(resp, body, conn, req)
-          Chunked(body) -> handle_chunked_body(resp, body, conn)
-          File(..) -> handle_file_body(resp, body, conn)
+          Bytes(body) ->
+            handle_bytes_builder_body(resp, body, conn, req, version)
+          Chunked(body) -> handle_chunked_body(resp, body, conn, version)
+          File(..) -> handle_file_body(resp, body, conn, version)
           _ -> panic as "This shouldn't ever happen 🤞"
         }
         |> result.replace_error(process.Normal)
-        |> result.then(fn(_res) { close_or_set_timer(resp, conn, sender) })
+        |> result.then(close_or_set_timer(_, conn, sender))
       }
     }
   })
@@ -62,19 +70,29 @@ fn log_and_error(
   socket: Socket,
   transport: Transport,
   req: Request(Connection),
+  version: http.HttpVersion,
 ) -> process.ExitReason {
   case error {
     Exited(msg) | Thrown(msg) | Errored(msg) -> {
       logging.log(logging.Error, string.inspect(error))
-      let _ =
+      let resp =
         response.new(500)
         |> response.set_body(
           bytes_builder.from_bit_array(<<"Internal Server Error":utf8>>),
         )
         |> response.prepend_header("content-length", "21")
-        |> http.add_default_headers(True, req.method == ghttp.Head)
-        |> encoder.to_bytes_builder
+        |> http.add_default_headers(req.method == ghttp.Head)
+
+      let resp = case version {
+        http.Http1 -> http.connection_close(resp)
+        _ -> http.maybe_keep_alive(resp)
+      }
+
+      let _ =
+        resp
+        |> encoder.to_bytes_builder(http.version_to_string(version))
         |> transport.send(transport, socket, _)
+
       let _ = transport.close(transport, socket)
       process.Abnormal(string.inspect(msg))
     }
@@ -82,7 +100,7 @@ fn log_and_error(
 }
 
 fn close_or_set_timer(
-  resp: response.Response(ResponseData),
+  resp: response.Response(BytesBuilder),
   conn: Connection,
   sender: Subject(handler.Message(user_message)),
 ) -> Result(State, process.ExitReason) {
@@ -105,9 +123,15 @@ fn handle_chunked_body(
   resp: response.Response(ResponseData),
   body: Iterator(BytesBuilder),
   conn: Connection,
-) -> Result(Nil, SocketReason) {
+  version: http.HttpVersion,
+) -> Result(response.Response(BytesBuilder), SocketReason) {
   let headers = [#("transfer-encoding", "chunked"), ..resp.headers]
-  let initial_payload = encoder.response_builder(resp.status, headers)
+  let initial_payload =
+    encoder.response_builder(
+      resp.status,
+      headers,
+      http.version_to_string(version),
+    )
 
   transport.send(conn.transport, conn.socket, initial_payload)
   |> result.then(fn(_ok) {
@@ -126,21 +150,39 @@ fn handle_chunked_body(
       transport.send(conn.transport, conn.socket, encoded)
     })
   })
-  |> result.replace(Nil)
+  |> result.replace(
+    resp
+    |> response.set_header("tranfer-encoding", "chunked")
+    |> response.set_body(bytes_builder.new()),
+  )
 }
 
 fn handle_file_body(
   resp: response.Response(ResponseData),
   body: ResponseData,
   conn: Connection,
-) -> Result(Nil, SocketReason) {
+  http_version: http.HttpVersion,
+) -> Result(response.Response(BytesBuilder), SocketReason) {
   let assert File(file_descriptor, offset, length) = body
+  let resp =
+    resp
+    |> response.set_body(bytes_builder.new())
+    |> http.add_date_header
+    |> response.prepend_header("content-length", int.to_string(length - offset))
+
+  let resp = case http_version {
+    http.Http1 -> http.connection_close(resp)
+    _ -> http.maybe_keep_alive(resp)
+  }
+
   let return =
     resp
-    |> response.prepend_header("content-length", int.to_string(length - offset))
-    |> response.set_body(bytes_builder.new())
     |> fn(r: response.Response(BytesBuilder)) {
-      encoder.response_builder(resp.status, r.headers)
+      encoder.response_builder(
+        resp.status,
+        r.headers,
+        http.version_to_string(http_version),
+      )
     }
     |> transport.send(conn.transport, conn.socket, _)
     |> result.then(fn(_) {
@@ -160,7 +202,7 @@ fn handle_file_body(
         Badarg
       })
     })
-    |> result.replace(Nil)
+    |> result.replace(resp)
 
   case file.close(file_descriptor) {
     Ok(_nil) -> Nil
@@ -180,12 +222,22 @@ fn handle_bytes_builder_body(
   body: BytesBuilder,
   conn: Connection,
   req: Request(Connection),
-) -> Result(Nil, SocketReason) {
+  version: http.HttpVersion,
+) -> Result(response.Response(BytesBuilder), SocketReason) {
+  let resp =
+    resp
+    |> response.set_body(body)
+    |> http.add_default_headers(req.method == ghttp.Head)
+
+  let resp = case version {
+    http.Http1 -> http.connection_close(resp)
+    _ -> http.maybe_keep_alive(resp)
+  }
+
   resp
-  |> response.set_body(body)
-  |> http.add_default_headers(True, req.method == ghttp.Head)
-  |> encoder.to_bytes_builder
+  |> encoder.to_bytes_builder(http.version_to_string(version))
   |> transport.send(conn.transport, conn.socket, _)
+  |> result.replace(resp)
 }
 
 /// Creates a standard HTTP handler service to pass to `mist.serve`

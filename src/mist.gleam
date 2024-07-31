@@ -688,7 +688,7 @@ pub fn server_sent_events(
   transport.send(
     req.body.transport,
     req.body.socket,
-    encoder.response_builder(200, with_default_headers.headers),
+    encoder.response_builder(200, with_default_headers.headers, "1.1"),
   )
   |> result.nil_error
   |> result.then(fn(_nil) {

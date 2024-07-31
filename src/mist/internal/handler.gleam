@@ -102,8 +102,8 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
         })
         |> result.then(fn(req) {
           case req {
-            http.Http1Request(req) ->
-              http_handler.call(req, handler, conn, sender)
+            http.Http1Request(req, version) ->
+              http_handler.call(req, handler, conn, sender, version)
               |> result.map(fn(new_state) {
                 Http1(state: new_state, self: self)
               })

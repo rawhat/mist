@@ -130,7 +130,7 @@ pub fn send_bytes_builder(
 ) -> Result(HpackContext, process.ExitReason) {
   let resp =
     resp
-    |> http.add_default_headers(False, False)
+    |> http.add_default_headers(False)
 
   let headers = [#(":status", int.to_string(resp.status)), ..resp.headers]
 

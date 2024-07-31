@@ -5,13 +5,20 @@ import gleam/int
 import gleam/list
 
 /// Turns an HTTP response into a TCP message
-pub fn to_bytes_builder(resp: Response(BytesBuilder)) -> BytesBuilder {
+pub fn to_bytes_builder(
+  resp: Response(BytesBuilder),
+  version: String,
+) -> BytesBuilder {
   resp.status
-  |> response_builder(resp.headers)
+  |> response_builder(resp.headers, version)
   |> bytes_builder.append_builder(resp.body)
 }
 
-pub fn response_builder(status: Int, headers: List(Header)) -> BytesBuilder {
+pub fn response_builder(
+  status: Int,
+  headers: List(Header),
+  version: String,
+) -> BytesBuilder {
   let status_string =
     status
     |> int.to_string
@@ -20,7 +27,7 @@ pub fn response_builder(status: Int, headers: List(Header)) -> BytesBuilder {
     |> bytes_builder.append(status_to_bit_array(status))
 
   bytes_builder.new()
-  |> bytes_builder.append(<<"HTTP/1.1 ":utf8>>)
+  |> bytes_builder.append(<<"HTTP/":utf8, version:utf8, " ":utf8>>)
   |> bytes_builder.append_builder(status_string)
   |> bytes_builder.append(<<"\r\n":utf8>>)
   |> bytes_builder.append_builder(encode_headers(headers))

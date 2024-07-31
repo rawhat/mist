@@ -70,6 +70,7 @@ pub type DecodeError {
   InvalidBody
   DiscardPacket
   NoHostHeader
+  InvalidHttpVersion
 }
 
 pub fn from_header(value: BitArray) -> String {
@@ -229,8 +230,20 @@ fn read_chunk(
   }
 }
 
+pub type HttpVersion {
+  Http1
+  Http11
+}
+
+pub fn version_to_string(version: HttpVersion) {
+  case version {
+    Http1 -> "1.0"
+    Http11 -> "1.1"
+  }
+}
+
 pub type ParsedRequest {
-  Http1Request(request.Request(Connection))
+  Http1Request(request: request.Request(Connection), version: HttpVersion)
   Upgrade(BitArray)
 }
 
@@ -240,7 +253,7 @@ pub fn parse_request(
   conn: Connection,
 ) -> Result(ParsedRequest, DecodeError) {
   case decode_packet(HttpBin, bs, []) {
-    Ok(BinaryData(HttpRequest(http_method, AbsPath(path), _version), rest)) -> {
+    Ok(BinaryData(HttpRequest(http_method, AbsPath(path), version), rest)) -> {
       use method <- result.then(
         http_method
         |> atom.from_dynamic
@@ -297,7 +310,11 @@ pub fn parse_request(
           query: option.from_result(query),
           scheme: scheme,
         )
-      Ok(Http1Request(req))
+      case version {
+        #(1, 0) -> Ok(Http1Request(request: req, version: Http1))
+        #(1, 1) -> Ok(Http1Request(request: req, version: Http11))
+        _ -> Error(InvalidHttpVersion)
+      }
     }
     // "\r\nSM\r\n\r\n"
     Ok(Http2Upgrade(<<
@@ -470,8 +487,9 @@ pub fn upgrade(
 
   use _sent <- result.then(
     resp
-    |> add_default_headers(True, req.method == http.Head)
-    |> encoder.to_bytes_builder
+    |> add_default_headers(req.method == http.Head)
+    |> maybe_keep_alive
+    |> encoder.to_bytes_builder("1.1")
     |> transport.send(transport, socket, _)
     |> result.nil_error,
   )
@@ -479,9 +497,50 @@ pub fn upgrade(
   Ok(Nil)
 }
 
+pub fn add_date_header(resp: Response(any)) -> Response(any) {
+  case response.get_header(resp, "date") {
+    Error(_nil) -> response.set_header(resp, "date", clock.get_date())
+    _ -> resp
+  }
+}
+
+pub fn connection_close(resp: Response(any)) -> Response(any) {
+  response.set_header(resp, "connection", "close")
+}
+
+pub fn keep_alive(resp: Response(any)) -> Response(any) {
+  response.set_header(resp, "connection", "keep-alive")
+}
+
+pub fn maybe_keep_alive(resp: Response(any)) -> Response(any) {
+  case response.get_header(resp, "connection") {
+    Ok(_) -> resp
+    _ -> response.set_header(resp, "connection", "keep-alive")
+  }
+}
+
+pub fn add_content_length(
+  when when: Bool,
+  length length: Int,
+) -> fn(Response(any)) -> Response(any) {
+  fn(resp: Response(any)) {
+    case when {
+      True -> {
+        let #(_existing, headers) =
+          resp.headers
+          |> list.key_pop("content-length")
+          |> result.lazy_unwrap(fn() { #("", resp.headers) })
+
+        Response(..resp, headers: headers)
+        |> response.set_header("content-length", int.to_string(length))
+      }
+      False -> resp
+    }
+  }
+}
+
 pub fn add_default_headers(
   resp: Response(BytesBuilder),
-  keep_alive: Bool,
   is_head_response: Bool,
 ) -> Response(BytesBuilder) {
   let body_size = bytes_builder.byte_size(resp.body)
@@ -493,34 +552,12 @@ pub fn add_default_headers(
     _ -> True
   }
 
-  let #(_existing, headers) =
-    resp.headers
-    |> list.key_pop("content-length")
-    |> result.lazy_unwrap(fn() { #("", resp.headers) })
-
-  let headers = case include_content_length, is_head_response {
-    True, True -> resp.headers
-    True, False -> {
-      [#("content-length", int.to_string(body_size)), ..resp.headers]
-    }
-    False, _ -> headers
-  }
-
-  let existing = list.key_pop(headers, "connection")
-  let keep_alive_header = #("connection", "keep-alive")
-  let headers = case keep_alive, existing {
-    _, Ok(#(connection, headers)) -> [#("connection", connection), ..headers]
-    False, _ -> headers
-    True, _ -> [keep_alive_header, ..headers]
-  }
-  let headers = {
-    case response.get_header(resp, "date") {
-      Error(_nil) -> [#("date", clock.get_date()), ..headers]
-      _ -> headers
-    }
-  }
-
-  Response(..resp, headers: headers)
+  resp
+  |> add_date_header
+  |> add_content_length(
+    when: include_content_length && !is_head_response,
+    length: body_size,
+  )
 }
 
 fn is_continue(req: Request(Connection)) -> Bool {
@@ -536,7 +573,7 @@ pub fn handle_continue(req: Request(Connection)) -> Result(Nil, DecodeError) {
     True -> {
       response.new(100)
       |> response.set_body(bytes_builder.new())
-      |> encoder.to_bytes_builder
+      |> encoder.to_bytes_builder("1.1")
       |> transport.send(req.body.transport, req.body.socket, _)
       |> result.replace_error(MalformedRequest)
     }
