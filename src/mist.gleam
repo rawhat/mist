@@ -396,6 +396,10 @@ pub fn get_supervisor(server: Server) -> Subject(supervisor.Message) {
   server.supervisor
 }
 
+pub fn get_port(server: Server) -> Int {
+  server.port
+}
+
 /// Start a `mist` service over HTTP with the provided builder.
 pub fn start_http(
   builder: Builder(Connection, ResponseData),
