@@ -389,7 +389,7 @@ pub type Port {
 }
 
 pub opaque type Server {
-  Server(supervisor: Subject(supervisor.Message))
+  Server(supervisor: Subject(supervisor.Message), port: Int)
 }
 
 pub fn get_supervisor(server: Server) -> Subject(supervisor.Message) {
@@ -418,7 +418,7 @@ pub fn start_http_server(
     case glisten.get_port(server) {
       Ok(port) -> {
         builder.after_start(port, Http)
-        Server(glisten.get_supervisor(server))
+        Server(supervisor: glisten.get_supervisor(server), port: port)
       }
       Error(reason) -> {
         logging.log(
@@ -487,7 +487,7 @@ pub fn start_https_server(
     case glisten.get_port(server) {
       Ok(port) -> {
         builder.after_start(port, Https)
-        Server(glisten.get_supervisor(server))
+        Server(supervisor: glisten.get_supervisor(server), port: port)
       }
       Error(reason) -> {
         logging.log(
