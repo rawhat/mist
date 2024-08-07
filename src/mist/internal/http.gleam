@@ -330,6 +330,16 @@ pub fn parse_request(
     >>)) -> {
       Ok(Upgrade(data))
     }
+    Ok(MoreData(size)) -> {
+      let amount_to_read = option.unwrap(size, 0)
+      use next <- result.then(read_data(
+        conn.socket,
+        conn.transport,
+        Buffer(amount_to_read, bs),
+        MalformedRequest,
+      ))
+      parse_request(next, conn)
+    }
     _ -> Error(DiscardPacket)
   }
 }
