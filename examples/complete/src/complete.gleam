@@ -118,6 +118,10 @@ fn serve_chunk(_request: Request(Connection)) -> Response(ResponseData) {
   let iter =
     ["one", "two", "three"]
     |> iterator.from_list
+    |> iterator.map(fn(data) {
+      process.sleep(2000)
+      data
+    })
     |> iterator.map(bytes_builder.from_string)
 
   response.new(200)

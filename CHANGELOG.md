@@ -4,6 +4,9 @@
 
 - Return `Server` type from `start_*` methods to get OS-assigned port.  Will
 also eventually provide graceful shutdown options
+- Move client IP / port access from `Connection` to public function
+- Don't keep HTTP/1.0 connection open
+- Fix bug reading large requests from socket
 
 ## v1.2.0
 
