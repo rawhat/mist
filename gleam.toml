@@ -19,7 +19,7 @@ gleam_stdlib = "~> 0.35 or ~> 1.0"
 gramps = "~> 2.0"
 hpack_erl = "~> 0.3"
 logging = "~> 1.0"
-glisten = ">= 4.0.0 and < 5.0.0"
+glisten = ">= 5.0.0 and < 6.0.0"
 
 [dev-dependencies]
 gleeunit = "~> 1.0"

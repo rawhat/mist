@@ -51,17 +51,27 @@ pub type IpAddress {
   IpV6(Int, Int, Int, Int, Int, Int, Int, Int)
 }
 
+fn convert_ip_address(ip: glisten.IpAddress) -> IpAddress {
+  case ip {
+    glisten.IpV4(a, b, c, d) -> IpV4(a, b, c, d)
+    glisten.IpV6(a, b, c, d, e, f, g, h) -> IpV6(a, b, c, d, e, f, g, h)
+  }
+}
+
+pub type ConnectionInfo {
+  ConnectionInfo(port: Int, ip_address: IpAddress)
+}
+
 /// Tries to get the IP address and port of a connected client.
-pub fn get_client_info(conn: Connection) -> Result(#(IpAddress, Int), Nil) {
+pub fn get_client_info(conn: Connection) -> Result(ConnectionInfo, Nil) {
   transport.peername(conn.transport, conn.socket)
   |> result.map(fn(pair) {
-    case pair {
-      #(transport.IpV4(a, b, c, d), port) -> #(IpV4(a, b, c, d), port)
-      #(transport.IpV6(a, b, c, d, e, f, g, h), port) -> #(
-        IpV6(a, b, c, d, e, f, g, h),
-        port,
-      )
-    }
+    ConnectionInfo(
+      ip_address: pair.0
+        |> glisten.convert_ip_address
+        |> convert_ip_address,
+      port: pair.1,
+    )
   })
 }
 
@@ -389,7 +399,11 @@ pub type Port {
 }
 
 pub opaque type Server {
-  Server(supervisor: Subject(supervisor.Message), port: Int)
+  Server(
+    supervisor: Subject(supervisor.Message),
+    port: Int,
+    ip_address: IpAddress,
+  )
 }
 
 pub fn get_supervisor(server: Server) -> Subject(supervisor.Message) {
@@ -419,10 +433,14 @@ pub fn start_http_server(
   |> glisten.handler(handler.init, _)
   |> glisten.start_server(builder.port)
   |> result.map(fn(server) {
-    case glisten.get_port(server) {
-      Ok(port) -> {
-        builder.after_start(port, Http)
-        Server(supervisor: glisten.get_supervisor(server), port: port)
+    case glisten.get_server_info(server, 5000) {
+      Ok(info) -> {
+        builder.after_start(info.port, Http)
+        Server(
+          supervisor: glisten.get_supervisor(server),
+          port: info.port,
+          ip_address: convert_ip_address(info.ip_address),
+        )
       }
       Error(reason) -> {
         logging.log(
@@ -488,10 +506,14 @@ pub fn start_https_server(
   |> glisten.handler(handler.init, _)
   |> glisten.start_ssl_server(builder.port, certfile, keyfile)
   |> result.map(fn(server) {
-    case glisten.get_port(server) {
-      Ok(port) -> {
-        builder.after_start(port, Https)
-        Server(supervisor: glisten.get_supervisor(server), port: port)
+    case glisten.get_server_info(server, 1000) {
+      Ok(info) -> {
+        builder.after_start(info.port, Https)
+        Server(
+          supervisor: glisten.get_supervisor(server),
+          port: info.port,
+          ip_address: convert_ip_address(info.ip_address),
+        )
       }
       Error(reason) -> {
         logging.log(
