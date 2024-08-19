@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.0.0
 
 - Return `Server` type from `start_*` methods to get OS-assigned port.  Will
 also eventually provide graceful shutdown options
