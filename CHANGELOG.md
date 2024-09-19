@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.0.0
+- Allow binding to an interface
+- Disable IPv6 by default
+- Pass `IpAddress` to `after_start`
+
 ## v2.0.0
 
 - Return `Server` type from `start_*` methods to get OS-assigned port.  Will
