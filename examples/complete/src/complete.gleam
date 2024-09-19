@@ -69,6 +69,8 @@ pub fn main() {
       }
     }
     |> mist.new
+    |> mist.bind("localhost")
+    |> mist.with_ipv6
     |> mist.port(0)
     |> mist.start_http
 

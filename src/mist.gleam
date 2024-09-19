@@ -51,10 +51,21 @@ pub type IpAddress {
   IpV6(Int, Int, Int, Int, Int, Int, Int, Int)
 }
 
-fn convert_ip_address(ip: glisten.IpAddress) -> IpAddress {
+pub fn ip_address_to_string(address: IpAddress) -> String {
+  glisten.ip_address_to_string(to_glisten_ip_address(address))
+}
+
+fn to_mist_ip_address(ip: glisten.IpAddress) -> IpAddress {
   case ip {
     glisten.IpV4(a, b, c, d) -> IpV4(a, b, c, d)
     glisten.IpV6(a, b, c, d, e, f, g, h) -> IpV6(a, b, c, d, e, f, g, h)
+  }
+}
+
+fn to_glisten_ip_address(ip: IpAddress) -> glisten.IpAddress {
+  case ip {
+    IpV4(a, b, c, d) -> glisten.IpV4(a, b, c, d)
+    IpV6(a, b, c, d, e, f, g, h) -> glisten.IpV6(a, b, c, d, e, f, g, h)
   }
 }
 
@@ -69,7 +80,7 @@ pub fn get_client_info(conn: Connection) -> Result(ConnectionInfo, Nil) {
     ConnectionInfo(
       ip_address: pair.0
         |> glisten.convert_ip_address
-        |> convert_ip_address,
+        |> to_mist_ip_address,
       port: pair.1,
     )
   })
@@ -332,21 +343,35 @@ pub opaque type Builder(request_body, response_body) {
   Builder(
     port: Int,
     handler: fn(Request(request_body)) -> Response(response_body),
-    after_start: fn(Int, Scheme) -> Nil,
+    after_start: fn(Int, Scheme, IpAddress) -> Nil,
+    interface: String,
+    ipv6_support: Bool,
   )
 }
 
 /// Create a new `mist` handler with a given function. The default port is
 /// 4000.
 pub fn new(handler: fn(Request(in)) -> Response(out)) -> Builder(in, out) {
-  Builder(port: 4000, handler: handler, after_start: fn(port, scheme) {
-    let message =
-      "Listening on "
-      <> gleam_http.scheme_to_string(scheme)
-      <> "://localhost:"
-      <> int.to_string(port)
-    io.println(message)
-  })
+  Builder(
+    port: 4000,
+    handler: handler,
+    interface: "localhost",
+    ipv6_support: False,
+    after_start: fn(port, scheme, interface) {
+      let address = case interface {
+        IpV6(..) -> "[" <> ip_address_to_string(interface) <> "]"
+        _ -> ip_address_to_string(interface)
+      }
+      let message =
+        "Listening on "
+        <> gleam_http.scheme_to_string(scheme)
+        <> "://"
+        <> address
+        <> ":"
+        <> int.to_string(port)
+      io.println(message)
+    },
+  )
 }
 
 /// Assign a different listening port to the service.
@@ -368,16 +393,30 @@ pub fn read_request_body(
       Error(_) -> failure_response
     }
   }
-  Builder(builder.port, handler, builder.after_start)
+  Builder(
+    builder.port,
+    handler,
+    builder.after_start,
+    builder.interface,
+    builder.ipv6_support,
+  )
 }
 
 /// Override the default function to be called after the service starts. The
 /// default is to log a message with the listening port.
 pub fn after_start(
   builder: Builder(in, out),
-  after_start: fn(Int, Scheme) -> Nil,
+  after_start: fn(Int, Scheme, IpAddress) -> Nil,
 ) -> Builder(in, out) {
   Builder(..builder, after_start: after_start)
+}
+
+pub fn bind(builder: Builder(in, out), interface: String) -> Builder(in, out) {
+  Builder(..builder, interface: interface)
+}
+
+pub fn with_ipv6(builder: Builder(in, out)) -> Builder(in, out) {
+  Builder(..builder, ipv6_support: True)
 }
 
 fn convert_body_types(
@@ -431,15 +470,23 @@ pub fn start_http_server(
   fn(req) { convert_body_types(builder.handler(req)) }
   |> handler.with_func
   |> glisten.handler(handler.init, _)
+  |> glisten.bind(builder.interface)
+  |> fn(handler) {
+    case builder.ipv6_support {
+      True -> glisten.with_ipv6(handler)
+      False -> handler
+    }
+  }
   |> glisten.start_server(builder.port)
   |> result.map(fn(server) {
     case glisten.get_server_info(server, 5000) {
       Ok(info) -> {
-        builder.after_start(info.port, Http)
+        let ip_address = to_mist_ip_address(info.ip_address)
+        builder.after_start(info.port, Http, ip_address)
         Server(
           supervisor: glisten.get_supervisor(server),
           port: info.port,
-          ip_address: convert_ip_address(info.ip_address),
+          ip_address: ip_address,
         )
       }
       Error(reason) -> {
@@ -504,15 +551,17 @@ pub fn start_https_server(
   fn(req) { convert_body_types(builder.handler(req)) }
   |> handler.with_func
   |> glisten.handler(handler.init, _)
+  |> glisten.bind(builder.interface)
   |> glisten.start_ssl_server(builder.port, certfile, keyfile)
   |> result.map(fn(server) {
     case glisten.get_server_info(server, 1000) {
       Ok(info) -> {
-        builder.after_start(info.port, Https)
+        let ip_address = to_mist_ip_address(info.ip_address)
+        builder.after_start(info.port, Https, ip_address)
         Server(
           supervisor: glisten.get_supervisor(server),
           port: info.port,
-          ip_address: convert_ip_address(info.ip_address),
+          ip_address: ip_address,
         )
       }
       Error(reason) -> {
