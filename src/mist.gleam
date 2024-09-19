@@ -51,6 +51,8 @@ pub type IpAddress {
   IpV6(Int, Int, Int, Int, Int, Int, Int, Int)
 }
 
+/// Convenience function for printing the `IpAddress` type. It will convert the
+/// IPv6 loopback to the short-hand `::1`.
 pub fn ip_address_to_string(address: IpAddress) -> String {
   glisten.ip_address_to_string(to_glisten_ip_address(address))
 }
@@ -411,10 +413,19 @@ pub fn after_start(
   Builder(..builder, after_start: after_start)
 }
 
+/// Specify an interface to listen on. This is a string that can have the
+/// following values: "localhost", a valid IPv4 address (i.e. "127.0.0.1"), or
+/// a valid IPv6 address (i.e. "::1"). An invalid value will cause the
+/// application to crash.
 pub fn bind(builder: Builder(in, out), interface: String) -> Builder(in, out) {
   Builder(..builder, interface: interface)
 }
 
+/// By default, `mist` will listen on `localhost` over IPv4. If you specify an
+/// IPv4 address to bind to, it will still only serve over IPv4. Calling this
+/// function will listen on both IPv4 and IPv6 for the given interface. If it is
+/// not supported, your application will crash. If you provide an IPv6 address
+/// to `mist.bind`, this function will have no effect.
 pub fn with_ipv6(builder: Builder(in, out)) -> Builder(in, out) {
   Builder(..builder, ipv6_support: True)
 }
