@@ -1,11 +1,11 @@
-import gleam/bytes_builder.{type BytesBuilder}
+import gleam/yielder.{type Yielder}
+import gleam/bytes_tree.{type BytesTree}
 import gleam/erlang.{Errored, Exited, Thrown, rescue}
 import gleam/erlang/process.{type Subject}
 import gleam/http as ghttp
 import gleam/http/request.{type Request}
 import gleam/http/response
 import gleam/int
-import gleam/iterator.{type Iterator}
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
@@ -52,8 +52,7 @@ pub fn call(
       }
       response.Response(body: body, ..) as resp -> {
         case body {
-          Bytes(body) ->
-            handle_bytes_builder_body(resp, body, conn, req, version)
+          Bytes(body) -> handle_bytes_tree_body(resp, body, conn, req, version)
           Chunked(body) -> handle_chunked_body(resp, body, conn, version)
           File(..) -> handle_file_body(resp, body, conn, version)
           _ -> panic as "This shouldn't ever happen 🤞"
@@ -78,7 +77,7 @@ fn log_and_error(
       let resp =
         response.new(500)
         |> response.set_body(
-          bytes_builder.from_bit_array(<<"Internal Server Error":utf8>>),
+          bytes_tree.from_bit_array(<<"Internal Server Error":utf8>>),
         )
         |> response.prepend_header("content-length", "21")
         |> http.add_default_headers(req.method == ghttp.Head)
@@ -90,7 +89,7 @@ fn log_and_error(
 
       let _ =
         resp
-        |> encoder.to_bytes_builder(http.version_to_string(version))
+        |> encoder.to_bytes_tree(http.version_to_string(version))
         |> transport.send(transport, socket, _)
 
       let _ = transport.close(transport, socket)
@@ -100,7 +99,7 @@ fn log_and_error(
 }
 
 fn close_or_set_timer(
-  resp: response.Response(BytesBuilder),
+  resp: response.Response(BytesTree),
   conn: Connection,
   sender: Subject(handler.Message(user_message)),
 ) -> Result(State, process.ExitReason) {
@@ -121,10 +120,10 @@ fn close_or_set_timer(
 
 fn handle_chunked_body(
   resp: response.Response(ResponseData),
-  body: Iterator(BytesBuilder),
+  body: Yielder(BytesTree),
   conn: Connection,
   version: http.HttpVersion,
-) -> Result(response.Response(BytesBuilder), SocketReason) {
+) -> Result(response.Response(BytesTree), SocketReason) {
   let headers = [#("transfer-encoding", "chunked"), ..resp.headers]
   let initial_payload =
     encoder.response_builder(
@@ -136,16 +135,16 @@ fn handle_chunked_body(
   transport.send(conn.transport, conn.socket, initial_payload)
   |> result.then(fn(_ok) {
     body
-    |> iterator.append(iterator.from_list([bytes_builder.new()]))
-    |> iterator.try_fold(Nil, fn(_prev, chunk) {
-      let size = bytes_builder.byte_size(chunk)
+    |> yielder.append(yielder.from_list([bytes_tree.new()]))
+    |> yielder.try_fold(Nil, fn(_prev, chunk) {
+      let size = bytes_tree.byte_size(chunk)
       let encoded =
         size
         |> int_to_hex
-        |> bytes_builder.from_string
-        |> bytes_builder.append_string("\r\n")
-        |> bytes_builder.append_builder(chunk)
-        |> bytes_builder.append_string("\r\n")
+        |> bytes_tree.from_string
+        |> bytes_tree.append_string("\r\n")
+        |> bytes_tree.append_tree(chunk)
+        |> bytes_tree.append_string("\r\n")
 
       transport.send(conn.transport, conn.socket, encoded)
     })
@@ -153,7 +152,7 @@ fn handle_chunked_body(
   |> result.replace(
     resp
     |> response.set_header("tranfer-encoding", "chunked")
-    |> response.set_body(bytes_builder.new()),
+    |> response.set_body(bytes_tree.new()),
   )
 }
 
@@ -162,11 +161,11 @@ fn handle_file_body(
   body: ResponseData,
   conn: Connection,
   http_version: http.HttpVersion,
-) -> Result(response.Response(BytesBuilder), SocketReason) {
+) -> Result(response.Response(BytesTree), SocketReason) {
   let assert File(file_descriptor, offset, length) = body
   let resp =
     resp
-    |> response.set_body(bytes_builder.new())
+    |> response.set_body(bytes_tree.new())
     |> http.add_date_header
     |> response.prepend_header("content-length", int.to_string(length - offset))
 
@@ -177,7 +176,7 @@ fn handle_file_body(
 
   let return =
     resp
-    |> fn(r: response.Response(BytesBuilder)) {
+    |> fn(r: response.Response(BytesTree)) {
       encoder.response_builder(
         resp.status,
         r.headers,
@@ -217,13 +216,13 @@ fn handle_file_body(
   return
 }
 
-fn handle_bytes_builder_body(
+fn handle_bytes_tree_body(
   resp: response.Response(ResponseData),
-  body: BytesBuilder,
+  body: BytesTree,
   conn: Connection,
   req: Request(Connection),
   version: http.HttpVersion,
-) -> Result(response.Response(BytesBuilder), SocketReason) {
+) -> Result(response.Response(BytesTree), SocketReason) {
   let resp =
     resp
     |> response.set_body(body)
@@ -235,7 +234,7 @@ fn handle_bytes_builder_body(
   }
 
   resp
-  |> encoder.to_bytes_builder(http.version_to_string(version))
+  |> encoder.to_bytes_tree(http.version_to_string(version))
   |> transport.send(conn.transport, conn.socket, _)
   |> result.replace(resp)
 }

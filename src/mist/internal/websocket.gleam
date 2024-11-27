@@ -301,10 +301,7 @@ fn apply_frames(
       transport.send(
         connection.transport,
         connection.socket,
-        websocket.frame_to_bytes_builder(
-          Control(PongFrame(length, payload)),
-          None,
-        ),
+        websocket.frame_to_bytes_builder(Control(PongFrame(length, payload)), None),
       )
       |> result.map(fn(_nil) {
         set_active(connection.transport, connection.socket)

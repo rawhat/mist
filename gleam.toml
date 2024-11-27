@@ -20,6 +20,7 @@ gramps = "~> 2.0"
 hpack_erl = "~> 0.3"
 logging = "~> 1.0"
 glisten = ">= 6.0.0 and < 7.0.0"
+gleam_yielder = ">= 1.0.0 and < 2.0.0"
 
 [dev-dependencies]
 gleeunit = "~> 1.0"

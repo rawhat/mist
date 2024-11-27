@@ -1,4 +1,4 @@
-import gleam/bytes_builder
+import gleam/bytes_tree
 import gleam/erlang/process
 import gleam/function
 import gleam/http/request
@@ -6,7 +6,7 @@ import gleam/http/response
 import gleam/int
 import gleam/otp/actor
 import gleam/string
-import gleam/string_builder
+import gleam/string_tree
 import logging
 import mist
 import repeatedly
@@ -52,7 +52,7 @@ pub fn main() {
 
   let index_resp =
     response.new(200)
-    |> response.set_body(mist.Bytes(bytes_builder.from_string(index_html)))
+    |> response.set_body(mist.Bytes(bytes_tree.from_string(index_html)))
 
   let assert Ok(_) =
     fn(req) {
@@ -79,7 +79,7 @@ pub fn main() {
               case message {
                 Time(value) -> {
                   let event =
-                    mist.event(string_builder.from_string(int.to_string(value)))
+                    mist.event(string_tree.from_string(int.to_string(value)))
                   case mist.send_event(conn, event) {
                     Ok(_) -> {
                       logging.log(

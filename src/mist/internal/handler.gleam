@@ -60,7 +60,7 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
           Bytes(bytes) -> {
             resp
             |> response.set_body(bytes)
-            |> http2.send_bytes_builder(conn, state.send_hpack_context, id)
+            |> http2.send_bytes_tree(conn, state.send_hpack_context, id)
           }
           File(..) ->
             Error(process.Abnormal("File sending unsupported over HTTP/2"))
