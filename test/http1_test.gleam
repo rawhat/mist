@@ -1,5 +1,5 @@
 import gleam/bit_array
-import gleam/bytes_builder.{type BytesBuilder}
+import gleam/bytes_tree.{type BytesTree}
 import gleam/http
 import gleam/http/request
 import gleam/http/response.{type Response, Response}
@@ -23,14 +23,14 @@ pub type Instantiator {
   Inparallel
 }
 
-fn get_default_response() -> Response(BytesBuilder) {
+fn get_default_response() -> Response(BytesTree) {
   response.new(200)
   |> response.prepend_header("user-agent", "hackney/1.20.1")
   |> response.prepend_header("host", "localhost:8888")
   |> response.prepend_header("content-type", "application/octet-stream")
   |> response.prepend_header("content-length", "13")
   |> response.prepend_header("connection", "keep-alive")
-  |> response.set_body(bytes_builder.from_bit_array(<<"hello, world!":utf8>>))
+  |> response.set_body(bytes_tree.from_bit_array(<<"hello, world!":utf8>>))
 }
 
 pub fn it_echoes_with_data_test() {
@@ -72,7 +72,7 @@ pub fn it_supports_large_header_fields_test() {
     |> response.prepend_header("content-type", "application/octet-stream")
     |> response.prepend_header("content-length", "0")
     |> response.prepend_header("host", "localhost:8888")
-    |> response.set_body(bytes_builder.from_bit_array(<<>>))
+    |> response.set_body(bytes_tree.from_bit_array(<<>>))
 
   let resp = scaffold.with_server(8888, scaffold.default_handler, big_request)
 
@@ -98,7 +98,7 @@ pub fn it_rejects_large_requests_test() {
 
   let expected =
     response.new(413)
-    |> response.set_body(bytes_builder.from_bit_array(<<>>))
+    |> response.set_body(bytes_tree.from_bit_array(<<>>))
     |> response.prepend_header("content-length", "0")
     |> response.prepend_header("connection", "close")
 
@@ -138,7 +138,7 @@ pub fn it_supports_chunked_encoding_test() {
     |> response.prepend_header("host", "localhost:8888")
     |> response.prepend_header("connection", "keep-alive")
     |> response.prepend_header("content-length", "10000")
-    |> response.set_body(bytes_builder.from_string(string.repeat("a", 10_000)))
+    |> response.set_body(bytes_tree.from_string(string.repeat("a", 10_000)))
 
   bitstring_response_should_equal(actual, expected)
 }
@@ -159,7 +159,7 @@ pub fn it_supports_query_parameters_test() {
     get_default_response()
     |> response.set_header("content-length", "61")
     |> response.set_body(
-      bytes_builder.from_bit_array(<<
+      bytes_tree.from_bit_array(<<
         "something=123&another=true&a-complicated-one=is%20the%20thing":utf8,
       >>),
     )
@@ -178,7 +178,7 @@ pub fn it_handles_query_parameters_with_question_mark_test() {
   let expected =
     get_default_response()
     |> response.set_header("content-length", "7")
-    |> response.set_body(bytes_builder.from_bit_array(<<"%3F=123":utf8>>))
+    |> response.set_body(bytes_tree.from_bit_array(<<"%3F=123":utf8>>))
 
   string_response_should_equal(resp, expected)
 }
@@ -194,7 +194,7 @@ pub fn it_doesnt_mangle_query_test() {
   let expected =
     get_default_response()
     |> response.set_header("content-length", "4")
-    |> response.set_body(bytes_builder.from_bit_array(<<"test":utf8>>))
+    |> response.set_body(bytes_tree.from_bit_array(<<"test":utf8>>))
 
   string_response_should_equal(resp, expected)
 }
@@ -210,7 +210,7 @@ pub fn it_supports_expect_continue_header_test() {
 
   let expected_body =
     string.repeat("a", 1000)
-    |> bytes_builder.from_string
+    |> bytes_tree.from_string
 
   let expected =
     response.new(200)

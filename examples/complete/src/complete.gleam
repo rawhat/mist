@@ -1,4 +1,4 @@
-import gleam/bytes_builder
+import gleam/bytes_tree
 import gleam/dict.{type Dict}
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/process
@@ -39,7 +39,7 @@ pub fn main() {
 
   let not_found =
     response.new(404)
-    |> response.set_body(mist.Bytes(bytes_builder.new()))
+    |> response.set_body(mist.Bytes(bytes_tree.new()))
 
   let assert Ok(_) =
     fn(req: Request(Connection)) -> Response(ResponseData) {
@@ -52,7 +52,7 @@ pub fn main() {
           response.new(200)
           |> response.prepend_header("my-value", "abc")
           |> response.prepend_header("my-value", "123")
-          |> response.set_body(mist.Bytes(bytes_builder.from_string(index)))
+          |> response.set_body(mist.Bytes(bytes_tree.from_string(index)))
         ["ws"] ->
           mist.websocket(
             request: req,
@@ -107,12 +107,12 @@ fn echo_body(request: Request(Connection)) -> Response(ResponseData) {
   mist.read_body(request, 1024 * 1024 * 10)
   |> result.map(fn(req) {
     response.new(200)
-    |> response.set_body(mist.Bytes(bytes_builder.from_bit_array(req.body)))
+    |> response.set_body(mist.Bytes(bytes_tree.from_bit_array(req.body)))
     |> response.set_header("content-type", content_type)
   })
   |> result.lazy_unwrap(fn() {
     response.new(400)
-    |> response.set_body(mist.Bytes(bytes_builder.new()))
+    |> response.set_body(mist.Bytes(bytes_tree.new()))
   })
 }
 
@@ -124,7 +124,7 @@ fn serve_chunk(_request: Request(Connection)) -> Response(ResponseData) {
       process.sleep(2000)
       data
     })
-    |> iterator.map(bytes_builder.from_string)
+    |> iterator.map(bytes_tree.from_string)
 
   response.new(200)
   |> response.set_body(mist.Chunked(iter))
@@ -147,14 +147,14 @@ fn serve_file(
   })
   |> result.lazy_unwrap(fn() {
     response.new(404)
-    |> response.set_body(mist.Bytes(bytes_builder.new()))
+    |> response.set_body(mist.Bytes(bytes_tree.new()))
   })
 }
 
 fn handle_form(req: Request(Connection)) -> Response(ResponseData) {
   let _req = mist.read_body(req, 1024 * 1024 * 30)
   response.new(200)
-  |> response.set_body(mist.Bytes(bytes_builder.new()))
+  |> response.set_body(mist.Bytes(bytes_tree.new()))
 }
 
 fn guess_content_type(_path: String) -> String {

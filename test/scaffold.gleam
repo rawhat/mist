@@ -1,6 +1,6 @@
 import gleam/bit_array
 import gleam/bool
-import gleam/bytes_builder.{type BytesBuilder}
+import gleam/bytes_tree.{type BytesTree}
 import gleam/erlang
 import gleam/erlang/process.{type Selector}
 import gleam/hackney
@@ -8,7 +8,7 @@ import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response, Response}
 import gleam/int
-import gleam/iterator
+import gleam/yielder
 import gleam/list
 import gleam/option
 import gleam/otp/actor
@@ -141,12 +141,12 @@ pub fn chunked_echo_server(chunk_size: Int) {
     let chunks =
       body
       |> string.to_graphemes
-      |> iterator.from_list
-      |> iterator.sized_chunk(chunk_size)
-      |> iterator.map(fn(chars) {
+      |> yielder.from_list
+      |> yielder.sized_chunk(chunk_size)
+      |> yielder.map(fn(chars) {
         chars
         |> string.join("")
-        |> bytes_builder.from_string
+        |> bytes_tree.from_string
       })
     response.new(200)
     |> response.set_body(mist.Chunked(chunks))
@@ -159,7 +159,7 @@ pub fn default_handler(
   let too_beeg =
     response.new(413)
     |> response.set_header("connection", "close")
-    |> response.set_body(mist.Bytes(bytes_builder.new()))
+    |> response.set_body(mist.Bytes(bytes_tree.new()))
   let req = mist.read_body(req, 4_000_000)
   use <- bool.guard(when: result.is_error(req), return: too_beeg)
   let assert Ok(req) = req
@@ -167,10 +167,10 @@ pub fn default_handler(
     req.query
     |> option.map(bit_array.from_string)
     |> option.unwrap(req.body)
-    |> bytes_builder.from_bit_array
+    |> bytes_tree.from_bit_array
   let length =
     body
-    |> bytes_builder.byte_size
+    |> bytes_tree.byte_size
     |> int.to_string
   let headers =
     list.filter(req.headers, fn(p) {
@@ -184,15 +184,15 @@ pub fn default_handler(
   Response(status: 200, headers: headers, body: mist.Bytes(body))
 }
 
-fn compare_bitstring_body(actual: BitArray, expected: BytesBuilder) {
+fn compare_bitstring_body(actual: BitArray, expected: BytesTree) {
   actual
-  |> bytes_builder.from_bit_array
+  |> bytes_tree.from_bit_array
   |> should.equal(expected)
 }
 
-fn compare_string_body(actual: String, expected: BytesBuilder) {
+fn compare_string_body(actual: String, expected: BytesTree) {
   actual
-  |> bytes_builder.from_string
+  |> bytes_tree.from_string
   |> should.equal(expected)
 }
 
@@ -222,7 +222,7 @@ fn compare_headers_and_status(actual: Response(a), expected: Response(b)) {
 
 pub fn string_response_should_equal(
   actual: Response(String),
-  expected: Response(BytesBuilder),
+  expected: Response(BytesTree),
 ) {
   compare_headers_and_status(actual, expected)
   compare_string_body(actual.body, expected.body)
@@ -230,7 +230,7 @@ pub fn string_response_should_equal(
 
 pub fn bitstring_response_should_equal(
   actual: Response(BitArray),
-  expected: Response(BytesBuilder),
+  expected: Response(BytesTree),
 ) {
   compare_headers_and_status(actual, expected)
   compare_bitstring_body(actual.body, expected.body)

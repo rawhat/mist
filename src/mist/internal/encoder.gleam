@@ -1,37 +1,34 @@
-import gleam/bytes_builder.{type BytesBuilder}
+import gleam/bytes_tree.{type BytesTree}
 import gleam/http.{type Header}
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/list
 
 /// Turns an HTTP response into a TCP message
-pub fn to_bytes_builder(
-  resp: Response(BytesBuilder),
-  version: String,
-) -> BytesBuilder {
+pub fn to_bytes_tree(resp: Response(BytesTree), version: String) -> BytesTree {
   resp.status
   |> response_builder(resp.headers, version)
-  |> bytes_builder.append_builder(resp.body)
+  |> bytes_tree.append_tree(resp.body)
 }
 
 pub fn response_builder(
   status: Int,
   headers: List(Header),
   version: String,
-) -> BytesBuilder {
+) -> BytesTree {
   let status_string =
     status
     |> int.to_string
-    |> bytes_builder.from_string
-    |> bytes_builder.append(<<" ":utf8>>)
-    |> bytes_builder.append(status_to_bit_array(status))
+    |> bytes_tree.from_string
+    |> bytes_tree.append(<<" ":utf8>>)
+    |> bytes_tree.append(status_to_bit_array(status))
 
-  bytes_builder.new()
-  |> bytes_builder.append(<<"HTTP/":utf8, version:utf8, " ":utf8>>)
-  |> bytes_builder.append_builder(status_string)
-  |> bytes_builder.append(<<"\r\n":utf8>>)
-  |> bytes_builder.append_builder(encode_headers(headers))
-  |> bytes_builder.append(<<"\r\n":utf8>>)
+  bytes_tree.new()
+  |> bytes_tree.append(<<"HTTP/":utf8, version:utf8, " ":utf8>>)
+  |> bytes_tree.append_tree(status_string)
+  |> bytes_tree.append(<<"\r\n":utf8>>)
+  |> bytes_tree.append_tree(encode_headers(headers))
+  |> bytes_tree.append(<<"\r\n":utf8>>)
 }
 
 pub fn status_to_bit_array(status: Int) -> BitArray {
@@ -95,14 +92,14 @@ pub fn status_to_bit_array(status: Int) -> BitArray {
   }
 }
 
-pub fn encode_headers(headers: List(Header)) -> BytesBuilder {
-  list.fold(headers, bytes_builder.new(), fn(builder, tup) {
+pub fn encode_headers(headers: List(Header)) -> BytesTree {
+  list.fold(headers, bytes_tree.new(), fn(builder, tup) {
     let #(header, value) = tup
 
     builder
-    |> bytes_builder.append_string(header)
-    |> bytes_builder.append(<<": ":utf8>>)
-    |> bytes_builder.append_string(value)
-    |> bytes_builder.append(<<"\r\n":utf8>>)
+    |> bytes_tree.append_string(header)
+    |> bytes_tree.append(<<": ":utf8>>)
+    |> bytes_tree.append_string(value)
+    |> bytes_tree.append(<<"\r\n":utf8>>)
   })
 }

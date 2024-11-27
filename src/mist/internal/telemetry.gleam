@@ -62,7 +62,7 @@ pub fn log(
 ) -> Nil {
   let duration_string =
     dict.get(measurements, atom.create_from_string("duration"))
-    |> result.then(fn(val) { result.nil_error(dynamic.int(val)) })
+    |> result.then(fn(val) { result.replace_error(dynamic.int(val), Nil) })
     |> result.map(convert_time_unit(_, Native, Microsecond))
     |> result.map(fn(time) { " duration: " <> int.to_string(time) <> "μs, " })
     |> result.unwrap("")

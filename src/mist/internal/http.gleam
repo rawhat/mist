@@ -1,5 +1,5 @@
 import gleam/bit_array
-import gleam/bytes_builder.{type BytesBuilder}
+import gleam/bytes_tree.{type BytesTree}
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/atom.{type Atom}
@@ -9,7 +9,7 @@ import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response, Response}
 import gleam/int
-import gleam/iterator.{type Iterator}
+import gleam/yielder.{type Yielder}
 import gleam/list
 import gleam/option.{type Option}
 import gleam/pair
@@ -25,8 +25,8 @@ import mist/internal/file
 
 pub type ResponseData {
   Websocket(Selector(ProcessDown))
-  Bytes(BytesBuilder)
-  Chunked(Iterator(BytesBuilder))
+  Bytes(BytesTree)
+  Chunked(Yielder(BytesTree))
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
   ServerSentEvents(Selector(ProcessDown))
 }
@@ -175,8 +175,8 @@ fn read_chunk(
   socket: Socket,
   transport: Transport,
   buffer: Buffer,
-  body: BytesBuilder,
-) -> Result(BytesBuilder, DecodeError) {
+  body: BytesTree,
+) -> Result(BytesTree, DecodeError) {
   case buffer.data, binary_match(buffer.data, crnl) {
     _, Ok(#(offset, _)) -> {
       let assert <<
@@ -204,7 +204,7 @@ fn read_chunk(
                 socket,
                 transport,
                 Buffer(0, rest),
-                bytes_builder.append(body, next_chunk),
+                bytes_tree.append(body, next_chunk),
               )
             _ -> {
               use next <- result.then(read_data(
@@ -259,7 +259,7 @@ pub fn parse_request(
         |> atom.from_dynamic
         |> result.map(atom.to_string)
         |> result.or(dynamic.string(http_method))
-        |> result.nil_error
+        |> result.replace_error(Nil)
         |> result.then(http.parse_method)
         |> result.replace_error(UnknownMethod),
       )
@@ -369,9 +369,9 @@ pub fn read_body(
         req.body.socket,
         transport,
         Buffer(remaining: 0, data: rest),
-        bytes_builder.new(),
+        bytes_tree.new(),
       ))
-      Ok(request.set_body(req, bytes_builder.to_bit_array(chunk)))
+      Ok(request.set_body(req, bytes_tree.to_bit_array(chunk)))
     }
     _, Initial(rest) -> {
       use _nil <- result.then(handle_continue(req))
@@ -447,7 +447,7 @@ fn parse_websocket_key(key: String) -> String {
 pub fn upgrade_socket(
   req: Request(Connection),
   extensions: List(String),
-) -> Result(Response(BytesBuilder), Request(Connection)) {
+) -> Result(Response(BytesTree), Request(Connection)) {
   use _upgrade <- result.then(
     request.get_header(req, "upgrade")
     |> result.replace_error(req),
@@ -467,7 +467,7 @@ pub fn upgrade_socket(
 
   let resp =
     response.new(101)
-    |> response.set_body(bytes_builder.new())
+    |> response.set_body(bytes_tree.new())
     |> response.prepend_header("upgrade", "websocket")
     |> response.prepend_header("connection", "Upgrade")
     |> response.prepend_header("sec-websocket-accept", accept_key)
@@ -492,16 +492,16 @@ pub fn upgrade(
 ) -> Result(Nil, Nil) {
   use resp <- result.then(
     upgrade_socket(req, extensions)
-    |> result.nil_error,
+    |> result.replace_error(Nil),
   )
 
   use _sent <- result.then(
     resp
     |> add_default_headers(req.method == http.Head)
     |> maybe_keep_alive
-    |> encoder.to_bytes_builder("1.1")
+    |> encoder.to_bytes_tree("1.1")
     |> transport.send(transport, socket, _)
-    |> result.nil_error,
+    |> result.replace_error(Nil),
   )
 
   Ok(Nil)
@@ -550,10 +550,10 @@ pub fn add_content_length(
 }
 
 pub fn add_default_headers(
-  resp: Response(BytesBuilder),
+  resp: Response(BytesTree),
   is_head_response: Bool,
-) -> Response(BytesBuilder) {
-  let body_size = bytes_builder.byte_size(resp.body)
+) -> Response(BytesTree) {
+  let body_size = bytes_tree.byte_size(resp.body)
 
   let include_content_length = case resp.status {
     n if n >= 100 && n <= 199 -> False
@@ -582,8 +582,8 @@ pub fn handle_continue(req: Request(Connection)) -> Result(Nil, DecodeError) {
   case is_continue(req) {
     True -> {
       response.new(100)
-      |> response.set_body(bytes_builder.new())
-      |> encoder.to_bytes_builder("1.1")
+      |> response.set_body(bytes_tree.new())
+      |> encoder.to_bytes_tree("1.1")
       |> transport.send(req.body.transport, req.body.socket, _)
       |> result.replace_error(MalformedRequest)
     }
