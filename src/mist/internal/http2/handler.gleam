@@ -54,34 +54,34 @@ pub fn append_data(state: State, data: BitArray) -> State {
 }
 
 pub fn upgrade(
-  data: BitArray,
+  _data: BitArray,
   conn: Connection,
-  self: Subject(Message),
+  _self: Subject(Message),
 ) -> Result(State, process.ExitReason) {
-  let initial_settings = http2.default_settings()
+  let _initial_settings = http2.default_settings()
   let settings_frame = frame.Settings(ack: False, settings: [])
 
   let assert Ok(_nil) =
     http2.send_frame(settings_frame, conn.socket, conn.transport)
 
   // TODO:  actually return this to support HTTP/2
-  let _resp =
-    State(
-      fragment: None,
-      frame_buffer: buffer.new(data),
-      pending_sends: [],
-      receive_hpack_context: http2.hpack_new_context(
-        initial_settings.header_table_size,
-      ),
-      receive_window_size: 65_535,
-      self: self,
-      send_hpack_context: http2.hpack_new_context(
-        initial_settings.header_table_size,
-      ),
-      send_window_size: 65_535,
-      settings: initial_settings,
-      streams: dict.new(),
-    )
+  // let _resp =
+  //   State(
+  //     fragment: None,
+  //     frame_buffer: buffer.new(data),
+  //     pending_sends: [],
+  //     receive_hpack_context: http2.hpack_new_context(
+  //       initial_settings.header_table_size,
+  //     ),
+  //     receive_window_size: 65_535,
+  //     self: self,
+  //     send_hpack_context: http2.hpack_new_context(
+  //       initial_settings.header_table_size,
+  //     ),
+  //     send_window_size: 65_535,
+  //     settings: initial_settings,
+  //     streams: dict.new(),
+  //   )
 
   logging.log(logging.Error, "HTTP/2 currently not supported")
 
