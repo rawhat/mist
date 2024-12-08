@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.0.1
+- Remove some code that produces a warning when compiling
+
 ## v4.0.0
 - Bump `stdlib` version requirement to >=0.44.0
 
