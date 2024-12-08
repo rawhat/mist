@@ -1,5 +1,5 @@
 import gleam/bit_array
-import gleam/bytes_builder.{type BytesBuilder}
+import gleam/bytes_tree.{type BytesTree}
 import gleam/erlang.{rescue}
 import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
 import gleam/function
@@ -8,14 +8,14 @@ import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/io
-import gleam/iterator.{type Iterator}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/supervisor
 import gleam/result
 import gleam/string
-import gleam/string_builder.{type StringBuilder}
+import gleam/string_tree.{type StringTree}
+import gleam/yielder.{type Yielder}
 import glisten
 import glisten/transport
 import gramps/websocket.{BinaryFrame, Data, TextFrame} as gramps_websocket
@@ -96,8 +96,8 @@ pub fn get_client_info(conn: Connection) -> Result(ConnectionInfo, Nil) {
 /// Erlang's `sendfile` to more efficiently return a file to the client.
 pub type ResponseData {
   Websocket(Selector(ProcessDown))
-  Bytes(BytesBuilder)
-  Chunked(Iterator(BytesBuilder))
+  Bytes(BytesTree)
+  Chunked(Yielder(BytesTree))
   /// See `mist.send_file` to use this response type.
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
   ServerSentEvents(Selector(ProcessDown))
@@ -666,7 +666,7 @@ pub fn websocket(
   })
   |> result.lazy_unwrap(fn() {
     response.new(400)
-    |> response.set_body(Bytes(bytes_builder.new()))
+    |> response.set_body(Bytes(bytes_tree.new()))
   })
 }
 
@@ -732,11 +732,11 @@ pub opaque type SSEConnection {
 // default to `message`.  If an `id` is provided, it will be included in the
 // event received by the client.
 pub opaque type SSEEvent {
-  SSEEvent(id: Option(String), event: Option(String), data: StringBuilder)
+  SSEEvent(id: Option(String), event: Option(String), data: StringTree)
 }
 
 // Builder for generating the base event
-pub fn event(data: StringBuilder) -> SSEEvent {
+pub fn event(data: StringTree) -> SSEEvent {
   SSEEvent(id: None, event: None, data: data)
 }
 
@@ -776,14 +776,14 @@ pub fn server_sent_events(
     req.body.socket,
     encoder.response_builder(200, with_default_headers.headers, "1.1"),
   )
-  |> result.nil_error
+  |> result.replace_error(Nil)
   |> result.then(fn(_nil) {
     actor.start_spec(
       actor.Spec(init: init, init_timeout: 1000, loop: fn(state, message) {
         loop(state, SSEConnection(req.body), message)
       }),
     )
-    |> result.nil_error
+    |> result.replace_error(Nil)
   })
   |> result.map(fn(subj) {
     let sse_process = process.subject_owner(subj)
@@ -796,7 +796,7 @@ pub fn server_sent_events(
   })
   |> result.lazy_unwrap(fn() {
     response.new(400)
-    |> response.set_body(Bytes(bytes_builder.new()))
+    |> response.set_body(Bytes(bytes_tree.new()))
   })
 }
 
@@ -816,18 +816,18 @@ pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
     |> option.unwrap("")
   let data =
     event.data
-    |> string_builder.split("\n")
-    |> list.map(fn(row) { string_builder.prepend(row, "data: ") })
-    |> string_builder.join("\n")
+    |> string_tree.split("\n")
+    |> list.map(fn(row) { string_tree.prepend(row, "data: ") })
+    |> string_tree.join("\n")
 
   let message =
     data
-    |> string_builder.prepend(event_name)
-    |> string_builder.prepend(id)
-    |> string_builder.append("\n\n")
-    |> bytes_builder.from_string_builder
+    |> string_tree.prepend(event_name)
+    |> string_tree.prepend(id)
+    |> string_tree.append("\n\n")
+    |> bytes_tree.from_string_tree
 
   transport.send(conn.transport, conn.socket, message)
   |> result.replace(Nil)
-  |> result.nil_error
+  |> result.replace_error(Nil)
 }

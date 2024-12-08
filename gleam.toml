@@ -5,7 +5,7 @@ licences = ["Apache-2.0"]
 description = "a misty Gleam web server"
 repository = { type = "github", user = "rawhat", repo = "mist" }
 target = "erlang"
-gleam = ">= 1.2.0"
+gleam = ">= 1.4.0"
 
 [erlang]
 application_start_module = "mist@internal@clock"
@@ -15,11 +15,12 @@ birl = "~> 1.3"
 gleam_erlang = "~> 0.24"
 gleam_http = "~> 3.5"
 gleam_otp = "~> 0.9"
-gleam_stdlib = "~> 0.35 or ~> 1.0"
-gramps = "~> 2.0"
+gleam_stdlib = ">= 0.44.0 and < 1.0.0"
 hpack_erl = "~> 0.3"
 logging = "~> 1.0"
-glisten = ">= 6.0.0 and < 7.0.0"
+gleam_yielder = ">= 1.1.0 and < 2.0.0"
+gramps = ">= 3.0.0 and < 4.0.0"
+glisten = ">= 7.0.0 and < 8.0.0"
 
 [dev-dependencies]
 gleeunit = "~> 1.0"

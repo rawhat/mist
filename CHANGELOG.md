@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- Bump `stdlib` version requirement to >=0.44.0
+
 ## v3.0.0
 - Allow binding to an interface
 - Disable IPv6 by default

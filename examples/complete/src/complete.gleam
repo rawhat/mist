@@ -1,15 +1,15 @@
-import gleam/bytes_builder
+import gleam/bytes_tree
 import gleam/dict.{type Dict}
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/process
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/io
-import gleam/iterator
 import gleam/option.{None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
+import gleam/yielder
 import logging
 import mist.{type Connection, type ResponseData}
 
@@ -39,7 +39,7 @@ pub fn main() {
 
   let not_found =
     response.new(404)
-    |> response.set_body(mist.Bytes(bytes_builder.new()))
+    |> response.set_body(mist.Bytes(bytes_tree.new()))
 
   let assert Ok(_) =
     fn(req: Request(Connection)) -> Response(ResponseData) {
@@ -52,7 +52,7 @@ pub fn main() {
           response.new(200)
           |> response.prepend_header("my-value", "abc")
           |> response.prepend_header("my-value", "123")
-          |> response.set_body(mist.Bytes(bytes_builder.from_string(index)))
+          |> response.set_body(mist.Bytes(bytes_tree.from_string(index)))
         ["ws"] ->
           mist.websocket(
             request: req,
@@ -107,24 +107,24 @@ fn echo_body(request: Request(Connection)) -> Response(ResponseData) {
   mist.read_body(request, 1024 * 1024 * 10)
   |> result.map(fn(req) {
     response.new(200)
-    |> response.set_body(mist.Bytes(bytes_builder.from_bit_array(req.body)))
+    |> response.set_body(mist.Bytes(bytes_tree.from_bit_array(req.body)))
     |> response.set_header("content-type", content_type)
   })
   |> result.lazy_unwrap(fn() {
     response.new(400)
-    |> response.set_body(mist.Bytes(bytes_builder.new()))
+    |> response.set_body(mist.Bytes(bytes_tree.new()))
   })
 }
 
 fn serve_chunk(_request: Request(Connection)) -> Response(ResponseData) {
   let iter =
     ["one", "two", "three"]
-    |> iterator.from_list
-    |> iterator.map(fn(data) {
+    |> yielder.from_list
+    |> yielder.map(fn(data) {
       process.sleep(2000)
       data
     })
-    |> iterator.map(bytes_builder.from_string)
+    |> yielder.map(bytes_tree.from_string)
 
   response.new(200)
   |> response.set_body(mist.Chunked(iter))
@@ -147,14 +147,14 @@ fn serve_file(
   })
   |> result.lazy_unwrap(fn() {
     response.new(404)
-    |> response.set_body(mist.Bytes(bytes_builder.new()))
+    |> response.set_body(mist.Bytes(bytes_tree.new()))
   })
 }
 
 fn handle_form(req: Request(Connection)) -> Response(ResponseData) {
   let _req = mist.read_body(req, 1024 * 1024 * 30)
   response.new(200)
-  |> response.set_body(mist.Bytes(bytes_builder.new()))
+  |> response.set_body(mist.Bytes(bytes_tree.new()))
 }
 
 fn guess_content_type(_path: String) -> String {

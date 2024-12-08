@@ -1,4 +1,4 @@
-import gleam/bytes_builder.{type BytesBuilder}
+import gleam/bytes_tree.{type BytesTree}
 import gleam/erlang
 import gleam/erlang/process
 import gleam/http.{type Header} as _ghttp
@@ -81,7 +81,7 @@ fn send_headers(
       transport.send(
         conn.transport,
         conn.socket,
-        bytes_builder.from_bit_array(encoded),
+        bytes_tree.from_bit_array(encoded),
       )
     {
       Ok(_nil) -> Ok(new_context)
@@ -103,7 +103,7 @@ fn send_data(
   transport.send(
     conn.transport,
     conn.socket,
-    bytes_builder.from_bit_array(encoded),
+    bytes_tree.from_bit_array(encoded),
   )
   |> result.map_error(fn(err) {
     logging.log(logging.Debug, "failed to send :(  " <> erlang.format(err))
@@ -119,11 +119,11 @@ pub fn send_frame(
 ) -> Result(Nil, SocketReason) {
   let data = frame.encode(frame_to_send)
 
-  transport.send(transport, socket, bytes_builder.from_bit_array(data))
+  transport.send(transport, socket, bytes_tree.from_bit_array(data))
 }
 
-pub fn send_bytes_builder(
-  resp: Response(BytesBuilder),
+pub fn send_bytes_tree(
+  resp: Response(BytesTree),
   conn: Connection,
   context: HpackContext,
   id: StreamIdentifier(Frame),
@@ -134,14 +134,14 @@ pub fn send_bytes_builder(
 
   let headers = [#(":status", int.to_string(resp.status)), ..resp.headers]
 
-  case bytes_builder.byte_size(resp.body) {
+  case bytes_tree.byte_size(resp.body) {
     0 -> send_headers(context, conn, headers, True, id)
     _ -> {
       send_headers(context, conn, headers, False, id)
       |> result.then(fn(context) {
         // TODO:  this should be broken up by window size
         // TODO:  fix end_stream
-        send_data(conn, bytes_builder.to_bit_array(resp.body), id, True)
+        send_data(conn, bytes_tree.to_bit_array(resp.body), id, True)
         |> result.replace(context)
       })
     }
