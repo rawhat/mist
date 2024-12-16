@@ -21,16 +21,16 @@ fed updated configuration options with the associated methods (demonstrated
 in the examples below).
 
 ```gleam
-import gleam/bytes_builder
+import gleam/bytes_tree
 import gleam/erlang/process
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/io
-import gleam/iterator
 import gleam/option.{None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
+import gleam/yielder
 import mist.{type Connection, type ResponseData}
 
 pub fn main() {
@@ -40,7 +40,7 @@ pub fn main() {
 
   let not_found =
     response.new(404)
-    |> response.set_body(mist.Bytes(bytes_builder.new()))
+    |> response.set_body(mist.Bytes(bytes_tree.new()))
 
   let assert Ok(_) =
     fn(req: Request(Connection)) -> Response(ResponseData) {
@@ -97,20 +97,20 @@ fn echo_body(request: Request(Connection)) -> Response(ResponseData) {
   mist.read_body(request, 1024 * 1024 * 10)
   |> result.map(fn(req) {
     response.new(200)
-    |> response.set_body(mist.Bytes(bytes_builder.from_bit_array(req.body)))
+    |> response.set_body(mist.Bytes(bytes_tree.from_bit_array(req.body)))
     |> response.set_header("content-type", content_type)
   })
   |> result.lazy_unwrap(fn() {
     response.new(400)
-    |> response.set_body(mist.Bytes(bytes_builder.new()))
+    |> response.set_body(mist.Bytes(bytes_tree.new()))
   })
 }
 
 fn serve_chunk(_request: Request(Connection)) -> Response(ResponseData) {
   let iter =
     ["one", "two", "three"]
-    |> iterator.from_list
-    |> iterator.map(bytes_builder.from_string)
+    |> yielder.from_list
+    |> yielder.map(bytes_tree.from_string)
 
   response.new(200)
   |> response.set_body(mist.Chunked(iter))
@@ -133,14 +133,14 @@ fn serve_file(
   })
   |> result.lazy_unwrap(fn() {
     response.new(404)
-    |> response.set_body(mist.Bytes(bytes_builder.new()))
+    |> response.set_body(mist.Bytes(bytes_tree.new()))
   })
 }
 
 fn handle_form(req: Request(Connection)) -> Response(ResponseData) {
   let _req = mist.read_body(req, 1024 * 1024 * 30)
   response.new(200)
-  |> response.set_body(mist.Bytes(bytes_builder.new()))
+  |> response.set_body(mist.Bytes(bytes_tree.new()))
 }
 
 fn guess_content_type(_path: String) -> String {
@@ -164,7 +164,7 @@ gives you back a function to start reading chunks. This function will return:
 
 ```gleam
 pub type Chunk {
-  Chunk(data: BitString, consume: fn(Int) -> Chunk)
+  Chunk(data: BitArray, consume: fn(Int) -> Chunk)
   Done
 }
 ```
@@ -182,7 +182,7 @@ fn handle_form(req: Request(Connection)) -> Response(ResponseData) {
   // NOTE:  This is a little misleading, since `Iterator`s can be replayed.
   // However, this will only be running this once.
   let content =
-    iterator.unfold(
+    yielder.unfold(
       consume,
       fn(consume) {
         // Reads up to 1024 bytes from the request
@@ -190,13 +190,13 @@ fn handle_form(req: Request(Connection)) -> Response(ResponseData) {
         case res {
           // The error will not be bubbled up to the iterator here. If either
           // we've read all the body, or we see an error, the iterator finishes
-          Ok(mist.Done) | Error(_) -> iterator.Done
+          Ok(mist.Done) | Error(_) -> yielder.Done
           // We read some data. It may be less than the specific amount above if
           // we have consumed all of the body. You'll still need to call it
           // again to ensure, since with `chunked` encoding, we need to check
           // for the last chunk.
           Ok(mist.Chunk(data, consume)) -> {
-            iterator.Next(bit_builder.from_bit_string(data), consume)
+            yielder.Next(bytes_tree.from_bit_array(data), consume)
           }
         }
       },
