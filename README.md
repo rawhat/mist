@@ -11,7 +11,7 @@ dependencies as follows:
 ```sh
 $ gleam new <your_project>
 $ cd <your_project>
-$ gleam add mist gleam_erlang gleam_http gleam_otp
+$ gleam add mist gleam_erlang gleam_http gleam_otp gleam_yielder
 ```
 
 The main entrypoints for your application are `mist.start_http` and
