@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.0.2
+- Replace `birl` with manual date methods (Thank you, @giacomocavalieri)
+
 ## v4.0.1
 - Remove some code that produces a warning when compiling
 
