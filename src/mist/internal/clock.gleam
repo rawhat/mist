@@ -1,9 +1,10 @@
-import birl
 import gleam/erlang/atom
 import gleam/erlang/process.{type Pid}
 import gleam/function
+import gleam/int
 import gleam/otp/actor
 import gleam/result
+import gleam/string
 import logging
 
 pub type ClockMessage {
@@ -66,10 +67,58 @@ pub fn get_date() -> String {
   }
 }
 
+/// Returns today's date in a format suitable to be used as an http date header
+/// (see here: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Date).
+///
 fn date() -> String {
-  birl.now()
-  |> birl.to_http
+  let #(weekday, #(year, month, day), #(hour, minute, second)) = now()
+
+  let weekday = weekday_to_short_string(weekday)
+  let year = int.to_string(year) |> string.pad_start(to: 4, with: "0")
+  let month = month_to_short_string(month)
+  let day = int.to_string(day) |> string.pad_start(to: 2, with: "0")
+  let hour = int.to_string(hour) |> string.pad_start(to: 2, with: "0")
+  let minute = int.to_string(minute) |> string.pad_start(to: 2, with: "0")
+  let second = int.to_string(second) |> string.pad_start(to: 2, with: "0")
+
+  { weekday <> ", " }
+  <> { day <> " " <> month <> " " <> year <> " " }
+  <> { hour <> ":" <> minute <> ":" <> second <> " GMT" }
 }
+
+fn weekday_to_short_string(weekday: Int) -> String {
+  case weekday {
+    1 -> "Mon"
+    2 -> "Tue"
+    3 -> "Wed"
+    4 -> "Thu"
+    5 -> "Fri"
+    6 -> "Sat"
+    7 -> "Sun"
+    _ -> panic as "erlang weekday outside of 1-7 range"
+  }
+}
+
+fn month_to_short_string(month: Int) -> String {
+  case month {
+    1 -> "Jan"
+    2 -> "Feb"
+    3 -> "Mar"
+    4 -> "Apr"
+    5 -> "May"
+    6 -> "Jun"
+    7 -> "Jul"
+    8 -> "Aug"
+    9 -> "Sep"
+    10 -> "Oct"
+    11 -> "Nov"
+    12 -> "Dec"
+    _ -> panic as "erlang month outside of 1-12 range"
+  }
+}
+
+@external(erlang, "mist_ffi", "now")
+fn now() -> #(Int, #(Int, Int, Int), #(Int, Int, Int))
 
 @external(erlang, "ets", "new")
 fn ets_new(table: ClockTable, opts: List(EtsOpts)) -> ClockTable
