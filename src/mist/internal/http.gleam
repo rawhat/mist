@@ -529,6 +529,16 @@ pub fn maybe_keep_alive(resp: Response(any)) -> Response(any) {
   }
 }
 
+fn maybe_drop_body(
+  resp: Response(BytesTree),
+  is_head_request: Bool,
+) -> Response(BytesTree) {
+  case is_head_request {
+    True -> response.set_body(resp, bytes_tree.new())
+    False -> resp
+  }
+}
+
 pub fn add_content_length(
   when when: Bool,
   length length: Int,
@@ -554,20 +564,28 @@ pub fn add_default_headers(
   is_head_response: Bool,
 ) -> Response(BytesTree) {
   let body_size = bytes_tree.byte_size(resp.body)
+  let #(_existing_content_length, headers) =
+    resp.headers
+    |> list.key_pop("content-length")
+    |> result.lazy_unwrap(fn() { #("", resp.headers) })
 
-  let include_content_length = case resp.status {
-    n if n >= 100 && n <= 199 -> False
-    n if n == 204 -> False
-    n if n == 304 -> False
-    _ -> True
+  let resp = case resp.status, body_size {
+    // explicitly drop
+    n, _ if n >= 100 && n <= 199 -> Response(..resp, headers:)
+    // explicitly drop
+    n, _ if n == 204 -> Response(..resp, headers:)
+    // don't add, don't drop
+    n, 0 if n == 304 -> resp
+    // don't add, don't drop
+    _, 0 if is_head_response == True -> resp
+    // explicitly overwrite
+    _, _ ->
+      response.set_header(resp, "content-length", int.to_string(body_size))
   }
 
   resp
   |> add_date_header
-  |> add_content_length(
-    when: include_content_length && !is_head_response,
-    length: body_size,
-  )
+  |> maybe_drop_body(is_head_response)
 }
 
 fn is_continue(req: Request(Connection)) -> Bool {

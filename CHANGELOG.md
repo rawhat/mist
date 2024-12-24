@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- Properly handle `content-length` and drop body on response when appropriate
+
 ## v4.0.2
 - Replace `birl` with manual date methods (Thank you, @giacomocavalieri)
 
