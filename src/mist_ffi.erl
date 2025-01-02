@@ -5,11 +5,10 @@
          file_close/1, now/0]).
 
 now() ->
-    Timestamp = os:system_time(microsecond),
-    {Date, Time} = calendar:system_time_to_universal_time(Timestamp, microsecond),
-    Weekday = calendar:day_of_the_week(Date),
-    {Weekday, Date, Time}.
-
+  Timestamp = os:system_time(microsecond),
+  {Date, Time} = calendar:system_time_to_universal_time(Timestamp, microsecond),
+  Weekday = calendar:day_of_the_week(Date),
+  {Weekday, Date, Time}.
 
 decode_packet(Type, Packet, Opts) ->
   case erlang:decode_packet(Type, Packet, Opts) of
@@ -44,7 +43,7 @@ string_to_int(String, Base) ->
   end.
 
 file_open(Path) ->
-  case file:open(Path, [raw]) of
+  case file:open(Path, [raw, binary]) of
     {ok, Fd} ->
       {ok, Fd};
     {error, enoent} ->

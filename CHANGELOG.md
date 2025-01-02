@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- Open files in `binary` mode to fix SSL file send bug
+
 ## v4.0.3
 - Properly handle `content-length` and drop body on response when appropriate
 
