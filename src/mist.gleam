@@ -730,14 +730,15 @@ pub opaque type SSEConnection {
 
 // Represents each event.  Only `data` is required.  The `event` name will
 // default to `message`.  If an `id` is provided, it will be included in the
-// event received by the client.
+// event received by the client. `retry` is the minimum time in milliseconds 
+// the client needs to wait before trying to reestablish the connection.
 pub opaque type SSEEvent {
-  SSEEvent(id: Option(String), event: Option(String), data: StringTree)
+  SSEEvent(id: Option(String), event: Option(String), retry: Option(Int), data: StringTree)
 }
 
 // Builder for generating the base event
 pub fn event(data: StringTree) -> SSEEvent {
-  SSEEvent(id: None, event: None, data: data)
+  SSEEvent(id: None, event: None, retry: None, data: data)
 }
 
 // Adds an `id` to the event
@@ -748,6 +749,11 @@ pub fn event_id(event: SSEEvent, id: String) -> SSEEvent {
 // Sets the `event` name field
 pub fn event_name(event: SSEEvent, name: String) -> SSEEvent {
   SSEEvent(..event, event: Some(name))
+}
+
+// Sets the `retry` reconnection time field in milliseconds
+pub fn event_retry(event: SSEEvent, retry: Int) -> SSEEvent {
+  SSEEvent(..event, retry: Some(retry))
 }
 
 /// Sets up the connection for server-sent events. The initial response provided
@@ -800,7 +806,7 @@ pub fn server_sent_events(
   })
 }
 
-// This constructs an event from the provided type.  If `id` or `event` are
+// This constructs an event from the provided type.  If `id`, `event` or `retry` are
 // provided, they are included in the message.  The data provided is split
 // across newlines, which I think is per the spec? The `Result` returned here
 // can be used to determine whether the event send has succeeded.
@@ -814,6 +820,10 @@ pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
     event.event
     |> option.map(fn(name) { "event: " <> name <> "\n" })
     |> option.unwrap("")
+  let retry =
+    event.retry
+    |> option.map(fn(retry) { "retry: " <> int.to_string(retry) <> "\n" })
+    |> option.unwrap("")
   let data =
     event.data
     |> string_tree.split("\n")
@@ -824,6 +834,7 @@ pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
     data
     |> string_tree.prepend(event_name)
     |> string_tree.prepend(id)
+    |> string_tree.prepend(retry)
     |> string_tree.append("\n\n")
     |> bytes_tree.from_string_tree
 
