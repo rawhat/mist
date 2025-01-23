@@ -120,19 +120,18 @@ pub fn new(
           Data(bits: bits, end: True), _ -> {
             process.send(state.data_subject, Done)
             actor.continue(
-              InternalState(
-                ..state,
-                end: True,
-                to_remove: <<state.to_remove:bits, bits:bits>>,
-              ),
+              InternalState(..state, end: True, to_remove: <<
+                state.to_remove:bits,
+                bits:bits,
+              >>),
             )
           }
           Data(bits: bits, ..), _ -> {
             actor.continue(
-              InternalState(
-                ..state,
-                to_remove: <<state.to_remove:bits, bits:bits>>,
-              ),
+              InternalState(..state, to_remove: <<
+                state.to_remove:bits,
+                bits:bits,
+              >>),
             )
           }
           _msg, _ -> {

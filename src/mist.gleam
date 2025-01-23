@@ -733,7 +733,12 @@ pub opaque type SSEConnection {
 // event received by the client. `retry` is the minimum time in milliseconds 
 // the client needs to wait before trying to reestablish the connection.
 pub opaque type SSEEvent {
-  SSEEvent(id: Option(String), event: Option(String), retry: Option(Int), data: StringTree)
+  SSEEvent(
+    id: Option(String),
+    event: Option(String),
+    retry: Option(Int),
+    data: StringTree,
+  )
 }
 
 // Builder for generating the base event

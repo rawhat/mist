@@ -358,7 +358,8 @@ fn set_active(transport: Transport, socket: Socket) -> Nil {
 fn map_user_selector(
   selector: Option(Selector(user_message)),
 ) -> Option(Selector(WebsocketMessage(user_message))) {
-  option.map(selector, process.map_selector(_, fn(msg) {
-    Valid(UserMessage(msg))
-  }))
+  option.map(
+    selector,
+    process.map_selector(_, fn(msg) { Valid(UserMessage(msg)) }),
+  )
 }
