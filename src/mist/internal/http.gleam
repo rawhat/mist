@@ -2,6 +2,7 @@ import gleam/bit_array
 import gleam/bytes_tree.{type BytesTree}
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist.{type Charlist}
 import gleam/erlang/process.{type ProcessDown, type Selector}
@@ -258,8 +259,12 @@ pub fn parse_request(
         http_method
         |> atom.from_dynamic
         |> result.map(atom.to_string)
-        |> result.or(dynamic.string(http_method))
         |> result.replace_error(Nil)
+        |> result.or({
+          http_method
+          |> decode.run(decode.string)
+          |> result.replace_error(Nil)
+        })
         |> result.then(http.parse_method)
         |> result.replace_error(UnknownMethod),
       )

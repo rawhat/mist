@@ -1,4 +1,4 @@
-import gleam/dynamic
+import gleam/dynamic/decode
 import gleam/erlang.{rescue}
 import gleam/erlang/atom
 import gleam/erlang/process.{type Selector, type Subject}
@@ -57,7 +57,7 @@ fn message_selector() -> Selector(WebsocketMessage(user_message)) {
   process.new_selector()
   |> process.selecting_record3(atom.create_from_string("tcp"), fn(_sock, data) {
     data
-    |> dynamic.bit_array
+    |> decode.run(decode.bit_array)
     |> result.replace_error(Nil)
     |> result.map(SocketMessage)
     |> result.map(Valid)
@@ -65,7 +65,7 @@ fn message_selector() -> Selector(WebsocketMessage(user_message)) {
   })
   |> process.selecting_record3(atom.create_from_string("ssl"), fn(_sock, data) {
     data
-    |> dynamic.bit_array
+    |> decode.run(decode.bit_array)
     |> result.replace_error(Nil)
     |> result.map(SocketMessage)
     |> result.map(Valid)
