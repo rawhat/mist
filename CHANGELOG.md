@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.0.5
+- Migrate to `gleam/dynamic/decode` API
+
 ## v4.0.4
 - Open files in `binary` mode to fix SSL file send bug
 
