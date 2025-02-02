@@ -1,9 +1,5 @@
 # Changelog
 
-## Unreleased
-- Migrate to `gleam/dynamic/decode` module
-- Pass `SSEConnection` to `init` for server-sent events
-
 ## v4.0.4
 - Open files in `binary` mode to fix SSL file send bug
 

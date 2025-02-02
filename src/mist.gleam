@@ -773,7 +773,7 @@ pub fn event_retry(event: SSEEvent, retry: Int) -> SSEEvent {
 pub fn server_sent_events(
   request req: Request(Connection),
   initial_response resp: Response(discard),
-  init init: fn(SSEConnection) -> actor.InitResult(state, message),
+  init init: fn() -> actor.InitResult(state, message),
   loop loop: fn(message, SSEConnection, state) -> actor.Next(message, state),
 ) -> Response(ResponseData) {
   let with_default_headers =
@@ -790,13 +790,9 @@ pub fn server_sent_events(
   |> result.replace_error(Nil)
   |> result.then(fn(_nil) {
     actor.start_spec(
-      actor.Spec(
-        init: fn() { init(SSEConnection(req.body)) },
-        init_timeout: 1000,
-        loop: fn(state, message) {
-          loop(state, SSEConnection(req.body), message)
-        },
-      ),
+      actor.Spec(init: init, init_timeout: 1000, loop: fn(state, message) {
+        loop(state, SSEConnection(req.body), message)
+      }),
     )
     |> result.replace_error(Nil)
   })
