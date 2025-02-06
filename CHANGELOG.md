@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.0.6
+- Relaxed `gleam_http` constraint to permit v4.
+
 ## v4.0.5
 - Migrate to `gleam/dynamic/decode` API
 
