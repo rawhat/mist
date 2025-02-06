@@ -1,5 +1,5 @@
 name = "mist"
-version = "4.0.5"
+version = "4.0.6"
 
 licences = ["Apache-2.0"]
 description = "a misty Gleam web server"
@@ -12,7 +12,7 @@ application_start_module = "mist@internal@clock"
 
 [dependencies]
 gleam_erlang = "~> 0.24"
-gleam_http = "~> 3.5"
+gleam_http = ">= 3.5.0 and < 5.0.0"
 gleam_otp = "~> 0.9"
 gleam_stdlib = ">= 0.44.0 and < 1.0.0"
 hpack_erl = "~> 0.3"
