@@ -25,7 +25,7 @@ pub type Instantiator {
 
 fn get_default_response() -> Response(BytesTree) {
   response.new(200)
-  |> response.prepend_header("user-agent", "hackney/1.20.1")
+  |> response.prepend_header("user-agent", "hackney/1.23.0")
   |> response.prepend_header("host", "localhost:8888")
   |> response.prepend_header("content-type", "application/octet-stream")
   |> response.prepend_header("content-length", "13")
@@ -134,7 +134,7 @@ pub fn it_supports_chunked_encoding_test() {
 
   let expected =
     response.new(200)
-    |> response.prepend_header("user-agent", "hackney/1.20.1")
+    |> response.prepend_header("user-agent", "hackney/1.23.0")
     |> response.prepend_header("host", "localhost:8888")
     |> response.prepend_header("connection", "keep-alive")
     |> response.prepend_header("content-length", "10000")
@@ -214,7 +214,7 @@ pub fn it_supports_expect_continue_header_test() {
 
   let expected =
     response.new(200)
-    |> response.prepend_header("user-agent", "hackney/1.20.1")
+    |> response.prepend_header("user-agent", "hackney/1.23.0")
     |> response.prepend_header("host", "localhost:8888")
     |> response.prepend_header("connection", "keep-alive")
     |> response.prepend_header("content-type", "application/octet-stream")
