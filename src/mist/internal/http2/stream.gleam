@@ -1,4 +1,3 @@
-import gleam/dynamic
 import gleam/erlang
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/function
@@ -152,8 +151,7 @@ pub fn make_request(
     [] -> Ok(req)
     [#("method", method), ..rest] -> {
       method
-      |> dynamic.from
-      |> ghttp.method_from_dynamic
+      |> ghttp.parse_method
       |> result.replace_error(Nil)
       |> result.map(request.set_method(req, _))
       |> result.then(make_request(rest, _))
