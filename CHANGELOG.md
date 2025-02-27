@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.0.7
+- Tighten `gleam_http` constraint for new function
+
 ## v4.0.6
 - Relaxed `gleam_http` constraint to permit v4.
 
