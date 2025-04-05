@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.1.0
+- Bump `stdlib` version requirement to >=0.50.0
+
 ## v4.0.7
 - Tighten `gleam_http` constraint for new function
 
