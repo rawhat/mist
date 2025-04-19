@@ -9,7 +9,7 @@ import glisten.{type Loop, Packet, User}
 import glisten/transport
 import logging
 import mist/internal/http.{
-  type Connection, type DecodeError, type Handler, Bytes, Chunked, Connection,
+  type DecodeError, type Handler, Bytes, Chunked, Connection,
   DiscardPacket, File, Initial, ServerSentEvents, Websocket,
 }
 import mist/internal/http/handler as http_handler

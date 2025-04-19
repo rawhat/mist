@@ -14,7 +14,7 @@ import mist/internal/http.{
 import mist/internal/http2.{type HpackContext, type Http2Settings, Http2Settings}
 import mist/internal/http2/flow_control
 import mist/internal/http2/frame.{
-  type Frame, type StreamIdentifier, Complete, Continued, Settings,
+  type Frame, type StreamIdentifier, Complete, Continued,
 }
 import mist/internal/http2/stream.{Ready}
 

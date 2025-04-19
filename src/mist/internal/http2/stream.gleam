@@ -2,7 +2,7 @@ import gleam/erlang
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/function
 import gleam/http.{type Header} as ghttp
-import gleam/http/request.{type Request, Request}
+import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/list
