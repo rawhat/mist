@@ -1,9 +1,6 @@
-import gleam/erlang/atom
-import gleam/erlang/process.{type Pid}
-import gleam/function
+import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/otp/actor
-import gleam/result
 import gleam/string
 import logging
 
@@ -26,35 +23,29 @@ pub type EtsOpts {
   ReadConcurrency(Bool)
 }
 
-pub fn start(_type, _args) -> Result(Pid, actor.StartError) {
-  actor.start_spec(
-    actor.Spec(
-      init: fn() {
-        let subj = process.new_subject()
-        let selector =
-          process.new_selector()
-          |> process.selecting(subj, function.identity)
-        ets_new(MistClock, [Set, Protected, NamedTable, ReadConcurrency(True)])
-        process.send(subj, SetTime)
-        actor.Ready(subj, selector)
-      },
-      init_timeout: 500,
-      loop: fn(msg, state) {
-        case msg {
-          SetTime -> {
-            ets_insert(MistClock, #(DateHeader, date()))
-            process.send_after(state, 1000, SetTime)
-            actor.continue(state)
-          }
-        }
-      },
-    ),
-  )
-  |> result.map(process.subject_owner)
-}
-
-pub fn stop(_state) {
-  atom.create_from_string("ok")
+pub fn start(
+  name: process.Name(ClockMessage),
+) -> Result(actor.Started(Subject(ClockMessage)), actor.StartError) {
+  actor.new_with_initialiser(500, fn(subject) {
+    ets_new(MistClock, [Set, Protected, NamedTable, ReadConcurrency(True)])
+    process.send(subject, SetTime)
+    subject
+    |> actor.initialised
+    |> actor.selecting(process.new_selector() |> process.select(subject))
+    |> actor.returning(subject)
+    |> Ok
+  })
+  |> actor.on_message(fn(state, msg) {
+    case msg {
+      SetTime -> {
+        ets_insert(MistClock, #(DateHeader, date()))
+        process.send_after(state, 1000, SetTime)
+        actor.continue(state)
+      }
+    }
+  })
+  |> actor.named(name)
+  |> actor.start
 }
 
 pub fn get_date() -> String {

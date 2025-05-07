@@ -1,6 +1,5 @@
-import gleam/erlang
+import gleam/dynamic
 import gleam/erlang/process.{type Selector, type Subject}
-import gleam/function
 import gleam/http.{type Header} as ghttp
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
@@ -58,89 +57,82 @@ pub fn new(
   connection: Connection,
   send: fn(Response(ResponseData)) -> todo_resp,
   end: Bool,
-) -> Result(Subject(Message), actor.StartError) {
-  actor.start_spec(
-    actor.Spec(
-      init: fn() {
-        let data_subj = process.new_subject()
-        let data_selector =
-          process.new_selector()
-          |> process.selecting(data_subj, function.identity)
-        actor.Ready(
-          InternalState(data_selector, data_subj, end, None, <<>>),
-          data_selector,
-        )
-      },
-      init_timeout: 1000,
-      loop: fn(msg, state) {
-        case msg, state.end {
-          Ready, _ -> {
-            let content_length =
-              headers
-              |> list.key_find("content-length")
-              |> result.then(int.parse)
-              |> result.unwrap(0)
-            let conn =
-              Connection(
-                ..connection,
-                body: Stream(
-                  selector: process.map_selector(state.data_selector, fn(val) {
-                    let assert Data(bits, ..) = val
-                    bits
-                  }),
-                  attempts: 0,
-                  data: <<>>,
-                  remaining: content_length,
-                ),
-              )
+) -> Result(actor.Started(Subject(Message)), actor.StartError) {
+  actor.new_with_initialiser(1000, fn(subject) {
+    let data_selector =
+      process.new_selector()
+      |> process.select(subject)
+    InternalState(data_selector, subject, end, None, <<>>)
+    |> actor.initialised
+    |> actor.selecting(data_selector)
+    |> actor.returning(subject)
+    |> Ok
+  })
+  |> actor.on_message(fn(state, msg) {
+    case msg, state.end {
+      Ready, _ -> {
+        let content_length =
+          headers
+          |> list.key_find("content-length")
+          |> result.then(int.parse)
+          |> result.unwrap(0)
+        let conn =
+          Connection(
+            ..connection,
+            body: Stream(
+              selector: process.map_selector(state.data_selector, fn(val) {
+                let assert Data(bits, ..) = val
+                bits
+              }),
+              attempts: 0,
+              data: <<>>,
+              remaining: content_length,
+            ),
+          )
 
-            request.new()
-            |> request.set_body(conn)
-            |> make_request(headers, _)
-            |> result.map(handler)
-            |> result.map(fn(resp) {
-              process.send(state.data_subject, Done)
-              actor.continue(
-                InternalState(..state, pending_response: Some(resp)),
-              )
-            })
-            |> result.map_error(fn(err) {
-              actor.Stop(process.Abnormal(
-                "Failed to respond to request: " <> erlang.format(err),
-              ))
-            })
-            |> result.unwrap_both
-          }
-          Done, True -> {
-            let assert Some(resp) = state.pending_response
-            send(resp)
-            actor.continue(state)
-          }
-          Data(bits: bits, end: True), _ -> {
-            process.send(state.data_subject, Done)
-            actor.continue(
-              InternalState(..state, end: True, to_remove: <<
-                state.to_remove:bits,
-                bits:bits,
-              >>),
-            )
-          }
-          Data(bits: bits, ..), _ -> {
-            actor.continue(
-              InternalState(..state, to_remove: <<
-                state.to_remove:bits,
-                bits:bits,
-              >>),
-            )
-          }
-          _msg, _ -> {
-            // TODO:  probably just discard this?
-            actor.continue(state)
-          }
-        }
-      },
-    ),
-  )
+        request.new()
+        |> request.set_body(conn)
+        |> make_request(headers, _)
+        |> result.map(handler)
+        |> result.map(fn(resp) {
+          process.send(state.data_subject, Done)
+          actor.continue(InternalState(..state, pending_response: Some(resp)))
+        })
+        |> result.map_error(fn(err) {
+          actor.Stop(
+            process.Abnormal(dynamic.from(
+              "Failed to respond to request: " <> string.inspect(err),
+            )),
+          )
+        })
+        |> result.unwrap_both
+      }
+      Done, True -> {
+        let assert Some(resp) = state.pending_response
+        send(resp)
+        actor.continue(state)
+      }
+      Data(bits: bits, end: True), _ -> {
+        process.send(state.data_subject, Done)
+        actor.continue(
+          InternalState(..state, end: True, to_remove: <<
+            state.to_remove:bits,
+            bits:bits,
+          >>),
+        )
+      }
+      Data(bits: bits, ..), _ -> {
+        actor.continue(
+          InternalState(..state, to_remove: <<state.to_remove:bits, bits:bits>>),
+        )
+      }
+      _msg, _ -> {
+        // TODO:  probably just discard this?
+        actor.continue(state)
+      }
+    }
+  })
+  |> actor.start
 }
 
 pub fn make_request(

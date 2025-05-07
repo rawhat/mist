@@ -1,7 +1,6 @@
 import gleam/bit_array
 import gleam/bytes_tree.{type BytesTree}
-import gleam/erlang.{rescue}
-import gleam/erlang/process.{type ProcessDown, type Selector, type Subject}
+import gleam/erlang/process.{type Down, type Selector, type Subject}
 import gleam/function
 import gleam/http.{type Scheme, Http, Https} as gleam_http
 import gleam/http/request.{type Request}
@@ -11,7 +10,8 @@ import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
-import gleam/otp/supervisor
+import gleam/otp/static_supervisor as supervisor
+import gleam/otp/supervision
 import gleam/result
 import gleam/string
 import gleam/string_tree.{type StringTree}
@@ -21,6 +21,7 @@ import glisten/transport
 import gramps/websocket.{BinaryFrame, Data, TextFrame} as gramps_websocket
 import logging
 import mist/internal/buffer.{type Buffer, Buffer}
+import mist/internal/clock
 import mist/internal/encoder
 import mist/internal/file
 import mist/internal/handler
@@ -34,6 +35,9 @@ import mist/internal/websocket.{
   type HandlerMessage, type WebsocketConnection as InternalWebsocketConnection,
   Internal, User,
 }
+
+@external(erlang, "mist_ffi", "rescue")
+fn rescue(func: fn() -> return) -> Result(return, Nil)
 
 /// Re-exported type that represents the default `Request` body type. See
 /// `mist.read_body` to convert this type into a `BitString`. The `Connection`
@@ -95,12 +99,12 @@ pub fn get_client_info(conn: Connection) -> Result(ConnectionInfo, Nil) {
 /// `Transfer-Encoding: chunked` to send an iterator in chunks. `File` will use
 /// Erlang's `sendfile` to more efficiently return a file to the client.
 pub type ResponseData {
-  Websocket(Selector(ProcessDown))
+  Websocket(Selector(Down))
   Bytes(BytesTree)
   Chunked(Yielder(BytesTree))
   /// See `mist.send_file` to use this response type.
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
-  ServerSentEvents(Selector(ProcessDown))
+  ServerSentEvents(Selector(Down))
 }
 
 /// Potential errors when opening a file to send. This list is
@@ -448,67 +452,36 @@ pub type Port {
   Provided(Int)
 }
 
-pub opaque type Server {
-  Server(
-    supervisor: Subject(supervisor.Message),
-    port: Int,
-    ip_address: IpAddress,
-  )
-}
-
-pub fn get_supervisor(server: Server) -> Subject(supervisor.Message) {
-  server.supervisor
-}
-
-pub fn get_port(server: Server) -> Int {
-  server.port
-}
-
 /// Start a `mist` service over HTTP with the provided builder.
 pub fn start_http(
   builder: Builder(Connection, ResponseData),
-) -> Result(Subject(supervisor.Message), glisten.StartError) {
-  start_http_server(builder)
-  |> result.map(get_supervisor)
-}
-
-/// See the documentation for `start_http`.  For now, you almost certainly
-/// want to use that.  In the future, this will allow access to things like
-/// OS-provided ports, graceful shutdown, etc.
-pub fn start_http_server(
-  builder: Builder(Connection, ResponseData),
-) -> Result(Server, glisten.StartError) {
-  fn(req) { convert_body_types(builder.handler(req)) }
-  |> handler.with_func
-  |> glisten.handler(handler.init, _)
-  |> glisten.bind(builder.interface)
-  |> fn(handler) {
-    case builder.ipv6_support {
-      True -> glisten.with_ipv6(handler)
-      False -> handler
-    }
-  }
-  |> glisten.start_server(builder.port)
-  |> result.map(fn(server) {
-    case glisten.get_server_info(server, 5000) {
-      Ok(info) -> {
+) -> Result(actor.Started(supervisor.Supervisor), actor.StartError) {
+  let listener_name = process.new_name("glisten_listener")
+  let clock_name = process.new_name("mist_clock")
+  supervisor.new(supervisor.OneForOne)
+  |> supervisor.add(
+    supervision.supervisor(fn() {
+      fn(req) { convert_body_types(builder.handler(req)) }
+      |> handler.with_func
+      |> glisten.handler(handler.init, _)
+      |> glisten.bind(builder.interface)
+      |> fn(handler) {
+        case builder.ipv6_support {
+          True -> glisten.with_ipv6(handler)
+          False -> handler
+        }
+      }
+      |> glisten.serve_with_listener_name(builder.port, listener_name)
+      |> result.map(fn(server) {
+        let info = glisten.get_server_info(listener_name, 5000)
         let ip_address = to_mist_ip_address(info.ip_address)
         builder.after_start(info.port, Http, ip_address)
-        Server(
-          supervisor: glisten.get_supervisor(server),
-          port: info.port,
-          ip_address: ip_address,
-        )
-      }
-      Error(reason) -> {
-        logging.log(
-          logging.Error,
-          "Failed to read port from socket: " <> string.inspect(reason),
-        )
-        panic
-      }
-    }
-  })
+        server
+      })
+    }),
+  )
+  |> supervisor.add(supervision.worker(fn() { clock.start(clock_name) }))
+  |> supervisor.start
 }
 
 /// These are the types of errors raised by trying to read the certificate and
@@ -523,7 +496,7 @@ pub type CertificateError {
 /// If there are issues reading the certificate or key files, those will be
 /// returned.
 pub type HttpsError {
-  GlistenError(glisten.StartError)
+  StartError(actor.StartError)
   CertificateError(CertificateError)
 }
 
@@ -534,19 +507,10 @@ pub fn start_https(
   builder: Builder(Connection, ResponseData),
   certfile certfile: String,
   keyfile keyfile: String,
-) -> Result(Subject(supervisor.Message), HttpsError) {
-  start_https_server(builder, certfile, keyfile)
-  |> result.map(get_supervisor)
-}
+) -> Result(actor.Started(supervisor.Supervisor), HttpsError) {
+  let listener_name = process.new_name("glisten_listener")
+  let clock_name = process.new_name("mist_clock")
 
-/// See the documentation for `start_https`.  For now, you almost certainly
-/// want to use that.  In the future, this will allow access to things like
-/// OS-provided ports, graceful shutdown, etc.
-pub fn start_https_server(
-  builder: Builder(Connection, ResponseData),
-  certfile certfile: String,
-  keyfile keyfile: String,
-) -> Result(Server, HttpsError) {
   let cert = file.open(bit_array.from_string(certfile))
   let key = file.open(bit_array.from_string(keyfile))
 
@@ -559,32 +523,25 @@ pub fn start_https_server(
 
   use _ <- result.then(res)
 
-  fn(req) { convert_body_types(builder.handler(req)) }
-  |> handler.with_func
-  |> glisten.handler(handler.init, _)
-  |> glisten.bind(builder.interface)
-  |> glisten.start_ssl_server(builder.port, certfile, keyfile)
-  |> result.map(fn(server) {
-    case glisten.get_server_info(server, 1000) {
-      Ok(info) -> {
+  supervisor.new(supervisor.OneForOne)
+  |> supervisor.add(
+    supervision.supervisor(fn() {
+      fn(req) { convert_body_types(builder.handler(req)) }
+      |> handler.with_func
+      |> glisten.handler(handler.init, _)
+      |> glisten.bind(builder.interface)
+      |> glisten.serve_ssl(builder.port, certfile, keyfile)
+      |> result.map(fn(server) {
+        let info = glisten.get_server_info(listener_name, 1000)
         let ip_address = to_mist_ip_address(info.ip_address)
         builder.after_start(info.port, Https, ip_address)
-        Server(
-          supervisor: glisten.get_supervisor(server),
-          port: info.port,
-          ip_address: ip_address,
-        )
-      }
-      Error(reason) -> {
-        logging.log(
-          logging.Error,
-          "Failed to read port from socket: " <> string.inspect(reason),
-        )
-        panic
-      }
-    }
-  })
-  |> result.map_error(GlistenError)
+        server
+      })
+    }),
+  )
+  |> supervisor.add(supervision.worker(fn() { clock.start(clock_name) }))
+  |> supervisor.start
+  |> result.map_error(StartError)
 }
 
 /// These are the types of messages that a websocket handler may receive.
@@ -623,16 +580,16 @@ fn internal_to_public_ws_message(
 /// for any reason, valid or otherwise.
 pub fn websocket(
   request request: Request(Connection),
-  handler handler: fn(state, WebsocketConnection, WebsocketMessage(message)) ->
-    actor.Next(message, state),
+  handler handler: fn(state, WebsocketMessage(message), WebsocketConnection) ->
+    actor.Next(state, message),
   on_init on_init: fn(WebsocketConnection) ->
     #(state, Option(process.Selector(message))),
   on_close on_close: fn(state) -> Nil,
 ) -> Response(ResponseData) {
-  let handler = fn(state, connection, message) {
+  let handler = fn(state, message, connection) {
     message
     |> internal_to_public_ws_message
-    |> result.map(handler(state, connection, _))
+    |> result.map(handler(state, _, connection))
     |> result.unwrap(actor.continue(state))
   }
   let extensions =
@@ -656,11 +613,11 @@ pub fn websocket(
     )
   })
   |> result.map(fn(subj) {
-    let ws_process = process.subject_owner(subj)
-    let monitor = process.monitor_process(ws_process)
+    let assert Ok(ws_process) = process.subject_owner(subj.data)
+    let monitor = process.monitor(ws_process)
     let selector =
       process.new_selector()
-      |> process.selecting_process_down(monitor, function.identity)
+      |> process.select_specific_monitor(monitor, function.identity)
     response.new(200)
     |> response.set_body(Websocket(selector))
   })
@@ -773,8 +730,9 @@ pub fn event_retry(event: SSEEvent, retry: Int) -> SSEEvent {
 pub fn server_sent_events(
   request req: Request(Connection),
   initial_response resp: Response(discard),
-  init init: fn() -> actor.InitResult(state, message),
-  loop loop: fn(message, SSEConnection, state) -> actor.Next(message, state),
+  init init: fn(Subject(message)) ->
+    Result(actor.Initialised(state, message, data), String),
+  loop loop: fn(state, message, SSEConnection) -> actor.Next(state, message),
 ) -> Response(ResponseData) {
   let with_default_headers =
     resp
@@ -789,19 +747,22 @@ pub fn server_sent_events(
   )
   |> result.replace_error(Nil)
   |> result.then(fn(_nil) {
-    actor.start_spec(
-      actor.Spec(init: init, init_timeout: 1000, loop: fn(state, message) {
-        loop(state, SSEConnection(req.body), message)
-      }),
-    )
+    actor.new_with_initialiser(1000, fn(subj) {
+      init(subj)
+      |> result.map(fn(return) { actor.returning(return, subj) })
+    })
+    |> actor.on_message(fn(state, message) {
+      loop(state, message, SSEConnection(req.body))
+    })
+    |> actor.start
     |> result.replace_error(Nil)
   })
   |> result.map(fn(subj) {
-    let sse_process = process.subject_owner(subj)
-    let monitor = process.monitor_process(sse_process)
+    let assert Ok(sse_process) = process.subject_owner(subj.data)
+    let monitor = process.monitor(sse_process)
     let selector =
       process.new_selector()
-      |> process.selecting_process_down(monitor, function.identity)
+      |> process.select_specific_monitor(monitor, function.identity)
     response.new(200)
     |> response.set_body(ServerSentEvents(selector))
   })

@@ -29,9 +29,7 @@ pub fn main() {
   logging.configure()
   let _ =
     logger_update_primary_config(
-      dict.from_list([
-        #(atom.create_from_string("level"), atom.create_from_string("debug")),
-      ]),
+      dict.from_list([#(atom.create("level"), atom.create("debug"))]),
     )
   // These values are for the Websocket process initialized below
   let selector = process.new_selector()
@@ -81,7 +79,7 @@ pub type MyMessage {
   Broadcast(String)
 }
 
-fn handle_ws_message(state, conn, message) {
+fn handle_ws_message(state, message, conn) {
   case message {
     mist.Text("ping") -> {
       let assert Ok(_) = mist.send_text_frame(conn, "pong")

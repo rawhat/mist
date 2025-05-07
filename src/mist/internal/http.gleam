@@ -5,7 +5,7 @@ import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist.{type Charlist}
-import gleam/erlang/process.{type ProcessDown, type Selector}
+import gleam/erlang/process.{type Down, type Selector}
 import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response, Response}
@@ -25,11 +25,11 @@ import mist/internal/encoder
 import mist/internal/file
 
 pub type ResponseData {
-  Websocket(Selector(ProcessDown))
+  Websocket(Selector(Down))
   Bytes(BytesTree)
   Chunked(Yielder(BytesTree))
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
-  ServerSentEvents(Selector(ProcessDown))
+  ServerSentEvents(Selector(Down))
 }
 
 pub type Connection {
@@ -248,6 +248,35 @@ pub type ParsedRequest {
   Upgrade(BitArray)
 }
 
+@external(erlang, "mist_ffi", "decode_atom")
+fn decode_atom(value: Dynamic) -> Result(atom.Atom, Nil)
+
+fn decode_http_method(value: Dynamic) -> Result(http.Method, Nil) {
+  let options = atom.create("OPTIONS")
+  let get = atom.create("GET")
+  let head = atom.create("HEAD")
+  let post = atom.create("POST")
+  let put = atom.create("PUT")
+  let delete = atom.create("DELETE")
+  let trace = atom.create("TRACE")
+
+  case decode_atom(value) {
+    Ok(method) if method == options -> Ok(http.Options)
+    Ok(method) if method == get -> Ok(http.Get)
+    Ok(method) if method == head -> Ok(http.Head)
+    Ok(method) if method == post -> Ok(http.Post)
+    Ok(method) if method == put -> Ok(http.Put)
+    Ok(method) if method == delete -> Ok(http.Delete)
+    Ok(method) if method == trace -> Ok(http.Trace)
+    _ -> {
+      case decode.run(value, decode.string) {
+        Ok(str) -> http.parse_method(str)
+        _ -> Error(Nil)
+      }
+    }
+  }
+}
+
 /// Turns the TCP message into an HTTP request
 pub fn parse_request(
   bs: BitArray,
@@ -257,15 +286,7 @@ pub fn parse_request(
     Ok(BinaryData(HttpRequest(http_method, AbsPath(path), version), rest)) -> {
       use method <- result.then(
         http_method
-        |> atom.from_dynamic
-        |> result.map(atom.to_string)
-        |> result.replace_error(Nil)
-        |> result.or({
-          http_method
-          |> decode.run(decode.string)
-          |> result.replace_error(Nil)
-        })
-        |> result.then(http.parse_method)
+        |> decode_http_method
         |> result.replace_error(UnknownMethod),
       )
       use #(headers, rest) <- result.then(parse_headers(
@@ -414,7 +435,7 @@ pub fn read_body(
     -> {
       let res =
         selector
-        |> process.select(1000)
+        |> process.selector_receive(1000)
         |> result.replace_error(InvalidBody)
       use next <- result.then(res)
       let got = bit_array.byte_size(next)

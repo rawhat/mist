@@ -7,19 +7,16 @@ repository = { type = "github", user = "rawhat", repo = "mist" }
 target = "erlang"
 gleam = ">= 1.4.0"
 
-[erlang]
-application_start_module = "mist@internal@clock"
-
 [dependencies]
-gleam_erlang = "~> 0.24"
+gleam_erlang = "1.0.0-rc1"
 gleam_http = ">= 4.0.0 and < 5.0.0"
-gleam_otp = "~> 0.9"
+gleam_otp = { git = "/home/alex/repos/gleam_otp", ref = "redux"}
 gleam_stdlib = ">= 0.50.0 and < 1.0.0"
 hpack_erl = "~> 0.3"
 logging = "~> 1.0"
 gleam_yielder = ">= 1.1.0 and < 2.0.0"
 gramps = ">= 3.0.0 and < 4.0.0"
-glisten = ">= 7.0.0 and < 8.0.0"
+glisten = { path = "../glisten"}
 
 [dev-dependencies]
 gleeunit = "~> 1.0"

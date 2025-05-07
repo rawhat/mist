@@ -1,7 +1,6 @@
 import gleam/bit_array
 import gleam/bool
 import gleam/bytes_tree.{type BytesTree}
-import gleam/erlang
 import gleam/erlang/process.{type Selector}
 import gleam/hackney
 import gleam/http
@@ -36,44 +35,44 @@ pub fn with_server(
   resp
 }
 
+@external(erlang, "mist_ffi", "rescue")
+fn rescue(func: fn() -> anything) -> Result(anything, Nil)
+
 pub fn open_server(
   at port: Int,
   with handler: fn(Request(Connection)) -> Response(mist.ResponseData),
   after perform: fn() -> return,
 ) -> return {
   let pid =
-    process.start(
-      fn() {
-        let assert Ok(listener) = tcp.listen(port, [])
-        let assert Ok(socket) = tcp.accept(listener)
+    process.spawn_unlinked(fn() {
+      let assert Ok(listener) = tcp.listen(port, [])
+      let assert Ok(socket) = tcp.accept(listener)
 
-        let loop_func =
-          handler.with_func(fn(req) {
-            req
-            |> handler
-            |> convert_body_types
-          })
+      let loop_func =
+        handler.with_func(fn(req) {
+          req
+          |> handler
+          |> convert_body_types
+        })
 
-        let glisten_handler =
-          glisten_handler.Handler(
-            socket: socket,
-            on_init: handler.init,
-            on_close: option.None,
-            loop: convert_loop(loop_func),
-            transport: Tcp,
-          )
+      let glisten_handler =
+        glisten_handler.Handler(
+          socket: socket,
+          on_init: handler.init,
+          on_close: option.None,
+          loop: convert_loop(loop_func),
+          transport: Tcp,
+        )
 
-        let assert Ok(server) = glisten_handler.start(glisten_handler)
-        let assert Ok(_nil) =
-          tcp.controlling_process(socket, process.subject_owner(server))
-        process.send(server, glisten_handler.Internal(glisten_handler.Ready))
+      let assert Ok(server) = glisten_handler.start(glisten_handler)
+      let assert Ok(owner) = process.subject_owner(server.data)
+      let assert Ok(_nil) = tcp.controlling_process(socket, owner)
+      process.send(server.data, glisten_handler.Internal(glisten_handler.Ready))
 
-        process.sleep_forever()
-      },
-      False,
-    )
+      process.sleep_forever()
+    })
 
-  case erlang.rescue(perform) {
+  case rescue(perform) {
     Ok(return) -> {
       process.kill(pid)
       return
@@ -111,20 +110,20 @@ fn map_user_selector(
 }
 
 fn convert_loop(
-  loop: glisten.Loop(user_message, data),
-) -> glisten_handler.Loop(user_message, data) {
-  fn(msg, data, conn: glisten_handler.Connection(user_message)) {
+  loop: glisten.Loop(data, user_message),
+) -> glisten_handler.Loop(data, user_message) {
+  fn(data, msg, conn: glisten_handler.Connection(user_message)) {
     let conn = glisten.Connection(conn.socket, conn.transport, conn.sender)
     case msg {
       glisten_handler.Packet(msg) -> {
-        case loop(glisten.Packet(msg), data, conn) {
+        case loop(data, glisten.Packet(msg), conn) {
           actor.Continue(data, selector) ->
             actor.Continue(data, option.map(selector, map_user_selector))
           actor.Stop(reason) -> actor.Stop(reason)
         }
       }
       glisten_handler.Custom(msg) -> {
-        case loop(glisten.User(msg), data, conn) {
+        case loop(data, glisten.User(msg), conn) {
           actor.Continue(data, selector) ->
             actor.Continue(data, option.map(selector, map_user_selector))
           actor.Stop(reason) -> actor.Stop(reason)

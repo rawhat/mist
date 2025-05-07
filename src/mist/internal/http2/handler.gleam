@@ -1,11 +1,13 @@
 import gleam/bit_array
 import gleam/dict.{type Dict}
+import gleam/dynamic
 import gleam/erlang/process.{type Subject}
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import logging
 import mist/internal/buffer.{type Buffer}
 import mist/internal/http.{
@@ -85,7 +87,7 @@ pub fn upgrade(
 
   logging.log(logging.Error, "HTTP/2 currently not supported")
 
-  Error(process.Abnormal("HTTP/2 currently not supported"))
+  Error(process.Abnormal(dynamic.from("HTTP/2 currently not supported")))
 }
 
 pub fn call(
@@ -110,8 +112,6 @@ pub fn call(
     }
   }
 }
-
-import gleam/erlang
 
 // TODO:  this should use the frame error types to actually do some shit with
 // the stream(s)
@@ -180,9 +180,11 @@ fn handle_frame(
         _stream_id -> {
           state.streams
           |> dict.get(identifier)
-          |> result.replace_error(process.Abnormal(
-            "Window update for non-existent stream",
-          ))
+          |> result.replace_error(
+            process.Abnormal(dynamic.from(
+              "Window update for non-existent stream",
+            )),
+          )
           |> result.then(fn(stream) {
             case
               flow_control.update_send_window(stream.send_window_size, amount)
@@ -197,7 +199,10 @@ fn handle_frame(
                   ),
                 )
               }
-              _err -> Error(process.Abnormal("Failed to update send window"))
+              _err ->
+                Error(
+                  process.Abnormal(dynamic.from("Failed to update send window")),
+                )
             }
           })
         }
@@ -227,13 +232,13 @@ fn handle_frame(
           fn(resp) { process.send(state.self, Send(identifier, resp)) },
           end_stream,
         )
-      process.send(new_stream, Ready)
+      process.send(new_stream.data, Ready)
 
       let stream_state =
         stream.State(
           id: identifier,
           state: stream.Open,
-          subject: new_stream,
+          subject: new_stream.data,
           receive_window_size: state.settings.initial_window_size,
           send_window_size: state.settings.initial_window_size,
           pending_content_length: pending_content_length,
@@ -255,7 +260,9 @@ fn handle_frame(
       |> result.map(stream.receive_data(_, data_size))
       // TODO:  this whole business should much more gracefully handle
       // individual stream errors rather than just blowin up
-      |> result.replace_error(process.Abnormal("Stream failed to receive data"))
+      |> result.replace_error(
+        process.Abnormal(dynamic.from("Stream failed to receive data")),
+      )
       // TODO:  handle end of stream?
       |> result.map(fn(update) {
         let #(new_stream, increment) = update
@@ -303,9 +310,9 @@ fn handle_frame(
     _, frame.Settings(..) -> {
       http2.send_frame(frame.settings_ack(), conn.socket, conn.transport)
       |> result.replace(state)
-      |> result.replace_error(process.Abnormal(
-        "Failed to respond to settings ACK",
-      ))
+      |> result.replace_error(
+        process.Abnormal(dynamic.from("Failed to respond to settings ACK")),
+      )
     }
     None, frame.GoAway(..) -> {
       logging.log(logging.Debug, "byteeee~~")
@@ -313,7 +320,7 @@ fn handle_frame(
     }
     // TODO:  obviously fill these out
     _, frame -> {
-      logging.log(logging.Debug, "Ignoring frame: " <> erlang.format(frame))
+      logging.log(logging.Debug, "Ignoring frame: " <> string.inspect(frame))
       Ok(state)
     }
   }

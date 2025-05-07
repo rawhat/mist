@@ -71,7 +71,7 @@ pub fn log(
   _config: List(config),
 ) -> Nil {
   let duration_string =
-    dict.get(measurements, atom.create_from_string("duration"))
+    dict.get(measurements, atom.create("duration"))
     |> result.then(fn(val) {
       val
       |> decode.run(decode.int)

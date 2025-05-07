@@ -1,5 +1,5 @@
 import gleam/bytes_tree.{type BytesTree}
-import gleam/erlang
+import gleam/dynamic
 import gleam/erlang/process
 import gleam/http.{type Header} as _ghttp
 import gleam/http/response.{type Response}
@@ -7,6 +7,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import glisten/socket.{type Socket, type SocketReason}
 import glisten/transport.{type Transport}
 import logging
@@ -85,7 +86,8 @@ fn send_headers(
       )
     {
       Ok(_nil) -> Ok(new_context)
-      Error(_reason) -> Error(process.Abnormal("Failed to send HTTP/2 headers"))
+      Error(_reason) ->
+        Error(process.Abnormal(dynamic.from("Failed to send HTTP/2 headers")))
     }
   })
 }
@@ -106,8 +108,8 @@ fn send_data(
     bytes_tree.from_bit_array(encoded),
   )
   |> result.map_error(fn(err) {
-    logging.log(logging.Debug, "failed to send :(  " <> erlang.format(err))
-    process.Abnormal("Failed to send HTTP/2 data")
+    logging.log(logging.Debug, "failed to send :(  " <> string.inspect(err))
+    process.Abnormal(dynamic.from("Failed to send HTTP/2 data"))
   })
 }
 

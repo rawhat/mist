@@ -1,11 +1,12 @@
+import gleam/dynamic
 import gleam/dynamic/decode
-import gleam/erlang.{rescue}
 import gleam/erlang/atom
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
+import gleam/string
 import glisten.{type Socket}
 import glisten/socket/options
 import glisten/transport.{type Transport}
@@ -15,6 +16,9 @@ import gramps/websocket.{
 }
 import gramps/websocket/compression.{type Compression, type Context}
 import logging
+
+@external(erlang, "mist_ffi", "rescue")
+fn rescue(func: fn() -> return) -> Result(return, Nil)
 
 pub type ValidMessage(user_message) {
   SocketMessage(BitArray)
@@ -49,32 +53,36 @@ pub type WebsocketState(state) {
 }
 
 pub type Handler(state, message) =
-  fn(state, WebsocketConnection, HandlerMessage(message)) ->
-    actor.Next(message, state)
+  fn(state, HandlerMessage(message), WebsocketConnection) ->
+    actor.Next(state, message)
 
 // TODO: this is pulled straight from glisten, prob should share it
 fn message_selector() -> Selector(WebsocketMessage(user_message)) {
   process.new_selector()
-  |> process.selecting_record3(atom.create_from_string("tcp"), fn(_sock, data) {
-    data
-    |> decode.run(decode.bit_array)
+  |> process.select_record(atom.create("tcp"), 2, fn(record) {
+    {
+      use data <- decode.field(2, decode.bit_array)
+      decode.success(SocketMessage(data))
+    }
+    |> decode.run(record, _)
     |> result.replace_error(Nil)
-    |> result.map(SocketMessage)
     |> result.map(Valid)
     |> result.unwrap(Invalid)
   })
-  |> process.selecting_record3(atom.create_from_string("ssl"), fn(_sock, data) {
-    data
-    |> decode.run(decode.bit_array)
+  |> process.select_record(atom.create("ssl"), 2, fn(record) {
+    {
+      use data <- decode.field(2, decode.bit_array)
+      decode.success(SocketMessage(data))
+    }
+    |> decode.run(record, _)
     |> result.replace_error(Nil)
-    |> result.map(SocketMessage)
     |> result.map(Valid)
     |> result.unwrap(Invalid)
   })
-  |> process.selecting_record2(atom.create_from_string("ssl_closed"), fn(_nil) {
+  |> process.select_record(atom.create("ssl_closed"), 1, fn(_nil) {
     Valid(SocketClosedMessage)
   })
-  |> process.selecting_record2(atom.create_from_string("tcp_closed"), fn(_nil) {
+  |> process.select_record(atom.create("tcp_closed"), 1, fn(_nil) {
     Valid(SocketClosedMessage)
   })
 }
@@ -86,173 +94,174 @@ pub fn initialize_connection(
   socket: Socket,
   transport: Transport,
   extensions: List(String),
-) -> Result(Subject(WebsocketMessage(user_message)), Nil) {
-  actor.start_spec(
-    actor.Spec(
-      init: fn() {
-        let compression = case websocket.has_deflate(extensions) {
-          True -> Some(compression.init())
-          False -> None
-        }
-        let connection =
-          WebsocketConnection(
-            socket: socket,
-            transport: transport,
-            deflate: option.map(compression, fn(compression) {
-              compression.deflate
+) -> Result(actor.Started(Subject(WebsocketMessage(user_message))), Nil) {
+  actor.new_with_initialiser(500, fn(subject) {
+    let compression = case websocket.has_deflate(extensions) {
+      True -> Some(compression.init())
+      False -> None
+    }
+    let connection =
+      WebsocketConnection(
+        socket: socket,
+        transport: transport,
+        deflate: option.map(compression, fn(compression) { compression.deflate }),
+      )
+    let #(initial_state, user_selector) = on_init(connection)
+    let selector = case user_selector {
+      Some(user_selector) ->
+        user_selector
+        |> process.map_selector(UserMessage)
+        |> process.map_selector(Valid)
+        |> process.merge_selector(message_selector())
+      _ -> message_selector()
+    }
+    WebsocketState(
+      buffer: <<>>,
+      user: initial_state,
+      permessage_deflate: compression,
+    )
+    |> actor.initialised
+    |> actor.selecting(selector)
+    |> actor.returning(subject)
+    |> Ok
+  })
+  |> actor.on_message(fn(state, msg) {
+    let connection =
+      WebsocketConnection(
+        socket: socket,
+        transport: transport,
+        deflate: option.map(state.permessage_deflate, fn(compression) {
+          compression.deflate
+        }),
+      )
+    case msg {
+      Valid(SocketMessage(data)) -> {
+        let #(frames, rest) =
+          get_messages(
+            <<state.buffer:bits, data:bits>>,
+            [],
+            option.map(state.permessage_deflate, fn(compression) {
+              compression.inflate
             }),
           )
-        let #(initial_state, user_selector) = on_init(connection)
-        let selector = case user_selector {
-          Some(user_selector) ->
-            user_selector
-            |> process.map_selector(UserMessage)
-            |> process.map_selector(Valid)
-            |> process.merge_selector(message_selector())
-          _ -> message_selector()
-        }
-        actor.Ready(
-          WebsocketState(
-            buffer: <<>>,
-            user: initial_state,
-            permessage_deflate: compression,
-          ),
-          selector,
-        )
-      },
-      init_timeout: 500,
-      loop: fn(msg, state) {
-        let connection =
-          WebsocketConnection(
-            socket: socket,
-            transport: transport,
-            deflate: option.map(state.permessage_deflate, fn(compression) {
-              compression.deflate
-            }),
-          )
-        case msg {
-          Valid(SocketMessage(data)) -> {
-            let #(frames, rest) =
-              get_messages(
-                <<state.buffer:bits, data:bits>>,
-                [],
-                option.map(state.permessage_deflate, fn(compression) {
-                  compression.inflate
-                }),
+        frames
+        |> websocket.aggregate_frames(None, [])
+        |> result.map(fn(frames) {
+          let next =
+            apply_frames(
+              frames,
+              handler,
+              connection,
+              actor.continue(state.user),
+              on_close,
+            )
+          case next {
+            actor.Continue(user_state, selector) -> {
+              actor.Continue(
+                WebsocketState(..state, buffer: rest, user: user_state),
+                selector,
               )
-            frames
-            |> websocket.aggregate_frames(None, [])
-            |> result.map(fn(frames) {
-              let next =
-                apply_frames(
-                  frames,
-                  handler,
-                  connection,
-                  actor.continue(state.user),
-                  on_close,
-                )
-              case next {
-                actor.Continue(user_state, selector) -> {
-                  actor.Continue(
-                    WebsocketState(..state, buffer: rest, user: user_state),
-                    selector,
-                  )
-                }
-                actor.Stop(reason) -> {
-                  let _ =
-                    option.map(state.permessage_deflate, fn(contexts) {
-                      compression.close(contexts.deflate)
-                      compression.close(contexts.inflate)
-                    })
-                  actor.Stop(reason)
-                }
-              }
-            })
-            |> result.lazy_unwrap(fn() {
-              logging.log(logging.Error, "Received a malformed WebSocket frame")
-              on_close(state.user)
+            }
+            actor.Stop(reason) -> {
               let _ =
                 option.map(state.permessage_deflate, fn(contexts) {
                   compression.close(contexts.deflate)
                   compression.close(contexts.inflate)
                 })
-              actor.Stop(process.Abnormal(
-                "WebSocket received a malformed message",
-              ))
-            })
+              actor.Stop(reason)
+            }
           }
-          Valid(UserMessage(msg)) -> {
-            rescue(fn() { handler(state.user, connection, User(msg)) })
-            |> result.map(fn(cont) {
-              case cont {
-                actor.Continue(user_state, selector) -> {
-                  let selector =
-                    selector
-                    |> map_user_selector
-                    |> option.map(fn(with_user) {
-                      process.merge_selector(message_selector(), with_user)
-                    })
-                  actor.Continue(
-                    WebsocketState(..state, user: user_state),
-                    selector,
-                  )
-                }
-                actor.Stop(reason) -> {
-                  let _ =
-                    option.map(state.permessage_deflate, fn(contexts) {
-                      compression.close(contexts.deflate)
-                      compression.close(contexts.inflate)
-                    })
-                  on_close(state.user)
-                  actor.Stop(reason)
-                }
-              }
+        })
+        |> result.lazy_unwrap(fn() {
+          logging.log(logging.Error, "Received a malformed WebSocket frame")
+          on_close(state.user)
+          let _ =
+            option.map(state.permessage_deflate, fn(contexts) {
+              compression.close(contexts.deflate)
+              compression.close(contexts.inflate)
             })
-            |> result.map_error(fn(err) {
-              logging.log(
-                logging.Error,
-                "Caught error in websocket handler: " <> erlang.format(err),
-              )
-            })
-            |> result.lazy_unwrap(fn() {
-              let _ =
-                option.map(state.permessage_deflate, fn(contexts) {
-                  compression.close(contexts.deflate)
-                  compression.close(contexts.inflate)
-                })
-              on_close(state.user)
-              actor.Stop(process.Abnormal("Crash in user websocket handler"))
-            })
-          }
-          Valid(SocketClosedMessage) -> {
-            let _ =
-              option.map(state.permessage_deflate, fn(contexts) {
-                compression.close(contexts.deflate)
-                compression.close(contexts.inflate)
-              })
-            on_close(state.user)
-            actor.Stop(process.Normal)
-          }
-          // TODO:  do we need to send something back for this?
-          Invalid -> {
-            logging.log(logging.Error, "Received a malformed WebSocket frame")
-            let _ =
-              option.map(state.permessage_deflate, fn(contexts) {
-                compression.close(contexts.deflate)
-                compression.close(contexts.inflate)
-              })
-            on_close(state.user)
-            actor.Stop(process.Abnormal(
+          actor.Stop(
+            process.Abnormal(dynamic.from(
               "WebSocket received a malformed message",
-            ))
+            )),
+          )
+        })
+      }
+      Valid(UserMessage(msg)) -> {
+        rescue(fn() { handler(state.user, User(msg), connection) })
+        |> result.map(fn(cont) {
+          case cont {
+            actor.Continue(user_state, selector) -> {
+              let selector =
+                selector
+                |> map_user_selector
+                |> option.map(fn(with_user) {
+                  process.merge_selector(message_selector(), with_user)
+                })
+              actor.Continue(
+                WebsocketState(..state, user: user_state),
+                selector,
+              )
+            }
+            actor.Stop(reason) -> {
+              let _ =
+                option.map(state.permessage_deflate, fn(contexts) {
+                  compression.close(contexts.deflate)
+                  compression.close(contexts.inflate)
+                })
+              on_close(state.user)
+              actor.Stop(reason)
+            }
           }
-        }
-      },
-    ),
-  )
+        })
+        |> result.map_error(fn(err) {
+          logging.log(
+            logging.Error,
+            "Caught error in websocket handler: " <> string.inspect(err),
+          )
+        })
+        |> result.lazy_unwrap(fn() {
+          let _ =
+            option.map(state.permessage_deflate, fn(contexts) {
+              compression.close(contexts.deflate)
+              compression.close(contexts.inflate)
+            })
+          on_close(state.user)
+          actor.Stop(
+            process.Abnormal(dynamic.from("Crash in user websocket handler")),
+          )
+        })
+      }
+      Valid(SocketClosedMessage) -> {
+        let _ =
+          option.map(state.permessage_deflate, fn(contexts) {
+            compression.close(contexts.deflate)
+            compression.close(contexts.inflate)
+          })
+        on_close(state.user)
+        actor.Stop(process.Normal)
+      }
+      // TODO:  do we need to send something back for this?
+      Invalid -> {
+        logging.log(logging.Error, "Received a malformed WebSocket frame")
+        let _ =
+          option.map(state.permessage_deflate, fn(contexts) {
+            compression.close(contexts.deflate)
+            compression.close(contexts.inflate)
+          })
+        on_close(state.user)
+        actor.Stop(
+          process.Abnormal(dynamic.from(
+            "WebSocket received a malformed message",
+          )),
+        )
+      }
+    }
+  })
+  |> actor.start
   |> result.replace_error(Nil)
   |> result.map(fn(subj) {
-    let websocket_pid = process.subject_owner(subj)
+    let assert Ok(websocket_pid) = process.subject_owner(subj.data)
     let assert Ok(_) =
       transport.controlling_process(transport, socket, websocket_pid)
     set_active(transport, socket)
@@ -278,9 +287,9 @@ fn apply_frames(
   frames: List(Frame),
   handler: Handler(state, user_message),
   connection: WebsocketConnection,
-  next: actor.Next(WebsocketMessage(user_message), state),
+  next: actor.Next(state, WebsocketMessage(user_message)),
   on_close: fn(state) -> Nil,
-) -> actor.Next(WebsocketMessage(user_message), state) {
+) -> actor.Next(state, WebsocketMessage(user_message)) {
   case frames, next {
     _, actor.Stop(reason) -> actor.Stop(reason)
     [], next -> {
@@ -309,11 +318,11 @@ fn apply_frames(
       })
       |> result.lazy_unwrap(fn() {
         on_close(state)
-        actor.Stop(process.Abnormal("Failed to send pong frame"))
+        actor.Stop(process.Abnormal(dynamic.from("Failed to send pong frame")))
       })
     }
     [frame, ..rest], actor.Continue(state, prev_selector) -> {
-      case rescue(fn() { handler(state, connection, Internal(frame)) }) {
+      case rescue(fn() { handler(state, Internal(frame), connection) }) {
         Ok(actor.Continue(state, selector)) -> {
           let next_selector =
             selector
@@ -338,10 +347,12 @@ fn apply_frames(
         Error(reason) -> {
           logging.log(
             logging.Error,
-            "Caught error in websocket handler: " <> erlang.format(reason),
+            "Caught error in websocket handler: " <> string.inspect(reason),
           )
           on_close(state)
-          actor.Stop(process.Abnormal("Crash in user websocket handler"))
+          actor.Stop(
+            process.Abnormal(dynamic.from("Crash in user websocket handler")),
+          )
         }
       }
     }

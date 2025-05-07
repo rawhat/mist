@@ -1,5 +1,5 @@
 import gleam/bytes_tree.{type BytesTree}
-import gleam/erlang.{Errored, Exited, Thrown, rescue}
+import gleam/dynamic.{type Dynamic}
 import gleam/erlang/process.{type Subject}
 import gleam/http as ghttp
 import gleam/http/request.{type Request}
@@ -19,6 +19,9 @@ import mist/internal/http.{
   type Connection, type Handler, type ResponseData, Bytes, Chunked, File,
   ServerSentEvents, Websocket,
 }
+
+@external(erlang, "mist_ffi", "rescue")
+fn rescue(func: fn() -> any) -> Result(any, Dynamic)
 
 pub type State {
   State(idle_timer: Option(process.Timer))
@@ -47,7 +50,7 @@ pub fn call(
     case resp {
       response.Response(body: Websocket(selector), ..)
       | response.Response(body: ServerSentEvents(selector), ..) -> {
-        let _resp = process.select_forever(selector)
+        let _resp = process.selector_receive_forever(selector)
         Error(process.Normal)
       }
       response.Response(body: body, ..) as resp -> {
@@ -65,37 +68,33 @@ pub fn call(
 }
 
 fn log_and_error(
-  error: erlang.Crash,
+  error: Dynamic,
   socket: Socket,
   transport: Transport,
   req: Request(Connection),
   version: http.HttpVersion,
 ) -> process.ExitReason {
-  case error {
-    Exited(msg) | Thrown(msg) | Errored(msg) -> {
-      logging.log(logging.Error, string.inspect(error))
-      let resp =
-        response.new(500)
-        |> response.set_body(
-          bytes_tree.from_bit_array(<<"Internal Server Error":utf8>>),
-        )
-        |> response.prepend_header("content-length", "21")
-        |> http.add_default_headers(req.method == ghttp.Head)
+  logging.log(logging.Error, string.inspect(error))
+  let resp =
+    response.new(500)
+    |> response.set_body(
+      bytes_tree.from_bit_array(<<"Internal Server Error":utf8>>),
+    )
+    |> response.prepend_header("content-length", "21")
+    |> http.add_default_headers(req.method == ghttp.Head)
 
-      let resp = case version {
-        http.Http1 -> http.connection_close(resp)
-        _ -> http.maybe_keep_alive(resp)
-      }
-
-      let _ =
-        resp
-        |> encoder.to_bytes_tree(http.version_to_string(version))
-        |> transport.send(transport, socket, _)
-
-      let _ = transport.close(transport, socket)
-      process.Abnormal(string.inspect(msg))
-    }
+  let resp = case version {
+    http.Http1 -> http.connection_close(resp)
+    _ -> http.maybe_keep_alive(resp)
   }
+
+  let _ =
+    resp
+    |> encoder.to_bytes_tree(http.version_to_string(version))
+    |> transport.send(transport, socket, _)
+
+  let _ = transport.close(transport, socket)
+  process.Abnormal(error)
 }
 
 fn close_or_set_timer(

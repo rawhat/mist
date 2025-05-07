@@ -1,5 +1,5 @@
+import gleam/dynamic
 import gleam/erlang/process.{type Selector, type Subject}
-import gleam/function
 import gleam/http/response
 import gleam/option.{type Option, Some}
 import gleam/otp/actor
@@ -34,13 +34,13 @@ pub fn init(_conn) -> #(State, Option(Selector(Message))) {
   let subj = process.new_subject()
   let selector =
     process.new_selector()
-    |> process.selecting(subj, function.identity)
+    |> process.select(subj)
 
   #(new_state(subj), Some(selector))
 }
 
-pub fn with_func(handler: Handler) -> Loop(Message, State) {
-  fn(msg, state: State, conn: glisten.Connection(Message)) {
+pub fn with_func(handler: Handler) -> Loop(State, Message) {
+  fn(state: State, msg, conn: glisten.Connection(Message)) {
     let sender = conn.subject
     let conn =
       Connection(
@@ -51,9 +51,11 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
 
     case msg, state {
       User(Send(..)), Http1(..) -> {
-        Error(process.Abnormal(
-          "Attempted to send HTTP/2 response without upgrade",
-        ))
+        Error(
+          process.Abnormal(dynamic.from(
+            "Attempted to send HTTP/2 response without upgrade",
+          )),
+        )
       }
       User(Send(id, resp)), Http2(state) -> {
         case resp.body {
@@ -63,14 +65,28 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
             |> http2.send_bytes_tree(conn, state.send_hpack_context, id)
           }
           File(..) ->
-            Error(process.Abnormal("File sending unsupported over HTTP/2"))
+            Error(
+              process.Abnormal(dynamic.from(
+                "File sending unsupported over HTTP/2",
+              )),
+            )
           // TODO:  properly error in some fashion for these
           Websocket(_selector) ->
-            Error(process.Abnormal("WebSocket unsupported for HTTP/2"))
+            Error(
+              process.Abnormal(dynamic.from("WebSocket unsupported for HTTP/2")),
+            )
           Chunked(_iterator) ->
-            Error(process.Abnormal("Chunked encoding not supported for HTTP/2"))
+            Error(
+              process.Abnormal(dynamic.from(
+                "Chunked encoding not supported for HTTP/2",
+              )),
+            )
           ServerSentEvents(_selector) ->
-            Error(process.Abnormal("Server-Sent Events unsupported for HTTP/2"))
+            Error(
+              process.Abnormal(dynamic.from(
+                "Server-Sent Events unsupported for HTTP/2",
+              )),
+            )
         }
         |> result.map(fn(context) {
           Http2(http2_handler.send_hpack_context(state, context))
@@ -96,7 +112,7 @@ pub fn with_func(handler: Handler) -> Loop(Message, State) {
             _ -> {
               logging.log(logging.Error, string.inspect(err))
               let _ = transport.close(conn.transport, conn.socket)
-              process.Abnormal("Received invalid request")
+              process.Abnormal(dynamic.from("Received invalid request"))
             }
           }
         })
