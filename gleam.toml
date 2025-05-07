@@ -10,7 +10,7 @@ gleam = ">= 1.4.0"
 [dependencies]
 gleam_erlang = "1.0.0-rc1"
 gleam_http = ">= 4.0.0 and < 5.0.0"
-gleam_otp = { git = "/home/alex/repos/gleam_otp", ref = "redux"}
+gleam_otp = { git = "git@github.com:gleam-lang/otp", ref = "redux"}
 gleam_stdlib = ">= 0.50.0 and < 1.0.0"
 hpack_erl = "~> 0.3"
 logging = "~> 1.0"
