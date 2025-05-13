@@ -14,7 +14,8 @@ import mist/internal/http.{
 }
 import mist/internal/http/handler as http_handler
 import mist/internal/http2
-import mist/internal/http2/handler.{type Message, Send} as http2_handler
+import mist/internal/http2/handler as http2_handler
+import mist/internal/http2/stream.{type SendMessage, Send}
 
 pub type HandlerError {
   InvalidRequest(DecodeError)
@@ -22,15 +23,15 @@ pub type HandlerError {
 }
 
 pub type State {
-  Http1(state: http_handler.State, self: Subject(Message))
+  Http1(state: http_handler.State, self: Subject(SendMessage))
   Http2(state: http2_handler.State)
 }
 
-pub fn new_state(subj: Subject(Message)) -> State {
+pub fn new_state(subj: Subject(SendMessage)) -> State {
   Http1(http_handler.initial_state(), subj)
 }
 
-pub fn init(_conn) -> #(State, Option(Selector(Message))) {
+pub fn init(_conn) -> #(State, Option(Selector(SendMessage))) {
   let subj = process.new_subject()
   let selector =
     process.new_selector()
@@ -39,8 +40,8 @@ pub fn init(_conn) -> #(State, Option(Selector(Message))) {
   #(new_state(subj), Some(selector))
 }
 
-pub fn with_func(handler: Handler) -> Loop(State, Message) {
-  fn(state: State, msg, conn: glisten.Connection(Message)) {
+pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
+  fn(state: State, msg, conn: glisten.Connection(SendMessage)) {
     let sender = conn.subject
     let conn =
       Connection(

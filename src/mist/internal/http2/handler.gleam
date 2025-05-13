@@ -2,7 +2,6 @@ import gleam/bit_array
 import gleam/dict.{type Dict}
 import gleam/dynamic
 import gleam/erlang/process.{type Subject}
-import gleam/http/response.{type Response}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -10,19 +9,13 @@ import gleam/result
 import gleam/string
 import logging
 import mist/internal/buffer.{type Buffer}
-import mist/internal/http.{
-  type Connection, type Handler, type ResponseData, Connection, Initial,
-}
+import mist/internal/http.{type Connection, type Handler, Connection, Initial}
 import mist/internal/http2.{type HpackContext, type Http2Settings, Http2Settings}
 import mist/internal/http2/flow_control
 import mist/internal/http2/frame.{
   type Frame, type StreamIdentifier, Complete, Continued,
 }
-import mist/internal/http2/stream.{Ready}
-
-pub type Message {
-  Send(identifier: StreamIdentifier(Frame), resp: Response(ResponseData))
-}
+import mist/internal/http2/stream.{type SendMessage, Ready}
 
 pub type PendingSend {
   PendingSend
@@ -34,7 +27,7 @@ pub type State {
     frame_buffer: Buffer,
     pending_sends: List(PendingSend),
     receive_hpack_context: HpackContext,
-    self: Subject(Message),
+    self: Subject(SendMessage),
     send_hpack_context: HpackContext,
     send_window_size: Int,
     receive_window_size: Int,
@@ -56,38 +49,36 @@ pub fn append_data(state: State, data: BitArray) -> State {
 }
 
 pub fn upgrade(
-  _data: BitArray,
+  data: BitArray,
   conn: Connection,
-  _self: Subject(Message),
+  self: Subject(SendMessage),
 ) -> Result(State, process.ExitReason) {
-  let _initial_settings = http2.default_settings()
+  let initial_settings = http2.default_settings()
   let settings_frame = frame.Settings(ack: False, settings: [])
 
-  let assert Ok(_nil) =
+  let sent =
     http2.send_frame(settings_frame, conn.socket, conn.transport)
+    |> result.replace_error(
+      process.Abnormal(dynamic.from("Failed to send settings frame")),
+    )
 
-  // TODO:  actually return this to support HTTP/2
-  // let _resp =
-  //   State(
-  //     fragment: None,
-  //     frame_buffer: buffer.new(data),
-  //     pending_sends: [],
-  //     receive_hpack_context: http2.hpack_new_context(
-  //       initial_settings.header_table_size,
-  //     ),
-  //     receive_window_size: 65_535,
-  //     self: self,
-  //     send_hpack_context: http2.hpack_new_context(
-  //       initial_settings.header_table_size,
-  //     ),
-  //     send_window_size: 65_535,
-  //     settings: initial_settings,
-  //     streams: dict.new(),
-  //   )
-
-  logging.log(logging.Error, "HTTP/2 currently not supported")
-
-  Error(process.Abnormal(dynamic.from("HTTP/2 currently not supported")))
+  use _nil <- result.map(sent)
+  State(
+    fragment: None,
+    frame_buffer: buffer.new(data),
+    pending_sends: [],
+    receive_hpack_context: http2.hpack_new_context(
+      initial_settings.header_table_size,
+    ),
+    receive_window_size: 65_535,
+    self: self,
+    send_hpack_context: http2.hpack_new_context(
+      initial_settings.header_table_size,
+    ),
+    send_window_size: 65_535,
+    settings: initial_settings,
+    streams: dict.new(),
+  )
 }
 
 pub fn call(
@@ -226,10 +217,12 @@ fn handle_frame(
 
       let assert Ok(new_stream) =
         stream.new(
+          identifier,
           handler,
           headers,
           conn,
-          fn(resp) { process.send(state.self, Send(identifier, resp)) },
+          state.self,
+          // fn(resp) { process.send(state.self, Send(identifier, resp)) },
           end_stream,
         )
       process.send(new_stream.data, Ready)

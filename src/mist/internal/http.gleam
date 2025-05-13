@@ -453,7 +453,9 @@ pub fn read_body(
           ))
       }
     }
-    _, Stream(data: data, ..) -> Ok(request.set_body(req, data))
+    _, Stream(data: data, ..) -> {
+      Ok(request.set_body(req, data))
+    }
   }
 }
 

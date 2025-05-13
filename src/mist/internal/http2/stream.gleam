@@ -23,6 +23,10 @@ pub type Message {
   Done
 }
 
+pub type SendMessage {
+  Send(identifier: StreamIdentifier(Frame), resp: Response(ResponseData))
+}
+
 pub type StreamState {
   Open
   RemoteClosed
@@ -52,10 +56,11 @@ pub type InternalState {
 }
 
 pub fn new(
+  identifier: StreamIdentifier(Frame),
   handler: Handler,
   headers: List(Header),
   connection: Connection,
-  send: fn(Response(ResponseData)) -> todo_resp,
+  sender: Subject(SendMessage),
   end: Bool,
 ) -> Result(actor.Started(Subject(Message)), actor.StartError) {
   actor.new_with_initialiser(1000, fn(subject) {
@@ -109,7 +114,7 @@ pub fn new(
       }
       Done, True -> {
         let assert Some(resp) = state.pending_response
-        send(resp)
+        process.send(sender, Send(identifier, resp))
         actor.continue(state)
       }
       Data(bits: bits, end: True), _ -> {

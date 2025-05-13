@@ -530,7 +530,13 @@ pub fn start_https(
       |> handler.with_func
       |> glisten.handler(handler.init, _)
       |> glisten.bind(builder.interface)
-      |> glisten.serve_ssl(builder.port, certfile, keyfile)
+      |> glisten.with_http2()
+      |> glisten.serve_ssl_with_listener_name(
+        builder.port,
+        certfile,
+        keyfile,
+        listener_name,
+      )
       |> result.map(fn(server) {
         let info = glisten.get_server_info(listener_name, 1000)
         let ip_address = to_mist_ip_address(info.ip_address)

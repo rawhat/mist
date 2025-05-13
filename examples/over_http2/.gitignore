@@ -1,0 +1,6 @@
+*.beam
+*.ez
+/build
+erl_crash.dump
+localhost.key
+localhost.crt
