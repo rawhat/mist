@@ -1,4 +1,3 @@
-import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/erlang/process.{type Selector, type Subject}
@@ -16,6 +15,7 @@ import gramps/websocket.{
 }
 import gramps/websocket/compression.{type Compression, type Context}
 import logging
+import mist/internal/next.{type Next, AbnormalStop, Continue, NormalStop}
 
 @external(erlang, "mist_ffi", "rescue")
 fn rescue(func: fn() -> return) -> Result(return, Nil)
@@ -54,7 +54,7 @@ pub type WebsocketState(state) {
 
 pub type Handler(state, message) =
   fn(state, HandlerMessage(message), WebsocketConnection) ->
-    actor.Next(state, message)
+    Next(state, message)
 
 // TODO: this is pulled straight from glisten, prob should share it
 fn message_selector() -> Selector(WebsocketMessage(user_message)) {
@@ -152,23 +152,35 @@ pub fn initialize_connection(
               frames,
               handler,
               connection,
-              actor.continue(state.user),
+              Continue(state.user, None),
               on_close,
             )
           case next {
-            actor.Continue(user_state, selector) -> {
-              actor.Continue(
-                WebsocketState(..state, buffer: rest, user: user_state),
-                selector,
-              )
+            Continue(user_state, selector) -> {
+              let next =
+                actor.continue(
+                  WebsocketState(..state, buffer: rest, user: user_state),
+                )
+              case selector {
+                Some(selector) -> actor.with_selector(next, selector)
+                _ -> next
+              }
             }
-            actor.Stop(reason) -> {
+            NormalStop -> {
               let _ =
                 option.map(state.permessage_deflate, fn(contexts) {
                   compression.close(contexts.deflate)
                   compression.close(contexts.inflate)
                 })
-              actor.Stop(reason)
+              actor.stop()
+            }
+            AbnormalStop(reason) -> {
+              let _ =
+                option.map(state.permessage_deflate, fn(contexts) {
+                  compression.close(contexts.deflate)
+                  compression.close(contexts.inflate)
+                })
+              actor.stop_abnormal(reason)
             }
           }
         })
@@ -180,37 +192,44 @@ pub fn initialize_connection(
               compression.close(contexts.deflate)
               compression.close(contexts.inflate)
             })
-          actor.Stop(
-            process.Abnormal(dynamic.from(
-              "WebSocket received a malformed message",
-            )),
-          )
+          actor.stop_abnormal("WebSocket received a malformed message")
         })
       }
       Valid(UserMessage(msg)) -> {
         rescue(fn() { handler(state.user, User(msg), connection) })
         |> result.map(fn(cont) {
           case cont {
-            actor.Continue(user_state, selector) -> {
+            Continue(user_state, selector) -> {
               let selector =
                 selector
                 |> map_user_selector
                 |> option.map(fn(with_user) {
                   process.merge_selector(message_selector(), with_user)
                 })
-              actor.Continue(
-                WebsocketState(..state, user: user_state),
-                selector,
-              )
+              let next =
+                actor.continue(WebsocketState(..state, user: user_state))
+              case selector {
+                Some(selector) -> actor.with_selector(next, selector)
+                _ -> next
+              }
             }
-            actor.Stop(reason) -> {
+            NormalStop -> {
               let _ =
                 option.map(state.permessage_deflate, fn(contexts) {
                   compression.close(contexts.deflate)
                   compression.close(contexts.inflate)
                 })
               on_close(state.user)
-              actor.Stop(reason)
+              actor.stop()
+            }
+            AbnormalStop(reason) -> {
+              let _ =
+                option.map(state.permessage_deflate, fn(contexts) {
+                  compression.close(contexts.deflate)
+                  compression.close(contexts.inflate)
+                })
+              on_close(state.user)
+              actor.stop_abnormal(reason)
             }
           }
         })
@@ -227,9 +246,7 @@ pub fn initialize_connection(
               compression.close(contexts.inflate)
             })
           on_close(state.user)
-          actor.Stop(
-            process.Abnormal(dynamic.from("Crash in user websocket handler")),
-          )
+          actor.stop_abnormal("Crash in user websocket handler")
         })
       }
       Valid(SocketClosedMessage) -> {
@@ -239,7 +256,7 @@ pub fn initialize_connection(
             compression.close(contexts.inflate)
           })
         on_close(state.user)
-        actor.Stop(process.Normal)
+        actor.stop()
       }
       // TODO:  do we need to send something back for this?
       Invalid -> {
@@ -250,11 +267,7 @@ pub fn initialize_connection(
             compression.close(contexts.inflate)
           })
         on_close(state.user)
-        actor.Stop(
-          process.Abnormal(dynamic.from(
-            "WebSocket received a malformed message",
-          )),
-        )
+        actor.stop_abnormal("WebSocket received a malformed message")
       }
     }
   })
@@ -287,16 +300,17 @@ fn apply_frames(
   frames: List(Frame),
   handler: Handler(state, user_message),
   connection: WebsocketConnection,
-  next: actor.Next(state, WebsocketMessage(user_message)),
+  next: Next(state, WebsocketMessage(user_message)),
   on_close: fn(state) -> Nil,
-) -> actor.Next(state, WebsocketMessage(user_message)) {
+) -> Next(state, WebsocketMessage(user_message)) {
   case frames, next {
-    _, actor.Stop(reason) -> actor.Stop(reason)
+    _, AbnormalStop(reason) -> AbnormalStop(reason)
+    _, NormalStop -> NormalStop
     [], next -> {
       set_active(connection.transport, connection.socket)
       next
     }
-    [Control(CloseFrame(..)) as frame, ..], actor.Continue(state, _selector) -> {
+    [Control(CloseFrame(..)) as frame, ..], Continue(state, _selector) -> {
       let _ =
         transport.send(
           connection.transport,
@@ -304,9 +318,9 @@ fn apply_frames(
           websocket.frame_to_bytes_tree(frame, None),
         )
       on_close(state)
-      actor.Stop(process.Normal)
+      NormalStop
     }
-    [Control(PingFrame(length, payload)), ..], actor.Continue(state, _selector) -> {
+    [Control(PingFrame(length, payload)), ..], Continue(state, _selector) -> {
       transport.send(
         connection.transport,
         connection.socket,
@@ -314,16 +328,16 @@ fn apply_frames(
       )
       |> result.map(fn(_nil) {
         set_active(connection.transport, connection.socket)
-        actor.continue(state)
+        Continue(state, None)
       })
       |> result.lazy_unwrap(fn() {
         on_close(state)
-        actor.Stop(process.Abnormal(dynamic.from("Failed to send pong frame")))
+        AbnormalStop("Failed to send pong frame")
       })
     }
-    [frame, ..rest], actor.Continue(state, prev_selector) -> {
+    [frame, ..rest], Continue(state, prev_selector) -> {
       case rescue(fn() { handler(state, Internal(frame), connection) }) {
-        Ok(actor.Continue(state, selector)) -> {
+        Ok(Continue(state, selector)) -> {
           let next_selector =
             selector
             |> map_user_selector
@@ -336,13 +350,17 @@ fn apply_frames(
             rest,
             handler,
             connection,
-            actor.Continue(state, next_selector),
+            Continue(state, next_selector),
             on_close,
           )
         }
-        Ok(actor.Stop(reason)) -> {
+        Ok(AbnormalStop(reason)) -> {
           on_close(state)
-          actor.Stop(reason)
+          AbnormalStop(reason)
+        }
+        Ok(NormalStop) -> {
+          on_close(state)
+          NormalStop
         }
         Error(reason) -> {
           logging.log(
@@ -350,9 +368,7 @@ fn apply_frames(
             "Caught error in websocket handler: " <> string.inspect(reason),
           )
           on_close(state)
-          actor.Stop(
-            process.Abnormal(dynamic.from("Crash in user websocket handler")),
-          )
+          AbnormalStop("Crash in user websocket handler")
         }
       }
     }

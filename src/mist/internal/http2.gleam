@@ -1,6 +1,4 @@
 import gleam/bytes_tree.{type BytesTree}
-import gleam/dynamic
-import gleam/erlang/process
 import gleam/http.{type Header} as _ghttp
 import gleam/http/response.{type Response}
 import gleam/int
@@ -66,7 +64,7 @@ fn send_headers(
   headers: List(Header),
   end_stream: Bool,
   stream_identifier: StreamIdentifier(Frame),
-) -> Result(HpackContext, process.ExitReason) {
+) -> Result(HpackContext, String) {
   hpack_encode(context, headers)
   |> result.then(fn(pair) {
     let #(headers, new_context) = pair
@@ -86,8 +84,7 @@ fn send_headers(
       )
     {
       Ok(_nil) -> Ok(new_context)
-      Error(_reason) ->
-        Error(process.Abnormal(dynamic.from("Failed to send HTTP/2 headers")))
+      Error(_reason) -> Error("Failed to send HTTP/2 headers")
     }
   })
 }
@@ -97,7 +94,7 @@ fn send_data(
   data: BitArray,
   stream_identifier: StreamIdentifier(Frame),
   end_stream: Bool,
-) -> Result(Nil, process.ExitReason) {
+) -> Result(Nil, String) {
   let data_frame =
     Data(data: data, end_stream: end_stream, identifier: stream_identifier)
   let encoded = frame.encode(data_frame)
@@ -109,7 +106,7 @@ fn send_data(
   )
   |> result.map_error(fn(err) {
     logging.log(logging.Debug, "failed to send :(  " <> string.inspect(err))
-    process.Abnormal(dynamic.from("Failed to send HTTP/2 data"))
+    "Failed to send HTTP/2 data"
   })
 }
 
@@ -129,7 +126,7 @@ pub fn send_bytes_tree(
   conn: Connection,
   context: HpackContext,
   id: StreamIdentifier(Frame),
-) -> Result(HpackContext, process.ExitReason) {
+) -> Result(HpackContext, String) {
   let resp =
     resp
     |> http.add_default_headers(False)

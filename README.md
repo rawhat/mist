@@ -22,18 +22,37 @@ in the examples below).
 
 ```gleam
 import gleam/bytes_tree
+import gleam/dict.{type Dict}
+import gleam/erlang/atom.{type Atom}
 import gleam/erlang/process
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/io
 import gleam/option.{None, Some}
-import gleam/otp/actor
 import gleam/result
 import gleam/string
 import gleam/yielder
+import logging
 import mist.{type Connection, type ResponseData}
 
+@external(erlang, "logger", "update_primary_config")
+fn logger_update_primary_config(config: Dict(Atom, Atom)) -> Result(Nil, any)
+
+const index = "<html lang='en'>
+  <head>
+    <title>Mist Example</title>
+  </head>
+  <body>
+    Hello, world!
+  </body>
+</html>"
+
 pub fn main() {
+  logging.configure()
+  let _ =
+    logger_update_primary_config(
+      dict.from_list([#(atom.create("level"), atom.create("debug"))]),
+    )
   // These values are for the Websocket process initialized below
   let selector = process.new_selector()
   let state = Nil
@@ -44,7 +63,16 @@ pub fn main() {
 
   let assert Ok(_) =
     fn(req: Request(Connection)) -> Response(ResponseData) {
+      logging.log(
+        logging.Info,
+        "Got a request from: " <> string.inspect(mist.get_client_info(req.body)),
+      )
       case request.path_segments(req) {
+        [] ->
+          response.new(200)
+          |> response.prepend_header("my-value", "abc")
+          |> response.prepend_header("my-value", "123")
+          |> response.set_body(mist.Bytes(bytes_tree.from_string(index)))
         ["ws"] ->
           mist.websocket(
             request: req,
@@ -61,7 +89,9 @@ pub fn main() {
       }
     }
     |> mist.new
-    |> mist.port(3000)
+    |> mist.bind("localhost")
+    |> mist.with_ipv6
+    |> mist.port(0)
     |> mist.start_http
 
   process.sleep_forever()
@@ -71,20 +101,20 @@ pub type MyMessage {
   Broadcast(String)
 }
 
-fn handle_ws_message(state, conn, message) {
+fn handle_ws_message(state, message, conn) {
   case message {
     mist.Text("ping") -> {
       let assert Ok(_) = mist.send_text_frame(conn, "pong")
-      actor.continue(state)
+      mist.continue(state)
     }
     mist.Text(_) | mist.Binary(_) -> {
-      actor.continue(state)
+      mist.continue(state)
     }
     mist.Custom(Broadcast(text)) -> {
       let assert Ok(_) = mist.send_text_frame(conn, text)
-      actor.continue(state)
+      mist.continue(state)
     }
-    mist.Closed | mist.Shutdown -> actor.Stop(process.Normal)
+    mist.Closed | mist.Shutdown -> mist.stop()
   }
 }
 
@@ -110,6 +140,10 @@ fn serve_chunk(_request: Request(Connection)) -> Response(ResponseData) {
   let iter =
     ["one", "two", "three"]
     |> yielder.from_list
+    |> yielder.map(fn(data) {
+      process.sleep(2000)
+      data
+    })
     |> yielder.map(bytes_tree.from_string)
 
   response.new(200)

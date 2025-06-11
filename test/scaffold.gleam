@@ -1,7 +1,7 @@
 import gleam/bit_array
 import gleam/bool
 import gleam/bytes_tree.{type BytesTree}
-import gleam/erlang/process.{type Selector}
+import gleam/erlang/process
 import gleam/hackney
 import gleam/http
 import gleam/http/request.{type Request}
@@ -9,7 +9,6 @@ import gleam/http/response.{type Response, Response}
 import gleam/int
 import gleam/list
 import gleam/option
-import gleam/otp/actor
 import gleam/result
 import gleam/set
 import gleam/string
@@ -99,14 +98,12 @@ fn convert_body_types(
 }
 
 fn map_user_selector(
-  selector: Selector(glisten.Message(user_message)),
-) -> Selector(glisten_handler.LoopMessage(user_message)) {
-  process.map_selector(selector, fn(value) {
-    case value {
-      glisten.Packet(msg) -> glisten_handler.Packet(msg)
-      glisten.User(msg) -> glisten_handler.Custom(msg)
-    }
-  })
+  value: glisten.Message(user_message),
+) -> glisten_handler.LoopMessage(user_message) {
+  case value {
+    glisten.Packet(msg) -> glisten_handler.Packet(msg)
+    glisten.User(msg) -> glisten_handler.Custom(msg)
+  }
 }
 
 fn convert_loop(
@@ -115,20 +112,14 @@ fn convert_loop(
   fn(data, msg, conn: glisten_handler.Connection(user_message)) {
     let conn = glisten.Connection(conn.socket, conn.transport, conn.sender)
     case msg {
-      glisten_handler.Packet(msg) -> {
-        case loop(data, glisten.Packet(msg), conn) {
-          actor.Continue(data, selector) ->
-            actor.Continue(data, option.map(selector, map_user_selector))
-          actor.Stop(reason) -> actor.Stop(reason)
-        }
-      }
-      glisten_handler.Custom(msg) -> {
-        case loop(data, glisten.User(msg), conn) {
-          actor.Continue(data, selector) ->
-            actor.Continue(data, option.map(selector, map_user_selector))
-          actor.Stop(reason) -> actor.Stop(reason)
-        }
-      }
+      glisten_handler.Packet(msg) ->
+        loop(data, glisten.Packet(msg), conn)
+        |> glisten.map_selector(map_user_selector)
+        |> glisten.convert_next
+      glisten_handler.Custom(msg) ->
+        loop(data, glisten.User(msg), conn)
+        |> glisten.map_selector(map_user_selector)
+        |> glisten.convert_next
     }
   }
 }

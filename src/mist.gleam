@@ -31,6 +31,7 @@ import mist/internal/http.{
   Chunked as InternalChunked, File as InternalFile,
   ServerSentEvents as InternalServerSentEvents, Websocket as InternalWebsocket,
 }
+import mist/internal/next
 import mist/internal/websocket.{
   type HandlerMessage, type WebsocketConnection as InternalWebsocketConnection,
   Internal, User,
@@ -46,6 +47,44 @@ fn rescue(func: fn() -> return) -> Result(return, Nil)
 /// integers representing the IPv4 address.
 pub type Connection =
   InternalConnection
+
+pub opaque type Next(state, user_message) {
+  Continue(state, Option(Selector(user_message)))
+  NormalStop
+  AbnormalStop(reason: String)
+}
+
+pub fn continue(state: state) -> Next(state, user_message) {
+  Continue(state, None)
+}
+
+pub fn with_selector(
+  next: Next(state, user_message),
+  selector: Selector(user_message),
+) -> Next(state, user_message) {
+  case next {
+    Continue(state, _) -> Continue(state, Some(selector))
+    _ -> next
+  }
+}
+
+pub fn stop() -> Next(state, user_message) {
+  NormalStop
+}
+
+pub fn stop_abnormal(reason: String) -> Next(state, user_message) {
+  AbnormalStop(reason)
+}
+
+fn convert_next(
+  next: Next(state, user_message),
+) -> next.Next(state, user_message) {
+  case next {
+    Continue(state, selector) -> next.Continue(state, selector)
+    NormalStop -> next.NormalStop
+    AbnormalStop(reason) -> next.AbnormalStop(reason)
+  }
+}
 
 /// When accessing client information, these are the possible shapes of the IP
 /// addresses. A best effort will be made to determine whether IPv4 is most
@@ -587,7 +626,7 @@ fn internal_to_public_ws_message(
 pub fn websocket(
   request request: Request(Connection),
   handler handler: fn(state, WebsocketMessage(message), WebsocketConnection) ->
-    actor.Next(state, message),
+    Next(state, message),
   on_init on_init: fn(WebsocketConnection) ->
     #(state, Option(process.Selector(message))),
   on_close on_close: fn(state) -> Nil,
@@ -596,7 +635,8 @@ pub fn websocket(
     message
     |> internal_to_public_ws_message
     |> result.map(handler(state, _, connection))
-    |> result.unwrap(actor.continue(state))
+    |> result.unwrap(continue(state))
+    |> convert_next
   }
   let extensions =
     request

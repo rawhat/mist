@@ -37,7 +37,7 @@ pub fn call(
   conn: Connection,
   sender: Subject(handler.Message(user_message)),
   version: http.HttpVersion,
-) -> Result(State, process.ExitReason) {
+) -> Result(State, Result(Nil, String)) {
   rescue(fn() { handler(req) })
   |> result.map_error(log_and_error(
     _,
@@ -51,7 +51,7 @@ pub fn call(
       response.Response(body: Websocket(selector), ..)
       | response.Response(body: ServerSentEvents(selector), ..) -> {
         let _resp = process.selector_receive_forever(selector)
-        Error(process.Normal)
+        Error(Ok(Nil))
       }
       response.Response(body: body, ..) as resp -> {
         case body {
@@ -60,7 +60,7 @@ pub fn call(
           File(..) -> handle_file_body(resp, body, conn, version)
           _ -> panic as "This shouldn't ever happen 🤞"
         }
-        |> result.replace_error(process.Normal)
+        |> result.replace_error(Ok(Nil))
         |> result.then(close_or_set_timer(_, conn, sender))
       }
     }
@@ -73,7 +73,7 @@ fn log_and_error(
   transport: Transport,
   req: Request(Connection),
   version: http.HttpVersion,
-) -> process.ExitReason {
+) -> Result(Nil, String) {
   logging.log(logging.Error, string.inspect(error))
   let resp =
     response.new(500)
@@ -94,20 +94,20 @@ fn log_and_error(
     |> transport.send(transport, socket, _)
 
   let _ = transport.close(transport, socket)
-  process.Abnormal(error)
+  Error(string.inspect(error))
 }
 
 fn close_or_set_timer(
   resp: response.Response(BytesTree),
   conn: Connection,
   sender: Subject(handler.Message(user_message)),
-) -> Result(State, process.ExitReason) {
+) -> Result(State, Result(Nil, String)) {
   // If the handler explicitly says to close the connection, we should
   // probably listen to them
   case response.get_header(resp, "connection") {
     Ok("close") -> {
       let _ = transport.close(conn.transport, conn.socket)
-      Error(process.Normal)
+      Error(Ok(Nil))
     }
     _ -> {
       // TODO:  this should be a configuration

@@ -1,8 +1,6 @@
-import gleam/dynamic
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http/response
 import gleam/option.{type Option, Some}
-import gleam/otp/actor
 import gleam/result
 import gleam/string
 import glisten.{type Loop, Packet, User}
@@ -52,11 +50,7 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
 
     case msg, state {
       User(Send(..)), Http1(..) -> {
-        Error(
-          process.Abnormal(dynamic.from(
-            "Attempted to send HTTP/2 response without upgrade",
-          )),
-        )
+        Error(Error("Attempted to send HTTP/2 response without upgrade"))
       }
       User(Send(id, resp)), Http2(state) -> {
         case resp.body {
@@ -65,29 +59,13 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
             |> response.set_body(bytes)
             |> http2.send_bytes_tree(conn, state.send_hpack_context, id)
           }
-          File(..) ->
-            Error(
-              process.Abnormal(dynamic.from(
-                "File sending unsupported over HTTP/2",
-              )),
-            )
+          File(..) -> Error("File sending unsupported over HTTP/2")
           // TODO:  properly error in some fashion for these
-          Websocket(_selector) ->
-            Error(
-              process.Abnormal(dynamic.from("WebSocket unsupported for HTTP/2")),
-            )
+          Websocket(_selector) -> Error("WebSocket unsupported for HTTP/2")
           Chunked(_iterator) ->
-            Error(
-              process.Abnormal(dynamic.from(
-                "Chunked encoding not supported for HTTP/2",
-              )),
-            )
+            Error("Chunked encoding not supported for HTTP/2")
           ServerSentEvents(_selector) ->
-            Error(
-              process.Abnormal(dynamic.from(
-                "Server-Sent Events unsupported for HTTP/2",
-              )),
-            )
+            Error("Server-Sent Events unsupported for HTTP/2")
         }
         |> result.map(fn(context) {
           Http2(http2_handler.send_hpack_context(state, context))
@@ -97,7 +75,7 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
             logging.Debug,
             "Error sending HTTP/2 data: " <> string.inspect(err),
           )
-          err
+          Error(string.inspect(err))
         })
       }
       Packet(msg), Http1(state, self) -> {
@@ -109,11 +87,11 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
         |> http.parse_request(conn)
         |> result.map_error(fn(err) {
           case err {
-            DiscardPacket -> process.Normal
+            DiscardPacket -> Ok(Nil)
             _ -> {
               logging.log(logging.Error, string.inspect(err))
               let _ = transport.close(conn.transport, conn.socket)
-              process.Abnormal(dynamic.from("Received invalid request"))
+              Error("Received invalid request")
             }
           }
         })
@@ -127,6 +105,7 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
             http.Upgrade(data) ->
               http2_handler.upgrade(data, conn, self)
               |> result.map(Http2)
+              |> result.map_error(Error)
           }
         })
       }
@@ -137,8 +116,13 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
         |> result.map(Http2)
       }
     }
-    |> result.map(actor.continue)
-    |> result.map_error(actor.Stop)
+    |> result.map(glisten.continue)
+    |> result.map_error(fn(err) {
+      case err {
+        Ok(_nil) -> glisten.stop()
+        Error(reason) -> glisten.stop_abnormal(reason)
+      }
+    })
     |> result.unwrap_both
   }
 }

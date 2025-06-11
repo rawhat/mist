@@ -1,4 +1,3 @@
-import gleam/dynamic
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http.{type Header} as ghttp
 import gleam/http/request.{type Request}
@@ -104,10 +103,8 @@ pub fn new(
           actor.continue(InternalState(..state, pending_response: Some(resp)))
         })
         |> result.map_error(fn(err) {
-          actor.Stop(
-            process.Abnormal(dynamic.from(
-              "Failed to respond to request: " <> string.inspect(err),
-            )),
+          actor.stop_abnormal(
+            "Failed to respond to request: " <> string.inspect(err),
           )
         })
         |> result.unwrap_both

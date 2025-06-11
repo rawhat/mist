@@ -6,7 +6,6 @@ import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/io
 import gleam/option.{None, Some}
-import gleam/otp/actor
 import gleam/result
 import gleam/string
 import gleam/yielder
@@ -83,16 +82,16 @@ fn handle_ws_message(state, message, conn) {
   case message {
     mist.Text("ping") -> {
       let assert Ok(_) = mist.send_text_frame(conn, "pong")
-      actor.continue(state)
+      mist.continue(state)
     }
     mist.Text(_) | mist.Binary(_) -> {
-      actor.continue(state)
+      mist.continue(state)
     }
     mist.Custom(Broadcast(text)) -> {
       let assert Ok(_) = mist.send_text_frame(conn, text)
-      actor.continue(state)
+      mist.continue(state)
     }
-    mist.Closed | mist.Shutdown -> actor.Stop(process.Normal)
+    mist.Closed | mist.Shutdown -> mist.stop()
   }
 }
 
