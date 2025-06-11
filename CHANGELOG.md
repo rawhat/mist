@@ -1,5 +1,13 @@
 # Changelog
 
+# v5.0.0-rc1
+- Support `gleam_erlang` and `gleam_otp` v1
+- Add `supervised` and `supervised_ssl` methods to help integrating with
+existing supervisors
+- Simply starting APIs
+- Add `mist.Next` helper functions for websockets to abstract over
+`gleam_otp/actor.Next` type
+
 ## v4.1.0
 - Bump `stdlib` version requirement to >=0.50.0
 
