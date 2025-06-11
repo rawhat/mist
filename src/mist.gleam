@@ -569,7 +569,6 @@ pub fn start_https(
       |> handler.with_func
       |> glisten.handler(handler.init, _)
       |> glisten.bind(builder.interface)
-      |> glisten.with_http2()
       |> glisten.serve_ssl_with_listener_name(
         builder.port,
         certfile,
