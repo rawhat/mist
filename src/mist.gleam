@@ -537,7 +537,7 @@ pub fn start(
           _ -> handler
         }
       }
-      |> glisten.serve_with_listener_name(builder.port, listener_name)
+      |> glisten.start_with_listener_name(builder.port, listener_name)
       |> result.map(fn(server) {
         let info = glisten.get_server_info(listener_name, 5000)
         let ip_address = to_mist_ip_address(info.ip_address)
