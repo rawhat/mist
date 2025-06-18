@@ -384,6 +384,10 @@ pub fn stream(
   }
 }
 
+type SslOptions {
+  CertKeyFiles(certfile: String, keyfile: String)
+}
+
 pub opaque type Builder(request_body, response_body) {
   Builder(
     port: Int,
@@ -391,6 +395,7 @@ pub opaque type Builder(request_body, response_body) {
     after_start: fn(Int, Scheme, IpAddress) -> Nil,
     interface: String,
     ipv6_support: Bool,
+    ssl_options: Option(SslOptions),
   )
 }
 
@@ -416,6 +421,7 @@ pub fn new(handler: fn(Request(in)) -> Response(out)) -> Builder(in, out) {
         <> int.to_string(port)
       io.println(message)
     },
+    ssl_options: None,
   )
 }
 
@@ -438,13 +444,7 @@ pub fn read_request_body(
       Error(_) -> failure_response
     }
   }
-  Builder(
-    builder.port,
-    handler,
-    builder.after_start,
-    builder.interface,
-    builder.ipv6_support,
-  )
+  Builder(..builder, handler:)
 }
 
 /// Override the default function to be called after the service starts. The
@@ -473,6 +473,25 @@ pub fn with_ipv6(builder: Builder(in, out)) -> Builder(in, out) {
   Builder(..builder, ipv6_support: True)
 }
 
+/// Use HTTPS with the provided certificate and key files.
+pub fn with_ssl(
+  builder: Builder(in, out),
+  certfile cert: String,
+  keyfile key: String,
+) -> Builder(in, out) {
+  let certfile = file.open(bit_array.from_string(cert))
+  let keyfile = file.open(bit_array.from_string(key))
+
+  let _ = case certfile, keyfile {
+    Error(_), Error(_) -> panic as "Certificate and key file not found"
+    Ok(_), Error(_) -> panic as "Key file not found"
+    Error(_), Ok(_) -> panic as "Certificate file not found"
+    Ok(_), Ok(_) -> Nil
+  }
+
+  Builder(..builder, ssl_options: Some(CertKeyFiles(cert, key)))
+}
+
 fn convert_body_types(
   resp: Response(ResponseData),
 ) -> Response(InternalResponseData) {
@@ -491,8 +510,8 @@ pub type Port {
   Provided(Int)
 }
 
-/// Start a `mist` service over HTTP with the provided builder.
-pub fn start_http(
+/// Start a `mist` service with the provided builder.
+pub fn start(
   builder: Builder(Connection, ResponseData),
 ) -> Result(actor.Started(supervisor.Supervisor), actor.StartError) {
   let listener_name = process.new_name("glisten_listener")
@@ -502,7 +521,7 @@ pub fn start_http(
     supervision.supervisor(fn() {
       fn(req) { convert_body_types(builder.handler(req)) }
       |> handler.with_func
-      |> glisten.handler(handler.init, _)
+      |> glisten.new(handler.init, _)
       |> glisten.bind(builder.interface)
       |> fn(handler) {
         case builder.ipv6_support {
@@ -510,82 +529,29 @@ pub fn start_http(
           False -> handler
         }
       }
+      |> fn(handler) {
+        case builder.ssl_options {
+          Some(CertKeyFiles(certfile, keyfile)) ->
+            handler
+            |> glisten.with_ssl(certfile, keyfile)
+          _ -> handler
+        }
+      }
       |> glisten.serve_with_listener_name(builder.port, listener_name)
       |> result.map(fn(server) {
         let info = glisten.get_server_info(listener_name, 5000)
         let ip_address = to_mist_ip_address(info.ip_address)
-        builder.after_start(info.port, Http, ip_address)
+        let scheme = case option.is_some(builder.ssl_options) {
+          True -> Https
+          False -> Http
+        }
+        builder.after_start(info.port, scheme, ip_address)
         server
       })
     }),
   )
   |> supervisor.add(supervision.worker(fn() { clock.start(clock_name) }))
   |> supervisor.start
-}
-
-/// These are the types of errors raised by trying to read the certificate and
-/// key files.
-pub type CertificateError {
-  NoCertificate
-  NoKey
-  NoKeyOrCertificate
-}
-
-/// These are the possible errors raised when trying to start an Https server.
-/// If there are issues reading the certificate or key files, those will be
-/// returned.
-pub type HttpsError {
-  StartError(actor.StartError)
-  CertificateError(CertificateError)
-}
-
-/// Start a `mist` service over HTTPS with the provided builder. This method
-/// requires both a certificate file and a key file. The library will attempt
-/// to read these files off of the disk.
-pub fn start_https(
-  builder: Builder(Connection, ResponseData),
-  certfile certfile: String,
-  keyfile keyfile: String,
-) -> Result(actor.Started(supervisor.Supervisor), HttpsError) {
-  let listener_name = process.new_name("glisten_listener")
-  let clock_name = process.new_name("mist_clock")
-
-  let cert = file.open(bit_array.from_string(certfile))
-  let key = file.open(bit_array.from_string(keyfile))
-
-  let res = case cert, key {
-    Error(_), Error(_) -> Error(CertificateError(NoKeyOrCertificate))
-    Ok(_), Error(_) -> Error(CertificateError(NoKey))
-    Error(_), Ok(_) -> Error(CertificateError(NoCertificate))
-    Ok(_), Ok(_) -> Ok(Nil)
-  }
-
-  use _ <- result.then(res)
-
-  supervisor.new(supervisor.OneForOne)
-  |> supervisor.add(
-    supervision.supervisor(fn() {
-      fn(req) { convert_body_types(builder.handler(req)) }
-      |> handler.with_func
-      |> glisten.handler(handler.init, _)
-      |> glisten.bind(builder.interface)
-      |> glisten.serve_ssl_with_listener_name(
-        builder.port,
-        certfile,
-        keyfile,
-        listener_name,
-      )
-      |> result.map(fn(server) {
-        let info = glisten.get_server_info(listener_name, 1000)
-        let ip_address = to_mist_ip_address(info.ip_address)
-        builder.after_start(info.port, Https, ip_address)
-        server
-      })
-    }),
-  )
-  |> supervisor.add(supervision.worker(fn() { clock.start(clock_name) }))
-  |> supervisor.start
-  |> result.map_error(StartError)
 }
 
 /// These are the types of messages that a websocket handler may receive.

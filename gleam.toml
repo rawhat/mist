@@ -16,7 +16,7 @@ hpack_erl = "~> 0.3"
 logging = "~> 1.0"
 gleam_yielder = ">= 1.1.0 and < 2.0.0"
 gramps = ">= 3.0.0 and < 4.0.0"
-glisten = "8.0.0-rc1"
+glisten = { path = "../glisten"}
 
 [dev-dependencies]
 gleeunit = "~> 1.0"
