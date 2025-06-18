@@ -16,7 +16,8 @@ pub fn main() {
     |> mist.new()
     // |> mist.bind("0.0.0.0")
     |> mist.with_ipv6()
-    |> mist.start_https(certfile: "localhost.crt", keyfile: "localhost.key")
+    |> mist.with_ssl(certfile: "localhost.crt", keyfile: "localhost.key")
+    |> mist.start
 
   process.sleep_forever()
 }
