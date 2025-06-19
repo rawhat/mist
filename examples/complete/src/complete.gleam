@@ -69,7 +69,7 @@ pub fn main() {
     |> mist.bind("localhost")
     |> mist.with_ipv6
     |> mist.port(0)
-    |> mist.start_http
+    |> mist.start
 
   process.sleep_forever()
 }

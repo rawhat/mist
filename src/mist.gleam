@@ -384,7 +384,7 @@ pub fn stream(
   }
 }
 
-type SslOptions {
+type TlsOptions {
   CertKeyFiles(certfile: String, keyfile: String)
 }
 
@@ -395,7 +395,7 @@ pub opaque type Builder(request_body, response_body) {
     after_start: fn(Int, Scheme, IpAddress) -> Nil,
     interface: String,
     ipv6_support: Bool,
-    ssl_options: Option(SslOptions),
+    tls_options: Option(TlsOptions),
   )
 }
 
@@ -421,7 +421,7 @@ pub fn new(handler: fn(Request(in)) -> Response(out)) -> Builder(in, out) {
         <> int.to_string(port)
       io.println(message)
     },
-    ssl_options: None,
+    tls_options: None,
   )
 }
 
@@ -474,7 +474,7 @@ pub fn with_ipv6(builder: Builder(in, out)) -> Builder(in, out) {
 }
 
 /// Use HTTPS with the provided certificate and key files.
-pub fn with_ssl(
+pub fn with_tls(
   builder: Builder(in, out),
   certfile cert: String,
   keyfile key: String,
@@ -489,7 +489,7 @@ pub fn with_ssl(
     Ok(_), Ok(_) -> Nil
   }
 
-  Builder(..builder, ssl_options: Some(CertKeyFiles(cert, key)))
+  Builder(..builder, tls_options: Some(CertKeyFiles(cert, key)))
 }
 
 fn convert_body_types(
@@ -530,10 +530,10 @@ pub fn start(
         }
       }
       |> fn(handler) {
-        case builder.ssl_options {
+        case builder.tls_options {
           Some(CertKeyFiles(certfile, keyfile)) ->
             handler
-            |> glisten.with_ssl(certfile, keyfile)
+            |> glisten.with_tls(certfile, keyfile)
           _ -> handler
         }
       }
@@ -541,7 +541,7 @@ pub fn start(
       |> result.map(fn(server) {
         let info = glisten.get_server_info(listener_name, 5000)
         let ip_address = to_mist_ip_address(info.ip_address)
-        let scheme = case option.is_some(builder.ssl_options) {
+        let scheme = case option.is_some(builder.tls_options) {
           True -> Https
           False -> Http
         }

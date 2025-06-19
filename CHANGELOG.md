@@ -1,5 +1,8 @@
 # Changelog
 
+# v5.0.0
+- Refine API for starting and TLS
+
 # v5.0.0-rc1
 - Support `gleam_erlang` and `gleam_otp` v1
 - Add `supervised` and `supervised_ssl` methods to help integrating with
