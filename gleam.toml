@@ -8,9 +8,9 @@ target = "erlang"
 gleam = ">= 1.10.0"
 
 [dependencies]
-gleam_erlang = "1.0.0-rc1"
+gleam_erlang = ">= 1.0.0 and < 2.0.0"
 gleam_http = ">= 4.0.0 and < 5.0.0"
-gleam_otp = "1.0.0-rc2"
+gleam_otp = ">= 1.0.0 and < 2.0.0"
 gleam_stdlib = ">= 0.50.0 and < 1.0.0"
 hpack_erl = "~> 0.3"
 logging = "~> 1.0"
