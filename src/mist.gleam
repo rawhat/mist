@@ -11,7 +11,6 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/static_supervisor as supervisor
-import gleam/otp/supervision
 import gleam/result
 import gleam/string
 import gleam/string_tree.{type StringTree}
@@ -514,41 +513,35 @@ pub fn start(
   builder: Builder(Connection, ResponseData),
 ) -> Result(actor.Started(supervisor.Supervisor), actor.StartError) {
   let listener_name = process.new_name("glisten_listener")
-  supervisor.new(supervisor.OneForOne)
-  |> supervisor.add(
-    supervision.supervisor(fn() {
-      fn(req) { convert_body_types(builder.handler(req)) }
-      |> handler.with_func
-      |> glisten.new(handler.init, _)
-      |> glisten.bind(builder.interface)
-      |> fn(handler) {
-        case builder.ipv6_support {
-          True -> glisten.with_ipv6(handler)
-          False -> handler
-        }
-      }
-      |> fn(handler) {
-        case builder.tls_options {
-          Some(CertKeyFiles(certfile, keyfile)) ->
-            handler
-            |> glisten.with_tls(certfile, keyfile)
-          _ -> handler
-        }
-      }
-      |> glisten.start_with_listener_name(builder.port, listener_name)
-      |> result.map(fn(server) {
-        let info = glisten.get_server_info(listener_name, 5000)
-        let ip_address = to_mist_ip_address(info.ip_address)
-        let scheme = case option.is_some(builder.tls_options) {
-          True -> Https
-          False -> Http
-        }
-        builder.after_start(info.port, scheme, ip_address)
-        server
-      })
-    }),
-  )
-  |> supervisor.start
+  fn(req) { convert_body_types(builder.handler(req)) }
+  |> handler.with_func
+  |> glisten.new(handler.init, _)
+  |> glisten.bind(builder.interface)
+  |> fn(handler) {
+    case builder.ipv6_support {
+      True -> glisten.with_ipv6(handler)
+      False -> handler
+    }
+  }
+  |> fn(handler) {
+    case builder.tls_options {
+      Some(CertKeyFiles(certfile, keyfile)) ->
+        handler
+        |> glisten.with_tls(certfile, keyfile)
+      _ -> handler
+    }
+  }
+  |> glisten.start_with_listener_name(builder.port, listener_name)
+  |> result.map(fn(server) {
+    let info = glisten.get_server_info(listener_name, 5000)
+    let ip_address = to_mist_ip_address(info.ip_address)
+    let scheme = case option.is_some(builder.tls_options) {
+      True -> Https
+      False -> Http
+    }
+    builder.after_start(info.port, scheme, ip_address)
+    server
+  })
 }
 
 /// These are the types of messages that a websocket handler may receive.
