@@ -11,7 +11,7 @@ dependencies as follows:
 ```sh
 $ gleam new <your_project>
 $ cd <your_project>
-$ gleam add mist gleam_erlang gleam_http gleam_otp gleam_yielder
+$ gleam add mist logging gleam_erlang gleam_http gleam_otp gleam_yielder
 ```
 
 The main entrypoints for your application are `mist.start_http` and
@@ -22,21 +22,16 @@ in the examples below).
 
 ```gleam
 import gleam/bytes_tree
-import gleam/dict.{type Dict}
-import gleam/erlang/atom.{type Atom}
 import gleam/erlang/process
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/io
-import gleam/option.{None, Some}
+import gleam/option.{None}
 import gleam/result
 import gleam/string
 import gleam/yielder
 import logging
 import mist.{type Connection, type ResponseData}
-
-@external(erlang, "logger", "update_primary_config")
-fn logger_update_primary_config(config: Dict(Atom, Atom)) -> Result(Nil, any)
 
 const index = "<html lang='en'>
   <head>
@@ -49,13 +44,7 @@ const index = "<html lang='en'>
 
 pub fn main() {
   logging.configure()
-  let _ =
-    logger_update_primary_config(
-      dict.from_list([#(atom.create("level"), atom.create("debug"))]),
-    )
-  // These values are for the Websocket process initialized below
-  let selector = process.new_selector()
-  let state = Nil
+  logging.set_level(logging.Debug)
 
   let not_found =
     response.new(404)
@@ -76,7 +65,7 @@ pub fn main() {
         ["ws"] ->
           mist.websocket(
             request: req,
-            on_init: fn(_conn) { #(state, Some(selector)) },
+            on_init: fn(_conn) { #(Nil, None) },
             on_close: fn(_state) { io.println("goodbye!") },
             handler: handle_ws_message,
           )
@@ -92,7 +81,7 @@ pub fn main() {
     |> mist.bind("localhost")
     |> mist.with_ipv6
     |> mist.port(0)
-    |> mist.start_http
+    |> mist.start
 
   process.sleep_forever()
 }
