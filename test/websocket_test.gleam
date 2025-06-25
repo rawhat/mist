@@ -1,6 +1,5 @@
 import gleam/bit_array
 import gleam/option.{None}
-import gleeunit/should
 import gramps/websocket.{Complete, Continuation, Data, Incomplete, TextFrame}
 
 pub fn it_should_combine_continuation_frames_test() {
@@ -15,9 +14,6 @@ pub fn it_should_combine_continuation_frames_test() {
 
   let combined = <<"Hello, world!":utf8>>
 
-  messages
-  |> websocket.aggregate_frames(None, [])
-  |> should.equal(
-    Ok([Data(TextFrame(bit_array.byte_size(combined), combined))]),
-  )
+  assert websocket.aggregate_frames(messages, None, [])
+    == Ok([Data(TextFrame(bit_array.byte_size(combined), combined))])
 }

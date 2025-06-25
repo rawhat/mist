@@ -13,7 +13,6 @@ import gleam/result
 import gleam/set
 import gleam/string
 import gleam/yielder
-import gleeunit/should
 import glisten
 import glisten/internal/handler as glisten_handler
 import glisten/tcp
@@ -175,19 +174,15 @@ pub fn default_handler(
 }
 
 fn compare_bitstring_body(actual: BitArray, expected: BytesTree) {
-  actual
-  |> bytes_tree.from_bit_array
-  |> should.equal(expected)
+  assert bytes_tree.from_bit_array(actual) == expected
 }
 
 fn compare_string_body(actual: String, expected: BytesTree) {
-  actual
-  |> bytes_tree.from_string
-  |> should.equal(expected)
+  assert bytes_tree.from_string(actual) == expected
 }
 
 fn compare_headers_and_status(actual: Response(a), expected: Response(b)) {
-  should.equal(actual.status, expected.status)
+  assert actual.status == expected.status
 
   let expected_headers = set.from_list(expected.headers)
   let actual_headers =
@@ -207,7 +202,7 @@ fn compare_headers_and_status(actual: Response(a), expected: Response(b)) {
       set.contains(expected_headers, header) == False
     })
 
-  should.equal(missing_headers, extra_headers)
+  assert missing_headers == extra_headers
 }
 
 pub fn string_response_should_equal(

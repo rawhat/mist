@@ -6,7 +6,6 @@ import gleam/http/response.{type Response, Response}
 import gleam/option.{Some}
 import gleam/string
 import gleam/uri
-import gleeunit/should
 import scaffold.{
   bitstring_response_should_equal, make_request, string_response_should_equal,
 }
@@ -236,6 +235,6 @@ pub fn it_sends_back_chunked_responses_test() {
 
   let resp = scaffold.with_server(8888, handler, req)
 
-  should.equal(resp.status, 200)
-  should.equal(resp.body, string.repeat("a", 1000))
+  assert resp.status == 200
+  assert resp.body == string.repeat("a", 1000)
 }
