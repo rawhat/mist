@@ -7,6 +7,9 @@ repository = { type = "github", user = "rawhat", repo = "mist" }
 target = "erlang"
 gleam = ">= 1.10.0"
 
+[erlang]
+application_start_module = "mist@internal@clock"
+
 [dependencies]
 gleam_erlang = ">= 1.0.0 and < 2.0.0"
 gleam_http = ">= 4.0.0 and < 5.0.0"

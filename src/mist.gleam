@@ -21,7 +21,6 @@ import glisten/transport
 import gramps/websocket.{BinaryFrame, Data, TextFrame} as gramps_websocket
 import logging
 import mist/internal/buffer.{type Buffer, Buffer}
-import mist/internal/clock
 import mist/internal/encoder
 import mist/internal/file
 import mist/internal/handler
@@ -515,7 +514,6 @@ pub fn start(
   builder: Builder(Connection, ResponseData),
 ) -> Result(actor.Started(supervisor.Supervisor), actor.StartError) {
   let listener_name = process.new_name("glisten_listener")
-  let clock_name = process.new_name("mist_clock")
   supervisor.new(supervisor.OneForOne)
   |> supervisor.add(
     supervision.supervisor(fn() {
@@ -550,7 +548,6 @@ pub fn start(
       })
     }),
   )
-  |> supervisor.add(supervision.worker(fn() { clock.start(clock_name) }))
   |> supervisor.start
 }
 
