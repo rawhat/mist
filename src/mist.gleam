@@ -568,45 +568,95 @@ fn internal_to_public_ws_message(
   }
 }
 
-/// Upgrade a request to handle websockets. If the request is
-/// malformed, or the websocket process fails to initialize, an empty
-/// 400 response will be sent to the client.
-///
-/// The `on_init` method will be called when the actual WebSocket process
-/// is started, and the return value is the initial state and an optional
-/// selector for receiving user messages.
-///
-/// The `on_close` method is called when the WebSocket process shuts down
-/// for any reason, valid or otherwise.
-pub fn websocket(
-  request request: Request(Connection),
-  handler handler: fn(state, WebsocketMessage(message), WebsocketConnection) ->
+pub opaque type WebsocketInit(state, message) {
+  WebsocketInit(state: state, selector: Option(Selector(message)))
+}
+
+pub fn initialised(state: state) -> WebsocketInit(state, Nil) {
+  WebsocketInit(state:, selector: None)
+}
+
+pub fn selecting(
+  return: WebsocketInit(state, any),
+  selector: Selector(message),
+) -> WebsocketInit(state, message) {
+  WebsocketInit(..return, selector: Some(selector))
+}
+
+pub opaque type WebsocketBuilder(state, message) {
+  WebsocketBuilder(
+    request: Request(Connection),
+    handler: fn(state, WebsocketMessage(message), WebsocketConnection) ->
+      Next(state, message),
+    on_init: fn(WebsocketConnection) -> WebsocketInit(state, message),
+    on_close: fn(state) -> Nil,
+  )
+}
+
+pub fn websocket(request: Request(Connection)) -> WebsocketBuilder(Nil, Nil) {
+  WebsocketBuilder(
+    request:,
+    handler: fn(state, _message, _conn) { continue(state) },
+    on_init: fn(_conn) { initialised(Nil) },
+    on_close: fn(_state) { Nil },
+  )
+}
+
+pub fn websocket_with_initialiser(
+  request: Request(Connection),
+  on_init: fn(WebsocketConnection) -> WebsocketInit(state, message),
+) -> WebsocketBuilder(state, message) {
+  WebsocketBuilder(
+    request:,
+    handler: fn(state, _message, _conn) { continue(state) },
+    on_init:,
+    on_close: fn(_state) { Nil },
+  )
+}
+
+pub fn on_message(
+  builder: WebsocketBuilder(state, message),
+  handler: fn(state, WebsocketMessage(message), WebsocketConnection) ->
     Next(state, message),
-  on_init on_init: fn(WebsocketConnection) ->
-    #(state, Option(process.Selector(message))),
-  on_close on_close: fn(state) -> Nil,
+) -> WebsocketBuilder(state, message) {
+  WebsocketBuilder(..builder, handler:)
+}
+
+pub fn on_close(
+  builder: WebsocketBuilder(state, message),
+  on_close: fn(state) -> Nil,
+) {
+  WebsocketBuilder(..builder, on_close:)
+}
+
+pub fn start_websocket(
+  builder: WebsocketBuilder(state, message),
 ) -> Response(ResponseData) {
   let handler = fn(state, message, connection) {
     message
     |> internal_to_public_ws_message
-    |> result.map(handler(state, _, connection))
+    |> result.map(builder.handler(state, _, connection))
     |> result.unwrap(continue(state))
     |> convert_next
   }
   let extensions =
-    request
+    builder.request
     |> request.get_header("sec-websocket-extensions")
     |> result.map(fn(header) { string.split(header, ";") })
     |> result.unwrap([])
 
-  let socket = request.body.socket
-  let transport = request.body.transport
-  request
+  let socket = builder.request.body.socket
+  let transport = builder.request.body.transport
+
+  builder.request
   |> http.upgrade(socket, transport, extensions, _)
   |> result.then(fn(_nil) {
     websocket.initialize_connection(
-      on_init,
-      on_close,
+      fn(conn) {
+        let WebsocketInit(state, selector) = builder.on_init(conn)
+        #(state, selector)
+      },
+      builder.on_close,
       handler,
       socket,
       transport,

@@ -27,6 +27,8 @@ pub fn main() {
     response.new(404)
     |> response.set_body(mist.Bytes(bytes_tree.new()))
 
+  let broadcaster = process.new_subject()
+
   let assert Ok(_) =
     fn(req: Request(Connection)) -> Response(ResponseData) {
       logging.log(
@@ -40,12 +42,15 @@ pub fn main() {
           |> response.prepend_header("my-value", "123")
           |> response.set_body(mist.Bytes(bytes_tree.from_string(index)))
         ["ws"] ->
-          mist.websocket(
-            request: req,
-            on_init: fn(_conn) { #(Nil, None) },
-            on_close: fn(_state) { io.println("goodbye!") },
-            handler: handle_ws_message,
-          )
+          mist.websocket_with_initialiser(req, fn(_conn) {
+            mist.initialised(Nil)
+            |> mist.selecting(
+              process.new_selector() |> process.select(broadcaster),
+            )
+          })
+          |> mist.on_close(fn(_state) { io.println("goodbye!") })
+          |> mist.on_message(handle_ws_message)
+          |> mist.start_websocket
         ["echo"] -> echo_body(req)
         ["chunk"] -> serve_chunk(req)
         ["file", ..rest] -> serve_file(req, rest)
