@@ -1,5 +1,10 @@
 # Changelog
 
+# v5.0.1
+- Revert clock change from named process back to erlang application
+    - Running multiple mist supervisors would cause issues with starting the
+    ETS table
+
 # v5.0.0
 - Refine API for starting and TLS
 
