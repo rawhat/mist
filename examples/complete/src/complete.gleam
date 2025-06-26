@@ -42,7 +42,7 @@ pub fn main() {
           |> response.prepend_header("my-value", "123")
           |> response.set_body(mist.Bytes(bytes_tree.from_string(index)))
         ["ws"] ->
-          mist.websocket_with_initialiser(req, fn(_conn) {
+          mist.initialise_websocket(req, fn(_conn) {
             mist.initialised(Nil)
             |> mist.selecting(
               process.new_selector() |> process.select(broadcaster),

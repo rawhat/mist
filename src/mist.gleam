@@ -593,16 +593,7 @@ pub opaque type WebsocketBuilder(state, message) {
   )
 }
 
-pub fn websocket(request: Request(Connection)) -> WebsocketBuilder(Nil, Nil) {
-  WebsocketBuilder(
-    request:,
-    handler: fn(state, _message, _conn) { continue(state) },
-    on_init: fn(_conn) { initialised(Nil) },
-    on_close: fn(_state) { Nil },
-  )
-}
-
-pub fn websocket_with_initialiser(
+pub fn initialise_websocket(
   request: Request(Connection),
   on_init: fn(WebsocketConnection) -> WebsocketInit(state, message),
 ) -> WebsocketBuilder(state, message) {
@@ -639,6 +630,10 @@ pub fn start_websocket(
     |> result.unwrap(continue(state))
     |> convert_next
   }
+  let on_init = fn(conn) {
+    let WebsocketInit(state, selector) = builder.on_init(conn)
+    #(state, selector)
+  }
   let extensions =
     builder.request
     |> request.get_header("sec-websocket-extensions")
@@ -652,10 +647,7 @@ pub fn start_websocket(
   |> http.upgrade(socket, transport, extensions, _)
   |> result.then(fn(_nil) {
     websocket.initialize_connection(
-      fn(conn) {
-        let WebsocketInit(state, selector) = builder.on_init(conn)
-        #(state, selector)
-      },
+      on_init,
       builder.on_close,
       handler,
       socket,
