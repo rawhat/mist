@@ -72,7 +72,7 @@ pub fn log(
 ) -> Nil {
   let duration_string =
     dict.get(measurements, atom.create("duration"))
-    |> result.then(fn(val) {
+    |> result.try(fn(val) {
       val
       |> decode.run(decode.int)
       |> result.replace_error(Nil)

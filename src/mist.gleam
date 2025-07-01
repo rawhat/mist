@@ -203,7 +203,7 @@ pub fn read_body(
 ) -> Result(Request(BitArray), ReadError) {
   req
   |> request.get_header("content-length")
-  |> result.then(int.parse)
+  |> result.try(int.parse)
   |> result.unwrap(0)
   |> fn(content_length) {
     case content_length {
@@ -318,7 +318,7 @@ fn fetch_chunks_until(
         http.Chunk(<<>>, next_buffer) -> {
           http.read_data(socket, transport, next_buffer, http.InvalidBody)
           |> result.replace_error(MalformedBody)
-          |> result.then(fn(new_data) {
+          |> result.try(fn(new_data) {
             let updated_state =
               ChunkState(..state, chunk_buffer: buffer.new(new_data))
             fetch_chunks_until(socket, transport, updated_state, byte_size)
@@ -369,7 +369,7 @@ pub fn stream(
       let content_length =
         req
         |> request.get_header("content-length")
-        |> result.then(int.parse)
+        |> result.try(int.parse)
         |> result.unwrap(0)
 
       let initial_size = bit_array.byte_size(data)
@@ -603,7 +603,7 @@ pub fn websocket(
   let transport = request.body.transport
   request
   |> http.upgrade(socket, transport, extensions, _)
-  |> result.then(fn(_nil) {
+  |> result.try(fn(_nil) {
     websocket.initialize_connection(
       on_init,
       on_close,
@@ -747,7 +747,7 @@ pub fn server_sent_events(
     encoder.response_builder(200, with_default_headers.headers, "1.1"),
   )
   |> result.replace_error(Nil)
-  |> result.then(fn(_nil) {
+  |> result.try(fn(_nil) {
     actor.new_with_initialiser(1000, fn(subj) {
       init(subj)
       |> result.map(fn(return) { actor.returning(return, subj) })

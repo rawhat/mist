@@ -78,7 +78,7 @@ pub fn new(
         let content_length =
           headers
           |> list.key_find("content-length")
-          |> result.then(int.parse)
+          |> result.try(int.parse)
           |> result.unwrap(0)
         let conn =
           Connection(
@@ -118,8 +118,7 @@ pub fn new(
         process.send(state.data_subject, Done)
         actor.continue(
           InternalState(..state, end: True, to_remove: <<
-            state.to_remove:bits,
-            bits:bits,
+            state.to_remove:bits, bits:bits,
           >>),
         )
       }
@@ -148,14 +147,14 @@ pub fn make_request(
       |> ghttp.parse_method
       |> result.replace_error(Nil)
       |> result.map(request.set_method(req, _))
-      |> result.then(make_request(rest, _))
+      |> result.try(make_request(rest, _))
     }
     [#("scheme", scheme), ..rest] -> {
       scheme
       |> ghttp.scheme_from_string
       |> result.replace_error(Nil)
       |> result.map(request.set_scheme(req, _))
-      |> result.then(make_request(rest, _))
+      |> result.try(make_request(rest, _))
     }
     // TODO
     [#("authority", _authority), ..rest] -> make_request(rest, req)

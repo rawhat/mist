@@ -46,7 +46,7 @@ pub fn call(
     req,
     version,
   ))
-  |> result.then(fn(resp) {
+  |> result.try(fn(resp) {
     case resp {
       response.Response(body: Websocket(selector), ..)
       | response.Response(body: ServerSentEvents(selector), ..) -> {
@@ -61,7 +61,7 @@ pub fn call(
           _ -> panic as "This shouldn't ever happen 🤞"
         }
         |> result.replace_error(Ok(Nil))
-        |> result.then(close_or_set_timer(_, conn, sender))
+        |> result.try(close_or_set_timer(_, conn, sender))
       }
     }
   })
@@ -132,7 +132,7 @@ fn handle_chunked_body(
     )
 
   transport.send(conn.transport, conn.socket, initial_payload)
-  |> result.then(fn(_ok) {
+  |> result.try(fn(_ok) {
     body
     |> yielder.append(yielder.from_list([bytes_tree.new()]))
     |> yielder.try_fold(Nil, fn(_prev, chunk) {
@@ -183,7 +183,7 @@ fn handle_file_body(
       )
     }
     |> transport.send(conn.transport, conn.socket, _)
-    |> result.then(fn(_) {
+    |> result.try(fn(_) {
       file.sendfile(
         conn.transport,
         file_descriptor,

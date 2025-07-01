@@ -169,7 +169,7 @@ fn handle_frame(
           state.streams
           |> dict.get(identifier)
           |> result.replace_error("Window update for non-existent stream")
-          |> result.then(fn(stream) {
+          |> result.try(fn(stream) {
             case
               flow_control.update_send_window(stream.send_window_size, amount)
             {
@@ -202,7 +202,7 @@ fn handle_frame(
       let pending_content_length =
         headers
         |> list.key_find("content-length")
-        |> result.then(int.parse)
+        |> result.try(int.parse)
         |> option.from_result
 
       let assert Ok(new_stream) =
