@@ -95,7 +95,7 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
             }
           }
         })
-        |> result.then(fn(req) {
+        |> result.try(fn(req) {
           case req {
             http.Http1Request(req, version) ->
               http_handler.call(req, handler, conn, sender, version)

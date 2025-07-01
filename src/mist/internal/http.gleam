@@ -97,7 +97,7 @@ pub fn parse_headers(
     Ok(EndOfHeaders(rest)) -> Ok(#(headers, rest))
     Ok(MoreData(size)) -> {
       let amount_to_read = option.unwrap(size, 0)
-      use next <- result.then(read_data(
+      use next <- result.try(read_data(
         socket,
         transport,
         Buffer(amount_to_read, bs),
@@ -118,15 +118,14 @@ pub fn read_data(
   // TODO:  don't hard-code these, probably
   let to_read = int.min(buffer.remaining, 1_000_000)
   let timeout = 15_000
-  use data <- result.then(
+  use data <- result.try(
     socket
     |> transport.receive_timeout(transport, _, to_read, timeout)
     |> result.replace_error(error),
   )
   let next_buffer =
     Buffer(remaining: int.max(0, buffer.remaining - to_read), data: <<
-      buffer.data:bits,
-      data:bits,
+      buffer.data:bits, data:bits,
     >>)
 
   case next_buffer.remaining > 0 {
@@ -186,13 +185,13 @@ fn read_chunk(
         _newline:int,
         rest:bytes,
       >> = buffer.data
-      use chunk_size <- result.then(
+      use chunk_size <- result.try(
         chunk
         |> bit_array.to_string
         |> result.map(charlist.from_string)
         |> result.replace_error(InvalidBody),
       )
-      use size <- result.then(
+      use size <- result.try(
         string_to_int(chunk_size, 16)
         |> result.replace_error(InvalidBody),
       )
@@ -208,7 +207,7 @@ fn read_chunk(
                 bytes_tree.append(body, next_chunk),
               )
             _ -> {
-              use next <- result.then(read_data(
+              use next <- result.try(read_data(
                 socket,
                 transport,
                 Buffer(0, buffer.data),
@@ -220,7 +219,7 @@ fn read_chunk(
       }
     }
     <<>> as data, _ | data, Error(Nil) -> {
-      use next <- result.then(read_data(
+      use next <- result.try(read_data(
         socket,
         transport,
         Buffer(0, data),
@@ -284,18 +283,18 @@ pub fn parse_request(
 ) -> Result(ParsedRequest, DecodeError) {
   case decode_packet(HttpBin, bs, []) {
     Ok(BinaryData(HttpRequest(http_method, AbsPath(path), version), rest)) -> {
-      use method <- result.then(
+      use method <- result.try(
         http_method
         |> decode_http_method
         |> result.replace_error(UnknownMethod),
       )
-      use #(headers, rest) <- result.then(parse_headers(
+      use #(headers, rest) <- result.try(parse_headers(
         rest,
         conn.socket,
         conn.transport,
         dict.new(),
       ))
-      use path <- result.then(
+      use path <- result.try(
         path
         |> bit_array.to_string
         |> result.replace_error(InvalidPath),
@@ -308,7 +307,7 @@ pub fn parse_request(
         transport.Ssl(..) -> http.Https
         transport.Tcp(..) -> http.Http
       }
-      use host_header <- result.then(
+      use host_header <- result.try(
         dict.get(headers, "host")
         |> result.replace_error(NoHostHeader),
       )
@@ -358,7 +357,7 @@ pub fn parse_request(
     }
     Ok(MoreData(size)) -> {
       let amount_to_read = option.unwrap(size, 0)
-      use next <- result.then(read_data(
+      use next <- result.try(read_data(
         conn.socket,
         conn.transport,
         Buffer(amount_to_read, bs),
@@ -389,9 +388,9 @@ pub fn read_body(
   }
   case request.get_header(req, "transfer-encoding"), req.body.body {
     Ok("chunked"), Initial(rest) -> {
-      use _nil <- result.then(handle_continue(req))
+      use _nil <- result.try(handle_continue(req))
 
-      use chunk <- result.then(read_chunk(
+      use chunk <- result.try(read_chunk(
         req.body.socket,
         transport,
         Buffer(remaining: 0, data: rest),
@@ -400,12 +399,12 @@ pub fn read_body(
       Ok(request.set_body(req, bytes_tree.to_bit_array(chunk)))
     }
     _, Initial(rest) -> {
-      use _nil <- result.then(handle_continue(req))
+      use _nil <- result.try(handle_continue(req))
       let body_size =
         req.headers
         |> list.find(fn(tup) { pair.first(tup) == "content-length" })
         |> result.map(pair.second)
-        |> result.then(int.parse)
+        |> result.try(int.parse)
         |> result.unwrap(0)
       let remaining = body_size - bit_array.byte_size(rest)
       case body_size, remaining {
@@ -437,7 +436,7 @@ pub fn read_body(
         selector
         |> process.selector_receive(1000)
         |> result.replace_error(InvalidBody)
-      use next <- result.then(res)
+      use next <- result.try(res)
       let got = bit_array.byte_size(next)
       let left = int.max(remaining - got, 0)
       let new_data = bit_array.append(data, next)
@@ -476,15 +475,15 @@ pub fn upgrade_socket(
   req: Request(Connection),
   extensions: List(String),
 ) -> Result(Response(BytesTree), Request(Connection)) {
-  use _upgrade <- result.then(
+  use _upgrade <- result.try(
     request.get_header(req, "upgrade")
     |> result.replace_error(req),
   )
-  use key <- result.then(
+  use key <- result.try(
     request.get_header(req, "sec-websocket-key")
     |> result.replace_error(req),
   )
-  use _version <- result.then(
+  use _version <- result.try(
     request.get_header(req, "sec-websocket-version")
     |> result.replace_error(req),
   )
@@ -518,12 +517,12 @@ pub fn upgrade(
   extensions: List(String),
   req: Request(Connection),
 ) -> Result(Nil, Nil) {
-  use resp <- result.then(
+  use resp <- result.try(
     upgrade_socket(req, extensions)
     |> result.replace_error(Nil),
   )
 
-  use _sent <- result.then(
+  use _sent <- result.try(
     resp
     |> add_default_headers(req.method == http.Head)
     |> maybe_keep_alive

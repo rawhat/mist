@@ -66,7 +66,7 @@ fn send_headers(
   stream_identifier: StreamIdentifier(Frame),
 ) -> Result(HpackContext, String) {
   hpack_encode(context, headers)
-  |> result.then(fn(pair) {
+  |> result.try(fn(pair) {
     let #(headers, new_context) = pair
     let header_frame =
       Header(
@@ -137,7 +137,7 @@ pub fn send_bytes_tree(
     0 -> send_headers(context, conn, headers, True, id)
     _ -> {
       send_headers(context, conn, headers, False, id)
-      |> result.then(fn(context) {
+      |> result.try(fn(context) {
         // TODO:  this should be broken up by window size
         // TODO:  fix end_stream
         send_data(conn, bytes_tree.to_bit_array(resp.body), id, True)

@@ -47,7 +47,7 @@ pub fn sendfile(
     Ssl(..) as transport -> {
       pread(file_descriptor, offset, bytes)
       |> result.map_error(FileErr)
-      |> result.then(fn(bits) {
+      |> result.try(fn(bits) {
         transport.send(transport, socket, bytes_tree.from_bit_array(bits))
         |> result.map_error(SocketErr)
       })

@@ -440,15 +440,8 @@ pub fn encode(frame: Frame) -> BitArray {
       let length = bit_array.byte_size(data)
       let end = from_bool(end_stream)
       <<
-        length:size(24),
-        0:size(8),
-        0:size(4),
-        0:size(1),
-        0:size(2),
-        end:size(1),
-        0:size(1),
-        identifier:size(31),
-        data:bits,
+        length:size(24), 0:size(8), 0:size(4), 0:size(1), 0:size(2), end:size(1),
+        0:size(1), identifier:size(31), data:bits,
       >>
     }
     Header(data, end_stream, StreamIdentifier(identifier), priority) -> {
@@ -458,19 +451,9 @@ pub fn encode(frame: Frame) -> BitArray {
       let priority_flags = encode_priority(priority)
       let has_priority = from_bool(option.is_some(priority))
       <<
-        length:size(24),
-        1:size(8),
-        0:size(2),
-        has_priority:size(1),
-        0:size(1),
-        0:size(1),
-        end_header:size(1),
-        0:size(1),
-        end:size(1),
-        0:size(1),
-        identifier:size(31),
-        priority_flags:bits,
-        data:bits,
+        length:size(24), 1:size(8), 0:size(2), has_priority:size(1), 0:size(1),
+        0:size(1), end_header:size(1), 0:size(1), end:size(1), 0:size(1),
+        identifier:size(31), priority_flags:bits, data:bits,
       >>
     }
     Priority(
@@ -481,24 +464,14 @@ pub fn encode(frame: Frame) -> BitArray {
     ) -> {
       let exclusive = from_bool(exclusive)
       <<
-        5:size(24),
-        2:size(2),
-        0:size(8),
-        0:size(1),
-        identifier:size(31),
-        exclusive:size(1),
-        dependency:size(31),
-        weight:size(8),
+        5:size(24), 2:size(2), 0:size(8), 0:size(1), identifier:size(31),
+        exclusive:size(1), dependency:size(31), weight:size(8),
       >>
     }
     Termination(error, StreamIdentifier(identifier)) -> {
       let error_code = encode_error(error)
       <<
-        4:size(24),
-        3:size(8),
-        0:size(8),
-        0:size(1),
-        identifier:size(31),
+        4:size(24), 3:size(8), 0:size(8), 0:size(1), identifier:size(31),
         error_code:size(32),
       >>
     }
@@ -507,13 +480,8 @@ pub fn encode(frame: Frame) -> BitArray {
       let settings = encode_settings(settings)
       let length = bit_array.byte_size(settings)
       <<
-        length:size(24),
-        4:size(8),
-        0:size(7),
-        ack:size(1),
-        0:size(1),
-        0:size(31),
-        settings:bits,
+        length:size(24), 4:size(8), 0:size(7), ack:size(1), 0:size(1),
+        0:size(31), settings:bits,
       >>
     }
     PushPromise(
@@ -523,28 +491,15 @@ pub fn encode(frame: Frame) -> BitArray {
     ) -> {
       let #(end_headers, data) = encode_data(data)
       <<
-        0:size(24),
-        5:size(8),
-        0:size(4),
-        0:size(0),
-        end_headers:size(1),
-        0:size(2),
-        0:size(1),
-        identifier:size(31),
-        0:size(1),
-        promised_identifier:size(31),
-        data:bits,
+        0:size(24), 5:size(8), 0:size(4), 0:size(0), end_headers:size(1),
+        0:size(2), 0:size(1), identifier:size(31), 0:size(1),
+        promised_identifier:size(31), data:bits,
       >>
     }
     Ping(ack, data) -> {
       let ack = from_bool(ack)
       <<
-        0:size(24),
-        6:size(8),
-        0:size(7),
-        ack:size(1),
-        0:size(1),
-        0:size(31),
+        0:size(24), 6:size(8), 0:size(7), ack:size(1), 0:size(1), 0:size(31),
         data:bits,
       >>
     }
@@ -552,40 +507,22 @@ pub fn encode(frame: Frame) -> BitArray {
       let error = encode_error(error)
       let payload_size = bit_array.byte_size(data)
       <<
-        payload_size:size(24),
-        7:size(8),
-        0:size(8),
-        0:size(1),
-        0:size(31),
-        0:size(1),
-        last_stream_id:size(31),
-        error:size(32),
-        data:bits,
+        payload_size:size(24), 7:size(8), 0:size(8), 0:size(1), 0:size(31),
+        0:size(1), last_stream_id:size(31), error:size(32), data:bits,
       >>
     }
     WindowUpdate(amount, StreamIdentifier(identifier)) -> {
       <<
-        4:size(24),
-        8:size(8),
-        0:size(8),
-        0:size(1),
-        identifier:size(31),
-        0:size(1),
-        amount:size(31),
+        4:size(24), 8:size(8), 0:size(8), 0:size(1), identifier:size(31),
+        0:size(1), amount:size(31),
       >>
     }
     Continuation(data, StreamIdentifier(identifier)) -> {
       let #(end_headers, data) = encode_data(data)
       let payload_size = bit_array.byte_size(data)
       <<
-        payload_size:size(24),
-        9:size(8),
-        0:size(5),
-        end_headers:size(1),
-        0:size(2),
-        0:size(1),
-        identifier:size(31),
-        data:bits,
+        payload_size:size(24), 9:size(8), 0:size(5), end_headers:size(1),
+        0:size(2), 0:size(1), identifier:size(31), data:bits,
       >>
     }
   }
