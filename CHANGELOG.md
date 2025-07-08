@@ -1,5 +1,8 @@
 # Changelog
 
+# Unreleased
+- Re-add `supervised` method
+
 # v5.0.1
 - Revert clock change from named process back to erlang application
     - Running multiple mist supervisors would cause issues with starting the

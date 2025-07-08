@@ -10,7 +10,8 @@ import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
-import gleam/otp/static_supervisor as supervisor
+import gleam/otp/static_supervisor.{type Supervisor} as supervisor
+import gleam/otp/supervision.{type ChildSpecification}
 import gleam/result
 import gleam/string
 import gleam/string_tree.{type StringTree}
@@ -511,7 +512,7 @@ pub type Port {
 /// Start a `mist` service with the provided builder.
 pub fn start(
   builder: Builder(Connection, ResponseData),
-) -> Result(actor.Started(supervisor.Supervisor), actor.StartError) {
+) -> Result(actor.Started(Supervisor), actor.StartError) {
   let listener_name = process.new_name("glisten_listener")
   fn(req) { convert_body_types(builder.handler(req)) }
   |> handler.with_func
@@ -542,6 +543,13 @@ pub fn start(
     builder.after_start(info.port, scheme, ip_address)
     server
   })
+}
+
+/// Start the `mist` supervisor as a child of a supervision tree.
+pub fn supervised(
+  builder: Builder(Connection, ResponseData),
+) -> ChildSpecification(Supervisor) {
+  supervision.supervisor(fn() { start(builder) })
 }
 
 /// These are the types of messages that a websocket handler may receive.
