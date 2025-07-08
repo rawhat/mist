@@ -125,7 +125,8 @@ pub fn read_data(
   )
   let next_buffer =
     Buffer(remaining: int.max(0, buffer.remaining - to_read), data: <<
-      buffer.data:bits, data:bits,
+      buffer.data:bits,
+      data:bits,
     >>)
 
   case next_buffer.remaining > 0 {

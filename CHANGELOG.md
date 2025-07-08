@@ -1,6 +1,6 @@
 # Changelog
 
-# Unreleased
+# v5.0.2
 - Re-add `supervised` method
 
 # v5.0.1
