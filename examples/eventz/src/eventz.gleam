@@ -1,42 +1,42 @@
-import gleam/bytes_builder
+import gleam/bytes_tree
 import gleam/erlang/process
-import gleam/function
 import gleam/http/request
 import gleam/http/response
 import gleam/int
 import gleam/otp/actor
 import gleam/string
-import gleam/string_builder
+import gleam/string_tree
 import logging
 import mist
 import repeatedly
 
 const index_html = "
-<!DOCTYPE html>
-<html lang=\"en\">
+  <!DOCTYPE html>
+  <html lang=\"en\">
   <head><title>eventzzz</title></head>
   <body>
-    <div id='time'></div>
-    <script>
-      const clock = document.getElementById(\"time\")
-      const eventz = new EventSource(\"/clock\")
-      eventz.onmessage = (e) => {
-        console.log(\"got a message\", e)
-        const theTime = new Date(parseInt(e.data))
-        clock.innerText = theTime.toLocaleString()
-      }
-      eventz.onclose = () => {
-        clock.innerText = \"Done!\"
-      }
-      // This is not 'ideal' but there is no way to close the connection from
-      // the server :(
-      eventz.onerror = (e) => {
-        eventz.close()
-      }
-    </script>
+  <div id='time'></div>
+  <script>
+  const clock = document.getElementById(\"time\")
+  const eventz = new EventSource(\"/clock\")
+  window.eventz = eventz;
+  eventz.onmessage = (e) => {
+  console.log(\"got a message\", e)
+  const theTime = new Date(parseInt(e.data))
+  clock.innerText = theTime.toLocaleString()
+  }
+  eventz.onclose = () => {
+  clock.innerText = \"Done!\"
+  }
+  // This is not 'ideal' but there is no way to close the connection from
+  // the server :(
+  eventz.onerror = (e) => {
+  eventz.close()
+  }
+  </script>
   </body>
-</html>
-"
+  </html>
+  "
 
 pub type EventState {
   EventState(count: Int, repeater: repeatedly.Repeater(Nil))
@@ -44,7 +44,6 @@ pub type EventState {
 
 pub type Event {
   Time(Int)
-  Down(process.ProcessDown)
 }
 
 pub fn main() {
@@ -52,7 +51,7 @@ pub fn main() {
 
   let index_resp =
     response.new(200)
-    |> response.set_body(mist.Bytes(bytes_builder.from_string(index_html)))
+    |> response.set_body(mist.Bytes(bytes_tree.from_string(index_html)))
 
   let assert Ok(_) =
     fn(req) {
@@ -61,25 +60,19 @@ pub fn main() {
           mist.server_sent_events(
             req,
             response.new(200),
-            init: fn() {
-              let subj = process.new_subject()
-              let monitor = process.monitor_process(process.self())
-              let selector =
-                process.new_selector()
-                |> process.selecting(subj, function.identity)
-                |> process.selecting_process_down(monitor, Down)
+            init: fn(subj) {
               let repeater =
                 repeatedly.call(1000, Nil, fn(_state, _count) {
                   let now = system_time(Millisecond)
                   process.send(subj, Time(now))
                 })
-              actor.Ready(EventState(0, repeater), selector)
+              Ok(actor.initialised(EventState(0, repeater)))
             },
-            loop: fn(message, conn, state) {
+            loop: fn(state, message, conn) {
               case message {
                 Time(value) -> {
                   let event =
-                    mist.event(string_builder.from_string(int.to_string(value)))
+                    mist.event(string_tree.from_string(int.to_string(value)))
                   case mist.send_event(conn, event) {
                     Ok(_) -> {
                       logging.log(
@@ -92,13 +85,9 @@ pub fn main() {
                     }
                     Error(_) -> {
                       repeatedly.stop(state.repeater)
-                      actor.Stop(process.Normal)
+                      actor.stop()
                     }
                   }
-                }
-                Down(_process_down) -> {
-                  repeatedly.stop(state.repeater)
-                  actor.Stop(process.Normal)
                 }
               }
             },
@@ -108,7 +97,7 @@ pub fn main() {
     }
     |> mist.new
     |> mist.port(4001)
-    |> mist.start_http
+    |> mist.start
 
   process.sleep_forever()
 }
