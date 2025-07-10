@@ -13,28 +13,27 @@ import repeatedly
 const index_html = "
   <!DOCTYPE html>
   <html lang=\"en\">
-  <head><title>eventzzz</title></head>
-  <body>
-  <div id='time'></div>
-  <script>
-  const clock = document.getElementById(\"time\")
-  const eventz = new EventSource(\"/clock\")
-  window.eventz = eventz;
-  eventz.onmessage = (e) => {
-  console.log(\"got a message\", e)
-  const theTime = new Date(parseInt(e.data))
-  clock.innerText = theTime.toLocaleString()
-  }
-  eventz.onclose = () => {
-  clock.innerText = \"Done!\"
-  }
-  // This is not 'ideal' but there is no way to close the connection from
-  // the server :(
-  eventz.onerror = (e) => {
-  eventz.close()
-  }
-  </script>
-  </body>
+    <head><title>eventzzz</title></head>
+    <body>
+      <div id='time'></div>
+      <script>
+        const clock = document.getElementById(\"time\")
+        const eventz = new EventSource(\"/clock\")
+        eventz.onmessage = (e) => {
+          console.log(\"got a message\", e)
+          const theTime = new Date(parseInt(e.data))
+          clock.innerText = theTime.toLocaleString()
+        }
+        eventz.onclose = () => {
+          clock.innerText = \"Done!\"
+        }
+        // This is not 'ideal' but there is no way to close the connection from
+        // the server :(
+        eventz.onerror = (e) => {
+          eventz.close()
+        }
+      </script>
+    </body>
   </html>
   "
 
