@@ -4,6 +4,7 @@ import gleam/option.{type Option, Some}
 import gleam/result
 import gleam/string
 import glisten.{type Loop, Packet, User}
+import glisten/internal/handler
 import glisten/transport
 import logging
 import mist/internal/http.{
@@ -78,13 +79,12 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
           Error(string.inspect(err))
         })
       }
-      Packet(msg), Http1(state, self) -> {
+      Packet(msg), Http1(state:, ..) as self_state -> {
         let _ = case state.idle_timer {
           Some(t) -> process.cancel_timer(t)
           _ -> process.TimerNotFound
         }
-        msg
-        |> http.parse_request(conn)
+        http.parse_requests(msg, conn, [])
         |> result.map_error(fn(err) {
           case err {
             DiscardPacket -> Ok(Nil)
@@ -95,18 +95,8 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
             }
           }
         })
-        |> result.try(fn(req) {
-          case req {
-            http.Http1Request(req, version) ->
-              http_handler.call(req, handler, conn, sender, version)
-              |> result.map(fn(new_state) {
-                Http1(state: new_state, self: self)
-              })
-            http.Upgrade(data) ->
-              http2_handler.upgrade(data, conn, self)
-              |> result.map(Http2)
-              |> result.map_error(Error)
-          }
+        |> result.try(fn(requests) {
+          apply_requests(conn, handler, sender, requests, self_state)
         })
       }
       Packet(msg), Http2(state) -> {
@@ -124,5 +114,36 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
       }
     })
     |> result.unwrap_both
+  }
+}
+
+fn apply_requests(
+  conn: http.Connection,
+  handler: Handler,
+  sender: Subject(handler.Message(user_message)),
+  requests: List(http.ParsedRequest),
+  prev_state: State,
+) -> Result(State, Result(Nil, String)) {
+  case requests, prev_state {
+    [], _ -> Ok(prev_state)
+    [http.Http1Request(req, version), ..next], Http1(..) -> {
+      case http_handler.call(req, handler, conn, sender, version) {
+        Ok(new_state) ->
+          apply_requests(
+            conn,
+            handler,
+            sender,
+            next,
+            Http1(..prev_state, state: new_state),
+          )
+        Error(reason) -> Error(reason)
+      }
+    }
+    [http.Upgrade(data)], Http1(self:, ..) -> {
+      http2_handler.upgrade(data, conn, self)
+      |> result.map(Http2)
+      |> result.map_error(Error)
+    }
+    _, _ -> Error(Error("Invalid pipelining with HTTP/2 upgrade"))
   }
 }

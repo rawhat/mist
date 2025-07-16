@@ -125,8 +125,7 @@ pub fn read_data(
   )
   let next_buffer =
     Buffer(remaining: int.max(0, buffer.remaining - to_read), data: <<
-      buffer.data:bits,
-      data:bits,
+      buffer.data:bits, data:bits,
     >>)
 
   case next_buffer.remaining > 0 {
@@ -277,11 +276,33 @@ fn decode_http_method(value: Dynamic) -> Result(http.Method, Nil) {
   }
 }
 
-/// Turns the TCP message into an HTTP request
-pub fn parse_request(
+pub fn parse_requests(
   bs: BitArray,
   conn: Connection,
-) -> Result(ParsedRequest, DecodeError) {
+  requests: List(ParsedRequest),
+) -> Result(List(ParsedRequest), DecodeError) {
+  case bs {
+    <<>> -> Ok(list.reverse(requests))
+    _ -> {
+      case parse_request(bs, conn) {
+        Ok(More(req:, rest:)) -> parse_requests(rest, conn, [req, ..requests])
+        Ok(Done(req:)) -> Ok(list.reverse([req, ..requests]))
+        Error(reason) -> Error(reason)
+      }
+    }
+  }
+}
+
+type ParsedResult {
+  Done(req: ParsedRequest)
+  More(req: ParsedRequest, rest: BitArray)
+}
+
+/// Turns the TCP message into an HTTP request
+fn parse_request(
+  bs: BitArray,
+  conn: Connection,
+) -> Result(ParsedResult, DecodeError) {
   case decode_packet(HttpBin, bs, []) {
     Ok(BinaryData(HttpRequest(http_method, AbsPath(path), version), rest)) -> {
       use method <- result.try(
@@ -325,9 +346,22 @@ pub fn parse_request(
           }
         })
         |> result.unwrap_both
+      let content_length =
+        dict.get(headers, "content-length")
+        |> result.try(int.parse)
+        |> result.unwrap(0)
+      let rest_size = bit_array.byte_size(rest)
+      let #(initial_body, rest) = case rest {
+        <<initial_body:bytes-size(content_length), rest:bits>> -> #(
+          initial_body,
+          rest,
+        )
+        _initial_body if rest_size < content_length -> #(rest, <<>>)
+        _ -> #(<<>>, rest)
+      }
       let req =
         request.Request(
-          body: Connection(..conn, body: Initial(rest)),
+          body: Connection(..conn, body: Initial(initial_body)),
           headers: dict.to_list(headers),
           host: hostname,
           method: method,
@@ -337,8 +371,20 @@ pub fn parse_request(
           scheme: scheme,
         )
       case version {
-        #(1, 0) -> Ok(Http1Request(request: req, version: Http1))
-        #(1, 1) -> Ok(Http1Request(request: req, version: Http11))
+        #(1, 0) -> {
+          let resp = Http1Request(request: req, version: Http1)
+          case rest {
+            <<>> -> Ok(Done(resp))
+            _ -> Ok(More(resp, rest))
+          }
+        }
+        #(1, 1) -> {
+          let resp = Http1Request(request: req, version: Http11)
+          case rest {
+            <<>> -> Ok(Done(resp))
+            _ -> Ok(More(resp, rest))
+          }
+        }
         _ -> Error(InvalidHttpVersion)
       }
     }
@@ -354,7 +400,7 @@ pub fn parse_request(
       10:int,
       data:bits,
     >>)) -> {
-      Ok(Upgrade(data))
+      Ok(Done(Upgrade(data)))
     }
     Ok(MoreData(size)) -> {
       let amount_to_read = option.unwrap(size, 0)
