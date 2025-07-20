@@ -14,11 +14,10 @@ $ cd <your_project>
 $ gleam add mist logging gleam_erlang gleam_http gleam_otp gleam_yielder
 ```
 
-The main entrypoint for your application is `mist.start`.
-The argument to this function is generated from the
-opaque `Builder` type. It can be constructed with the `mist.new` function, and
-fed updated configuration options with the associated methods (demonstrated
-in the examples below).
+The main entrypoint for your application is `mist.start`. The argument to this
+function is generated from the opaque `Builder` type. It can be constructed with
+the `mist.new` function, and fed updated configuration options with the
+associated methods (demonstrated in the examples below).
 
 ```gleam
 import gleam/bytes_tree
