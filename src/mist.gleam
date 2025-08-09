@@ -1,3 +1,4 @@
+import exception
 import gleam/bit_array
 import gleam/bytes_tree.{type BytesTree}
 import gleam/erlang/process.{type Down, type Selector, type Subject}
@@ -35,9 +36,6 @@ import mist/internal/websocket.{
   type HandlerMessage, type WebsocketConnection as InternalWebsocketConnection,
   Internal, User,
 }
-
-@external(erlang, "mist_ffi", "rescue")
-fn rescue(func: fn() -> return) -> Result(return, Nil)
 
 /// Re-exported type that represents the default `Request` body type. See
 /// `mist.read_body` to convert this type into a `BitString`. The `Connection`
@@ -565,12 +563,12 @@ fn internal_to_public_ws_message(
   msg: HandlerMessage(custom),
 ) -> Result(WebsocketMessage(custom), Nil) {
   case msg {
-    Internal(Data(TextFrame(_length, data))) -> {
+    Internal(Data(TextFrame(data))) -> {
       data
       |> bit_array.to_string
       |> result.map(Text)
     }
-    Internal(Data(BinaryFrame(_length, data))) -> Ok(Binary(data))
+    Internal(Data(BinaryFrame(data))) -> Ok(Binary(data))
     User(msg) -> Ok(Custom(msg))
     _ -> Error(Nil)
   }
@@ -645,8 +643,8 @@ pub fn send_binary_frame(
   frame: BitArray,
 ) -> Result(Nil, glisten.SocketReason) {
   let binary_frame =
-    rescue(fn() {
-      gramps_websocket.to_binary_frame(frame, connection.deflate, None)
+    exception.rescue(fn() {
+      gramps_websocket.encode_binary_frame(frame, connection.deflate, None)
     })
   case binary_frame {
     Ok(binary_frame) -> {
@@ -669,8 +667,8 @@ pub fn send_text_frame(
   frame: String,
 ) -> Result(Nil, glisten.SocketReason) {
   let text_frame =
-    rescue(fn() {
-      gramps_websocket.to_text_frame(frame, connection.deflate, None)
+    exception.rescue(fn() {
+      gramps_websocket.encode_text_frame(frame, connection.deflate, None)
     })
   case text_frame {
     Ok(text_frame) -> {

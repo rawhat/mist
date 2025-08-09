@@ -1,5 +1,9 @@
 # Changelog
 
+# Unreleased
+- Replace custom `rescue` with the `exception` package
+- Bump `gramps` version for better WebSocket compression support
+
 # v5.0.2
 - Re-add `supervised` method
 

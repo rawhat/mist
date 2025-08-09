@@ -1,3 +1,4 @@
+import exception
 import gleam/bit_array
 import gleam/bool
 import gleam/bytes_tree.{type BytesTree}
@@ -33,9 +34,6 @@ pub fn with_server(
   resp
 }
 
-@external(erlang, "mist_ffi", "rescue")
-fn rescue(func: fn() -> anything) -> Result(anything, Nil)
-
 pub fn open_server(
   at port: Int,
   with handler: fn(Request(Connection)) -> Response(mist.ResponseData),
@@ -70,7 +68,7 @@ pub fn open_server(
       process.sleep_forever()
     })
 
-  case rescue(perform) {
+  case exception.rescue(perform) {
     Ok(return) -> {
       process.kill(pid)
       return

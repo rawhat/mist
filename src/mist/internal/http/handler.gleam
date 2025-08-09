@@ -1,5 +1,5 @@
+import exception
 import gleam/bytes_tree.{type BytesTree}
-import gleam/dynamic.{type Dynamic}
 import gleam/erlang/process.{type Subject}
 import gleam/http as ghttp
 import gleam/http/request.{type Request}
@@ -20,9 +20,6 @@ import mist/internal/http.{
   ServerSentEvents, Websocket,
 }
 
-@external(erlang, "mist_ffi", "rescue")
-fn rescue(func: fn() -> any) -> Result(any, Dynamic)
-
 pub type State {
   State(idle_timer: Option(process.Timer))
 }
@@ -38,7 +35,7 @@ pub fn call(
   sender: Subject(handler.Message(user_message)),
   version: http.HttpVersion,
 ) -> Result(State, Result(Nil, String)) {
-  rescue(fn() { handler(req) })
+  exception.rescue(fn() { handler(req) })
   |> result.map_error(log_and_error(
     _,
     conn.socket,
@@ -68,7 +65,7 @@ pub fn call(
 }
 
 fn log_and_error(
-  error: Dynamic,
+  error: exception.Exception,
   socket: Socket,
   transport: Transport,
   req: Request(Connection),

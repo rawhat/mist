@@ -18,8 +18,9 @@ gleam_stdlib = ">= 0.50.0 and < 1.0.0"
 hpack_erl = ">= 0.3.0 and < 1.0.0"
 logging = ">= 1.0.0 and < 2.0.0"
 gleam_yielder = ">= 1.1.0 and < 2.0.0"
-gramps = ">= 3.0.0 and < 4.0.0"
 glisten = ">= 8.0.0 and < 9.0.0"
+exception = ">= 2.1.0 and < 3.0.0"
+gramps = ">= 6.0.0 and < 7.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

@@ -20,10 +20,12 @@ the `mist.new` function, and fed updated configuration options with the
 associated methods (demonstrated in the examples below).
 
 ```gleam
+import gleam/bit_array
 import gleam/bytes_tree
 import gleam/erlang/process
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
+import gleam/int
 import gleam/io
 import gleam/option.{None}
 import gleam/result
@@ -95,7 +97,17 @@ fn handle_ws_message(state, message, conn) {
       let assert Ok(_) = mist.send_text_frame(conn, "pong")
       mist.continue(state)
     }
-    mist.Text(_) | mist.Binary(_) -> {
+    mist.Text(msg) -> {
+      logging.log(logging.Info, "Received text frame: " <> msg)
+      mist.continue(state)
+    }
+    mist.Binary(msg) -> {
+      logging.log(
+        logging.Info,
+        "Received binary frame ("
+          <> int.to_string(bit_array.byte_size(msg))
+          <> ")",
+      )
       mist.continue(state)
     }
     mist.Custom(Broadcast(text)) -> {

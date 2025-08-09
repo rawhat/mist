@@ -1,7 +1,7 @@
+import exception
 import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/erlang/process.{type Selector, type Subject}
-import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
@@ -9,16 +9,10 @@ import gleam/string
 import glisten.{type Socket}
 import glisten/socket/options
 import glisten/transport.{type Transport}
-import gramps/websocket.{
-  type Frame, type ParsedFrame, CloseFrame, Control, InvalidFrame, NeedMoreData,
-  PingFrame, PongFrame,
-}
+import gramps/websocket.{type Frame, CloseFrame, Control, PingFrame}
 import gramps/websocket/compression.{type Compression, type Context}
 import logging
 import mist/internal/next.{type Next, AbnormalStop, Continue, NormalStop}
-
-@external(erlang, "mist_ffi", "rescue")
-fn rescue(func: fn() -> return) -> Result(return, Nil)
 
 pub type ValidMessage(user_message) {
   SocketMessage(BitArray)
@@ -95,9 +89,10 @@ pub fn initialize_connection(
   transport: Transport,
   extensions: List(String),
 ) -> Result(actor.Started(Subject(WebsocketMessage(user_message))), Nil) {
+  let takeovers = websocket.get_context_takeovers(extensions)
   actor.new_with_initialiser(500, fn(subject) {
     let compression = case websocket.has_deflate(extensions) {
-      True -> Some(compression.init())
+      True -> Some(compression.init(takeovers))
       False -> None
     }
     let connection =
@@ -137,12 +132,12 @@ pub fn initialize_connection(
     case msg {
       Valid(SocketMessage(data)) -> {
         let #(frames, rest) =
-          get_messages(
+          websocket.decode_many_frames(
             <<state.buffer:bits, data:bits>>,
-            [],
             option.map(state.permessage_deflate, fn(compression) {
               compression.inflate
             }),
+            [],
           )
         frames
         |> websocket.aggregate_frames(None, [])
@@ -196,7 +191,7 @@ pub fn initialize_connection(
         })
       }
       Valid(UserMessage(msg)) -> {
-        rescue(fn() { handler(state.user, User(msg), connection) })
+        exception.rescue(fn() { handler(state.user, User(msg), connection) })
         |> result.map(fn(cont) {
           case cont {
             Continue(user_state, selector) -> {
@@ -283,19 +278,6 @@ pub fn initialize_connection(
   |> result.replace_error(Nil)
 }
 
-fn get_messages(
-  data: BitArray,
-  frames: List(ParsedFrame),
-  context: Option(Context),
-) -> #(List(ParsedFrame), BitArray) {
-  case websocket.frame_from_message(data, context) {
-    Ok(#(frame, <<>>)) -> #(list.reverse([frame, ..frames]), <<>>)
-    Ok(#(frame, rest)) -> get_messages(rest, [frame, ..frames], context)
-    Error(NeedMoreData(rest)) -> #(list.reverse(frames), rest)
-    Error(InvalidFrame) -> #(list.reverse(frames), data)
-  }
-}
-
 fn apply_frames(
   frames: List(Frame),
   handler: Handler(state, user_message),
@@ -310,21 +292,21 @@ fn apply_frames(
       set_active(connection.transport, connection.socket)
       next
     }
-    [Control(CloseFrame(..)) as frame, ..], Continue(state, _selector) -> {
+    [Control(CloseFrame(reason)), ..], Continue(state, _selector) -> {
       let _ =
         transport.send(
           connection.transport,
           connection.socket,
-          websocket.frame_to_bytes_tree(frame, None),
+          websocket.encode_close_frame(reason, None),
         )
       on_close(state)
       NormalStop
     }
-    [Control(PingFrame(length, payload)), ..], Continue(state, _selector) -> {
+    [Control(PingFrame(payload)), ..], Continue(state, _selector) -> {
       transport.send(
         connection.transport,
         connection.socket,
-        websocket.frame_to_bytes_tree(Control(PongFrame(length, payload)), None),
+        websocket.encode_pong_frame(payload, None),
       )
       |> result.map(fn(_nil) {
         set_active(connection.transport, connection.socket)
@@ -336,7 +318,9 @@ fn apply_frames(
       })
     }
     [frame, ..rest], Continue(state, prev_selector) -> {
-      case rescue(fn() { handler(state, Internal(frame), connection) }) {
+      case
+        exception.rescue(fn() { handler(state, Internal(frame), connection) })
+      {
         Ok(Continue(state, selector)) -> {
           let next_selector =
             selector
