@@ -1,6 +1,6 @@
 # Changelog
 
-# Unreleased
+# v5.0.3
 - Replace custom `rescue` with the `exception` package
 - Bump `gramps` version for better WebSocket compression support
 
