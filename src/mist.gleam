@@ -116,7 +116,7 @@ pub type ConnectionInfo {
 }
 
 /// Tries to get the IP address and port of a connected client.
-pub fn get_client_info(conn: Connection) -> Result(ConnectionInfo, Nil) {
+pub fn get_connection_info(conn: Connection) -> Result(ConnectionInfo, Nil) {
   transport.peername(conn.transport, conn.socket)
   |> result.map(fn(pair) {
     ConnectionInfo(
