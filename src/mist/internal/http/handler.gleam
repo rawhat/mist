@@ -128,8 +128,9 @@ fn handle_chunked_body(
       http.version_to_string(version),
     )
 
-  transport.send(conn.transport, conn.socket, initial_payload)
-  |> result.try(fn(_ok) {
+  {
+    use _ok <- result.try(transport.send(conn.transport, conn.socket, initial_payload))
+    
     body
     |> yielder.append(yielder.from_list([bytes_tree.new()]))
     |> yielder.try_fold(Nil, fn(_prev, chunk) {
@@ -144,7 +145,7 @@ fn handle_chunked_body(
 
       transport.send(conn.transport, conn.socket, encoded)
     })
-  })
+  }
   |> result.replace(
     resp
     |> response.set_header("tranfer-encoding", "chunked")
