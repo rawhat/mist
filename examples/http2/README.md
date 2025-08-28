@@ -70,9 +70,9 @@ gleam test
 ./test_h2c_upgrade.sh
 ```
 
-**Full HTTP/2 Feature Tests**:
+**Basic HTTP/2 Features Tests**:
 ```bash
-./test_http2.sh
+./test_working_features.sh
 ```
 
 ### Manual Testing Examples
