@@ -5,8 +5,6 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import gleam/string
-import logging
 import mist/internal/buffer.{type Buffer}
 import mist/internal/http.{type Connection, type Handler, Connection, Initial}
 import mist/internal/http2.{type HpackContext, type Http2Settings, Http2Settings}
@@ -110,7 +108,6 @@ pub fn call(
   let #(cleaned_buffer, should_continue, set_active) = case state.frame_buffer.data {
     // Check for HTTP/2 connection preface: "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
     <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8, rest:bits>> -> {
-      logging.log(logging.Debug, "Received HTTP/2 connection preface")
       #(buffer.new(rest), True, True)
     }
     _ -> #(state.frame_buffer, True, False)
@@ -121,10 +118,7 @@ pub fn call(
     True -> {
       // Set socket to active true after processing preface
       let _ = case set_active {
-        True -> {
-          logging.log(logging.Debug, "Setting socket to active:true after preface")
-          http.set_socket_active(conn.transport, conn.socket)
-        }
+        True -> http.set_socket_active(conn.transport, conn.socket)
         False -> Ok(Nil)
       }
       
@@ -342,13 +336,11 @@ fn handle_frame(
       |> result.replace_error("Failed to respond to settings ACK")
     }
     None, frame.GoAway(..) -> {
-      logging.log(logging.Debug, "byteeee~~")
       // TODO:  Normal exit
       Error("Going away...")
     }
     // TODO:  obviously fill these out
-    _, frame -> {
-      logging.log(logging.Debug, "Ignoring frame: " <> string.inspect(frame))
+    _, _frame -> {
       Ok(state)
     }
   }

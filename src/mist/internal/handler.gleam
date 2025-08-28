@@ -183,7 +183,6 @@ pub fn with_func_and_config(
         
         case accumulated {
           <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8, rest:bits>> -> {
-            logging.log(logging.Debug, "Received complete HTTP/2 preface, upgrading to HTTP/2")
             // Set socket to active true for continuous HTTP/2 communication
             let _ = http.set_socket_active_continuous(conn.transport, conn.socket)
             
@@ -227,7 +226,6 @@ pub fn with_func_and_config(
                 
                 case matches {
                   True -> {
-                    logging.log(logging.Debug, "Partial HTTP/2 preface received, waiting for more: " <> string.inspect(accumulated))
                     // Set socket to receive the next packet
                     let _ = http.set_socket_active(conn.transport, conn.socket)
                     Ok(AwaitingH2cPreface(self, http2_settings, accumulated))
