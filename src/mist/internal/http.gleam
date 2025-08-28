@@ -246,6 +246,7 @@ pub fn version_to_string(version: HttpVersion) {
 pub type ParsedRequest {
   Http1Request(request: request.Request(Connection), version: HttpVersion)
   Upgrade(BitArray)
+  H2cUpgrade(request: request.Request(Connection), settings: String)
 }
 
 @external(erlang, "mist_ffi", "decode_atom")
@@ -338,7 +339,27 @@ pub fn parse_request(
         )
       case version {
         #(1, 0) -> Ok(Http1Request(request: req, version: Http1))
-        #(1, 1) -> Ok(Http1Request(request: req, version: Http11))
+        #(1, 1) -> {
+          // Debug: log all headers
+          let connection_header = dict.get(headers, "connection")
+          let upgrade_header = dict.get(headers, "upgrade")
+          let settings_header = dict.get(headers, "http2-settings")
+          
+          // Check for h2c upgrade
+          case connection_header, upgrade_header, settings_header {
+            Ok(connection), Ok("h2c"), Ok(settings) -> {
+              // Check if connection header contains "Upgrade"
+              case string.contains(string.lowercase(connection), "upgrade") {
+                True -> {
+                  // This is an h2c upgrade request
+                  Ok(H2cUpgrade(request: req, settings: settings))
+                }
+                False -> Ok(Http1Request(request: req, version: Http11))
+              }
+            }
+            _, _, _ -> Ok(Http1Request(request: req, version: Http11))
+          }
+        }
         _ -> Error(InvalidHttpVersion)
       }
     }
@@ -643,6 +664,62 @@ fn decode_packet(
   packet packet: BitArray,
   options options: List(a),
 ) -> Result(DecodedPacket, DecodeError)
+
+pub type SocketPacketMode {
+  RawPacket
+  HttpBinPacket
+}
+
+@external(erlang, "mist_ffi", "set_packet_mode")
+fn ffi_set_packet_mode(
+  transport: atom.Atom,
+  socket: Socket,
+  mode: atom.Atom,
+) -> Result(Nil, Nil)
+
+pub fn set_socket_packet_mode(
+  transport: Transport,
+  socket: Socket,
+  mode: SocketPacketMode,
+) -> Result(Nil, Nil) {
+  let transport_atom = case transport {
+    transport.Tcp -> atom.create("tcp")
+    transport.Ssl -> atom.create("ssl")
+  }
+  let mode_atom = case mode {
+    RawPacket -> atom.create("raw")
+    HttpBinPacket -> atom.create("http_bin")
+  }
+  ffi_set_packet_mode(transport_atom, socket, mode_atom)
+}
+
+@external(erlang, "mist_ffi", "set_socket_active")
+fn ffi_set_socket_active(transport: atom.Atom, socket: Socket) -> Result(Nil, Nil)
+
+@external(erlang, "mist_ffi", "set_socket_active_continuous")
+fn ffi_set_socket_active_continuous(transport: atom.Atom, socket: Socket) -> Result(Nil, Nil)
+
+pub fn set_socket_active(
+  transport: Transport,
+  socket: Socket,
+) -> Result(Nil, Nil) {
+  let transport_atom = case transport {
+    transport.Tcp -> atom.create("tcp")
+    transport.Ssl -> atom.create("ssl")
+  }
+  ffi_set_socket_active(transport_atom, socket)
+}
+
+pub fn set_socket_active_continuous(
+  transport: Transport,
+  socket: Socket,
+) -> Result(Nil, Nil) {
+  let transport_atom = case transport {
+    transport.Tcp -> atom.create("tcp")
+    transport.Ssl -> atom.create("ssl")
+  }
+  ffi_set_socket_active_continuous(transport_atom, socket)
+}
 
 @external(erlang, "crypto", "hash")
 pub fn crypto_hash(hash hash: ShaHash, data data: String) -> String

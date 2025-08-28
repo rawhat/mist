@@ -8,7 +8,9 @@ import gleam/result
 import gleam/string
 import logging
 import mist/internal/buffer.{type Buffer}
+import mist/internal/buffer as buffer_module
 import mist/internal/http.{type Connection, type Handler, Connection, Initial}
+import mist/internal/http as http_module
 import mist/internal/http2.{type HpackContext, type Http2Settings, Http2Settings}
 import mist/internal/http2/flow_control
 import mist/internal/http2/frame.{
@@ -44,7 +46,7 @@ pub fn receive_hpack_context(state: State, context: HpackContext) -> State {
 }
 
 pub fn append_data(state: State, data: BitArray) -> State {
-  State(..state, frame_buffer: buffer.append(state.frame_buffer, data))
+  State(..state, frame_buffer: buffer_module.append(state.frame_buffer, data))
 }
 
 pub fn upgrade(
@@ -52,8 +54,33 @@ pub fn upgrade(
   conn: Connection,
   self: Subject(SendMessage),
 ) -> Result(State, String) {
-  let initial_settings = http2.default_settings()
-  let settings_frame = frame.Settings(ack: False, settings: [])
+  upgrade_with_settings(data, conn, self, None)
+}
+
+pub fn upgrade_with_settings(
+  data: BitArray,
+  conn: Connection,
+  self: Subject(SendMessage),
+  custom_settings: Option(http2.Http2Settings),
+) -> Result(State, String) {
+  let initial_settings = case custom_settings {
+    Some(settings) -> settings
+    None -> http2.default_settings()
+  }
+  let settings_frame = frame.Settings(
+    ack: False,
+    settings: [
+      frame.MaxConcurrentStreams(initial_settings.max_concurrent_streams),
+      frame.InitialWindowSize(initial_settings.initial_window_size),
+      frame.MaxFrameSize(initial_settings.max_frame_size),
+    ]
+    |> fn(settings) {
+      case initial_settings.max_header_list_size {
+        Some(size) -> [frame.MaxHeaderListSize(size), ..settings]
+        None -> settings
+      }
+    },
+  )
 
   let sent =
     http2.send_frame(settings_frame, conn.socket, conn.transport)
@@ -62,17 +89,17 @@ pub fn upgrade(
   use _nil <- result.map(sent)
   State(
     fragment: None,
-    frame_buffer: buffer.new(data),
+    frame_buffer: buffer_module.new(data),
     pending_sends: [],
     receive_hpack_context: http2.hpack_new_context(
       initial_settings.header_table_size,
     ),
-    receive_window_size: 65_535,
+    receive_window_size: initial_settings.initial_window_size,
     self: self,
     send_hpack_context: http2.hpack_new_context(
       initial_settings.header_table_size,
     ),
-    send_window_size: 65_535,
+    send_window_size: initial_settings.initial_window_size,
     settings: initial_settings,
     streams: dict.new(),
   )
@@ -83,20 +110,45 @@ pub fn call(
   conn: Connection,
   handler: Handler,
 ) -> Result(State, Result(Nil, String)) {
-  case frame.decode(state.frame_buffer.data) {
-    Ok(#(frame, rest)) -> {
-      let new_state = State(..state, frame_buffer: buffer.new(rest))
-      case handle_frame(frame, new_state, conn, handler) {
-        Ok(updated) -> call(updated, conn, handler)
-        Error(reason) -> Error(Error(reason))
-      }
+  // Check for HTTP/2 connection preface first
+  let #(cleaned_buffer, should_continue, set_active) = case state.frame_buffer.data {
+    // Check for HTTP/2 connection preface: "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+    <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8, rest:bits>> -> {
+      logging.log(logging.Debug, "Received HTTP/2 connection preface")
+      #(buffer_module.new(rest), True, True)
     }
-    Error(frame.NoError) -> Ok(state)
-    Error(_connection_error) -> {
-      // TODO:
-      //  - send GOAWAY with last good stream ID
-      //  - close the connection
-      Ok(state)
+    _ -> #(state.frame_buffer, True, False)
+  }
+  
+  case should_continue {
+    False -> Ok(state)
+    True -> {
+      // Set socket to active true after processing preface
+      let _ = case set_active {
+        True -> {
+          logging.log(logging.Debug, "Setting socket to active:true after preface")
+          http_module.set_socket_active(conn.transport, conn.socket)
+        }
+        False -> Ok(Nil)
+      }
+      
+      let state = State(..state, frame_buffer: cleaned_buffer)
+      case frame.decode(state.frame_buffer.data) {
+        Ok(#(frame, rest)) -> {
+          let new_state = State(..state, frame_buffer: buffer_module.new(rest))
+          case handle_frame(frame, new_state, conn, handler) {
+            Ok(updated) -> call(updated, conn, handler)
+            Error(reason) -> Error(Error(reason))
+          }
+        }
+        Error(frame.NoError) -> Ok(state)
+        Error(_connection_error) -> {
+          // TODO:
+          //  - send GOAWAY with last good stream ID
+          //  - close the connection
+          Ok(state)
+        }
+      }
     }
   }
 }
