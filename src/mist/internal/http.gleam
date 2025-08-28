@@ -344,7 +344,6 @@ pub fn parse_request(
           let upgrade_header = dict.get(headers, "upgrade")
           let settings_header = dict.get(headers, "http2-settings")
           
-          // Check for h2c upgrade using 'use' syntax
           let h2c_result = {
             use connection <- result.try(connection_header)
             use upgrade <- result.try(upgrade_header)

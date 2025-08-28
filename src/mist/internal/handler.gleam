@@ -142,30 +142,25 @@ pub fn with_func_and_config(
               |> result.map(Http2)
               |> result.map_error(Error)
             http.H2cUpgrade(_req, _settings) -> {
-              // Send 101 Switching Protocols response
               let resp_101 = 
                 response.new(101)
                 |> response.set_body(bytes_tree.new())
                 |> response.set_header("connection", "Upgrade")
                 |> response.set_header("upgrade", "h2c")
               
-              // Send the 101 response
               let _ = 
                 resp_101
                 |> encoder.to_bytes_tree("1.1")
                 |> transport.send(conn.transport, conn.socket, _)
               
-              // Switch to raw mode to handle HTTP/2 frames
               let _ = http.set_socket_packet_mode(
                 conn.transport,
                 conn.socket,
                 http.RawPacket
               )
               
-              // Set socket to receive the next packet
               let _ = http.set_socket_active(conn.transport, conn.socket)
               
-              // Wait for the HTTP/2 preface in the next packet
               Ok(AwaitingH2cPreface(self, http2_settings, <<>>))
             }
           }
@@ -178,15 +173,12 @@ pub fn with_func_and_config(
         |> result.map(Http2)
       }
       Packet(msg), AwaitingH2cPreface(self, http2_settings, buffer) -> {
-        // Accumulate data until we have the complete preface
         let accumulated = bit_array.append(buffer, msg)
         
         case accumulated {
           <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8, rest:bits>> -> {
-            // Set socket to active true for continuous HTTP/2 communication
             let _ = http.set_socket_active_continuous(conn.transport, conn.socket)
             
-            // Initialize HTTP/2 handler with any remaining data
             http2_handler.upgrade_with_settings(
               rest,
               conn,
@@ -197,26 +189,22 @@ pub fn with_func_and_config(
             |> result.map_error(Error)
           }
           _ -> {
-            // Check if we have part of the preface
             let preface = <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8>>
             let preface_size = bit_array.byte_size(preface)
             let accumulated_size = bit_array.byte_size(accumulated)
             
             case accumulated_size >= preface_size {
               True -> {
-                // We have enough data but it doesn't match the preface
                 logging.log(logging.Error, "Invalid HTTP/2 preface received: " <> string.inspect(accumulated))
                 Error(Error("Invalid HTTP/2 preface"))
               }
               False -> {
-                // Check if what we have so far matches the beginning of the preface
                 let matches = case accumulated {
                   <<"PRI":utf8, _:bits>> -> True
                   <<"PR":utf8, _:bits>> -> True
                   <<"P":utf8, _:bits>> -> True
                   <<>> -> True
                   _ -> {
-                    // Check if it matches the start of the preface at any position
                     let assert <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8>> = preface
                     bit_array.slice(preface, 0, accumulated_size) 
                     |> result.map(fn(prefix) { bit_array.compare(accumulated, prefix) == order.Eq })
@@ -226,8 +214,7 @@ pub fn with_func_and_config(
                 
                 case matches {
                   True -> {
-                    // Set socket to receive the next packet
-                    let _ = http.set_socket_active(conn.transport, conn.socket)
+                          let _ = http.set_socket_active(conn.transport, conn.socket)
                     Ok(AwaitingH2cPreface(self, http2_settings, accumulated))
                   }
                   False -> {
@@ -241,7 +228,6 @@ pub fn with_func_and_config(
         }
       }
       User(_), AwaitingH2cPreface(..) -> {
-        // Ignore user messages while waiting for preface
         Ok(state)
       }
     }
