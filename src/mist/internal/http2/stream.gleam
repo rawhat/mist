@@ -172,13 +172,13 @@ pub fn make_request(
       })
       |> result.unwrap(#(path, None))
       |> fn(tup: #(String, Option(List(#(String, String))))) {
-        case tup.1 {
-          Some(query) ->
-            req
-            |> request.set_path(tup.0)
-            |> request.set_query(query)
-          _ -> request.set_path(req, tup.0)
-        }
+        tup.1
+        |> option.map(fn(query) {
+          req
+          |> request.set_path(tup.0)
+          |> request.set_query(query)
+        })
+        |> option.unwrap(request.set_path(req, tup.0))
       }
       |> make_request(rest, _)
     }

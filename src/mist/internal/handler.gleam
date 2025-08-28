@@ -2,7 +2,6 @@ import gleam/bit_array
 import gleam/bytes_tree
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http/response
-import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/result
@@ -110,10 +109,10 @@ pub fn with_func_and_config(
         })
       }
       Packet(msg), Http1(state, self) -> {
-        let _ = case state.idle_timer {
-          Some(t) -> process.cancel_timer(t)
-          _ -> process.TimerNotFound
-        }
+        let _ = 
+          state.idle_timer
+          |> option.map(process.cancel_timer)
+          |> option.unwrap(process.TimerNotFound)
         msg
         |> http.parse_request(conn)
         |> result.map_error(fn(err) {
@@ -142,7 +141,7 @@ pub fn with_func_and_config(
               )
               |> result.map(Http2)
               |> result.map_error(Error)
-            http.H2cUpgrade(req, settings) -> {
+            http.H2cUpgrade(_req, _settings) -> {
               // Send 101 Switching Protocols response
               let resp_101 = 
                 response.new(101)
