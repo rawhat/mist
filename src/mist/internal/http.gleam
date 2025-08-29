@@ -345,17 +345,21 @@ pub fn parse_request(
           let upgrade_header = dict.get(headers, "upgrade")
           let settings_header = dict.get(headers, "http2-settings")
           
-          // Check for h2c upgrade using 'use' syntax
-          let h2c_result = {
-            use connection <- result.try(connection_header)
-            use upgrade <- result.try(upgrade_header)
-            use settings <- result.try(settings_header)
-            
-            case upgrade == "h2c" && string.contains(string.lowercase(connection), "upgrade") {
-              True -> Ok(H2cUpgrade(request: req, settings: settings))
-              False -> Error(Nil)
-            }
-          }
+          // Check for h2c upgrade using functional approach
+          let h2c_result = 
+            connection_header
+            |> result.try(fn(connection) {
+              upgrade_header
+              |> result.try(fn(upgrade) {
+                settings_header
+                |> result.try(fn(settings) {
+                  case upgrade == "h2c" && string.contains(string.lowercase(connection), "upgrade") {
+                    True -> Ok(H2cUpgrade(request: req, settings: settings))
+                    False -> Error(Nil)
+                  }
+                })
+              })
+            })
           
           h2c_result
           |> result.unwrap(Http1Request(request: req, version: Http11))

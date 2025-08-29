@@ -65,8 +65,8 @@ fn send_headers(
   end_stream: Bool,
   stream_identifier: StreamIdentifier(Frame),
 ) -> Result(HpackContext, String) {
-  {
-    use pair <- result.try(hpack_encode(context, headers))
+  hpack_encode(context, headers)
+  |> result.try(fn(pair) {
     let #(headers, new_context) = pair
     let header_frame =
       Header(
@@ -76,15 +76,17 @@ fn send_headers(
         priority: None,
       )
     let encoded = frame.encode(header_frame)
-    
-    transport.send(
-      conn.transport,
-      conn.socket,
-      bytes_tree.from_bit_array(encoded),
-    )
-    |> result.map(fn(_) { new_context })
-    |> result.map_error(fn(_) { "Failed to send HTTP/2 headers" })
-  }
+    case
+      transport.send(
+        conn.transport,
+        conn.socket,
+        bytes_tree.from_bit_array(encoded),
+      )
+    {
+      Ok(_nil) -> Ok(new_context)
+      Error(_reason) -> Error("Failed to send HTTP/2 headers")
+    }
+  })
 }
 
 fn send_data(
@@ -134,13 +136,13 @@ pub fn send_bytes_tree(
   case bytes_tree.byte_size(resp.body) {
     0 -> send_headers(context, conn, headers, True, id)
     _ -> {
-      {
-        use context <- result.try(send_headers(context, conn, headers, False, id))
+      send_headers(context, conn, headers, False, id)
+      |> result.try(fn(context) {
         // TODO:  this should be broken up by window size
         // TODO:  fix end_stream
         send_data(conn, bytes_tree.to_bit_array(resp.body), id, True)
         |> result.replace(context)
-      }
+      })
     }
   }
 }
