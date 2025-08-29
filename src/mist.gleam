@@ -31,6 +31,8 @@ import mist/internal/http.{
   Chunked as InternalChunked, File as InternalFile,
   ServerSentEvents as InternalServerSentEvents, Websocket as InternalWebsocket,
 }
+import mist/internal/http2
+import mist/internal/http2/frame
 import mist/internal/next
 import mist/internal/websocket.{
   type HandlerMessage, type WebsocketConnection as InternalWebsocketConnection,
@@ -385,6 +387,26 @@ type TlsOptions {
   CertKeyFiles(certfile: String, keyfile: String)
 }
 
+pub type Http2Config {
+  Http2Config(
+    enabled: Bool,
+    max_concurrent_streams: Int,
+    initial_window_size: Int,
+    max_frame_size: Int,
+    max_header_list_size: Option(Int),
+  )
+}
+
+pub fn default_http2_config() -> Http2Config {
+  Http2Config(
+    enabled: True,
+    max_concurrent_streams: 100,
+    initial_window_size: 65_535,
+    max_frame_size: 16_384,
+    max_header_list_size: None,
+  )
+}
+
 pub opaque type Builder(request_body, response_body) {
   Builder(
     port: Int,
@@ -393,6 +415,7 @@ pub opaque type Builder(request_body, response_body) {
     interface: String,
     ipv6_support: Bool,
     tls_options: Option(TlsOptions),
+    http2_config: Option(Http2Config),
   )
 }
 
@@ -419,6 +442,7 @@ pub fn new(handler: fn(Request(in)) -> Response(out)) -> Builder(in, out) {
       io.println(message)
     },
     tls_options: None,
+    http2_config: None,
   )
 }
 
@@ -489,6 +513,79 @@ pub fn with_tls(
   Builder(..builder, tls_options: Some(CertKeyFiles(cert, key)))
 }
 
+/// Enable HTTP/2 support with default configuration.
+/// HTTP/2 will be negotiated via ALPN when using TLS.
+pub fn with_http2(builder: Builder(in, out)) -> Builder(in, out) {
+  Builder(..builder, http2_config: Some(default_http2_config()))
+}
+
+/// Configure HTTP/2 with custom settings.
+pub fn with_http2_config(
+  builder: Builder(in, out),
+  config: Http2Config,
+) -> Builder(in, out) {
+  Builder(..builder, http2_config: Some(config))
+}
+
+/// Set the maximum number of concurrent HTTP/2 streams.
+pub fn http2_max_concurrent_streams(
+  builder: Builder(in, out),
+  max: Int,
+) -> Builder(in, out) {
+  let config = 
+    builder.http2_config
+    |> option.unwrap(default_http2_config())
+    |> fn(c) { Http2Config(..c, max_concurrent_streams: max) }
+  Builder(..builder, http2_config: Some(config))
+}
+
+/// Set the initial window size for HTTP/2 flow control.
+pub fn http2_initial_window_size(
+  builder: Builder(in, out),
+  size: Int,
+) -> Builder(in, out) {
+  let config = 
+    builder.http2_config
+    |> option.unwrap(default_http2_config())
+    |> fn(c) { Http2Config(..c, initial_window_size: size) }
+  Builder(..builder, http2_config: Some(config))
+}
+
+/// Set the maximum frame size for HTTP/2.
+pub fn http2_max_frame_size(
+  builder: Builder(in, out),
+  size: Int,
+) -> Builder(in, out) {
+  let config = 
+    builder.http2_config
+    |> option.unwrap(default_http2_config())
+    |> fn(c) { Http2Config(..c, max_frame_size: size) }
+  Builder(..builder, http2_config: Some(config))
+}
+
+/// Set the maximum header list size for HTTP/2.
+pub fn http2_max_header_list_size(
+  builder: Builder(in, out),
+  size: Int,
+) -> Builder(in, out) {
+  let config = 
+    builder.http2_config
+    |> option.unwrap(default_http2_config())
+    |> fn(c) { Http2Config(..c, max_header_list_size: Some(size)) }
+  Builder(..builder, http2_config: Some(config))
+}
+
+fn convert_http2_config(config: Http2Config) -> http2.Http2Settings {
+  http2.Http2Settings(
+    header_table_size: 4096,
+    server_push: frame.Disabled,
+    max_concurrent_streams: config.max_concurrent_streams,
+    initial_window_size: config.initial_window_size,
+    max_frame_size: config.max_frame_size,
+    max_header_list_size: config.max_header_list_size,
+  )
+}
+
 fn convert_body_types(
   resp: Response(ResponseData),
 ) -> Response(InternalResponseData) {
@@ -512,9 +609,10 @@ pub fn start(
   builder: Builder(Connection, ResponseData),
 ) -> Result(actor.Started(Supervisor), actor.StartError) {
   let listener_name = process.new_name("glisten_listener")
+  let http2_settings = option.map(builder.http2_config, convert_http2_config)
   fn(req) { convert_body_types(builder.handler(req)) }
-  |> handler.with_func
-  |> glisten.new(handler.init, _)
+  |> handler.with_func_and_config(http2_settings, _)
+  |> glisten.new(handler.init_with_config(http2_settings), _)
   |> glisten.bind(builder.interface)
   |> fn(handler) {
     case builder.ipv6_support {
