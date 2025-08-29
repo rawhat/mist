@@ -8,7 +8,9 @@ import gleam/result
 import gleam/string
 import logging
 import mist/internal/buffer.{type Buffer}
+import mist/internal/buffer as buffer_module
 import mist/internal/http.{type Connection, type Handler, Connection, Initial}
+import mist/internal/http as http_module
 import mist/internal/http2.{type HpackContext, type Http2Settings, Http2Settings}
 import mist/internal/http2/flow_control
 import mist/internal/http2/frame.{
@@ -44,7 +46,7 @@ pub fn receive_hpack_context(state: State, context: HpackContext) -> State {
 }
 
 pub fn append_data(state: State, data: BitArray) -> State {
-  State(..state, frame_buffer: buffer.append(state.frame_buffer, data))
+  State(..state, frame_buffer: buffer_module.append(state.frame_buffer, data))
 }
 
 pub fn upgrade(
@@ -61,9 +63,10 @@ pub fn upgrade_with_settings(
   self: Subject(SendMessage),
   custom_settings: Option(http2.Http2Settings),
 ) -> Result(State, String) {
-  let initial_settings = 
-    custom_settings
-    |> option.unwrap(http2.default_settings())
+  let initial_settings = case custom_settings {
+    Some(settings) -> settings
+    None -> http2.default_settings()
+  }
   let settings_frame = frame.Settings(
     ack: False,
     settings: [
@@ -72,9 +75,10 @@ pub fn upgrade_with_settings(
       frame.MaxFrameSize(initial_settings.max_frame_size),
     ]
     |> fn(settings) {
-      initial_settings.max_header_list_size
-      |> option.map(fn(size) { [frame.MaxHeaderListSize(size), ..settings] })
-      |> option.unwrap(settings)
+      case initial_settings.max_header_list_size {
+        Some(size) -> [frame.MaxHeaderListSize(size), ..settings]
+        None -> settings
+      }
     },
   )
 
@@ -85,7 +89,7 @@ pub fn upgrade_with_settings(
   use _nil <- result.map(sent)
   State(
     fragment: None,
-    frame_buffer: buffer.new(data),
+    frame_buffer: buffer_module.new(data),
     pending_sends: [],
     receive_hpack_context: http2.hpack_new_context(
       initial_settings.header_table_size,
@@ -111,7 +115,7 @@ pub fn call(
     // Check for HTTP/2 connection preface: "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
     <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8, rest:bits>> -> {
       logging.log(logging.Debug, "Received HTTP/2 connection preface")
-      #(buffer.new(rest), True, True)
+      #(buffer_module.new(rest), True, True)
     }
     _ -> #(state.frame_buffer, True, False)
   }
@@ -123,7 +127,7 @@ pub fn call(
       let _ = case set_active {
         True -> {
           logging.log(logging.Debug, "Setting socket to active:true after preface")
-          http.set_socket_active(conn.transport, conn.socket)
+          http_module.set_socket_active(conn.transport, conn.socket)
         }
         False -> Ok(Nil)
       }
@@ -131,7 +135,7 @@ pub fn call(
       let state = State(..state, frame_buffer: cleaned_buffer)
       case frame.decode(state.frame_buffer.data) {
         Ok(#(frame, rest)) -> {
-          let new_state = State(..state, frame_buffer: buffer.new(rest))
+          let new_state = State(..state, frame_buffer: buffer_module.new(rest))
           case handle_frame(frame, new_state, conn, handler) {
             Ok(updated) -> call(updated, conn, handler)
             Error(reason) -> Error(Error(reason))

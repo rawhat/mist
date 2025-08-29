@@ -345,25 +345,20 @@ pub fn parse_request(
           let upgrade_header = dict.get(headers, "upgrade")
           let settings_header = dict.get(headers, "http2-settings")
           
-          // Check for h2c upgrade using functional approach
-          let h2c_result = 
-            connection_header
-            |> result.try(fn(connection) {
-              upgrade_header
-              |> result.try(fn(upgrade) {
-                settings_header
-                |> result.try(fn(settings) {
-                  case upgrade == "h2c" && string.contains(string.lowercase(connection), "upgrade") {
-                    True -> Ok(H2cUpgrade(request: req, settings: settings))
-                    False -> Error(Nil)
-                  }
-                })
-              })
-            })
-          
-          h2c_result
-          |> result.unwrap(Http1Request(request: req, version: Http11))
-          |> Ok
+          // Check for h2c upgrade
+          case connection_header, upgrade_header, settings_header {
+            Ok(connection), Ok("h2c"), Ok(settings) -> {
+              // Check if connection header contains "Upgrade"
+              case string.contains(string.lowercase(connection), "upgrade") {
+                True -> {
+                  // This is an h2c upgrade request
+                  Ok(H2cUpgrade(request: req, settings: settings))
+                }
+                False -> Ok(Http1Request(request: req, version: Http11))
+              }
+            }
+            _, _, _ -> Ok(Http1Request(request: req, version: Http11))
+          }
         }
         _ -> Error(InvalidHttpVersion)
       }

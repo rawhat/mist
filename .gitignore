@@ -2,4 +2,3 @@
 *.ez
 build
 erl_crash.dump
-.claude/
