@@ -2,7 +2,6 @@ import gleam/bit_array
 import gleam/bytes_tree
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http/response
-import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/result
@@ -142,7 +141,7 @@ pub fn with_func_and_config(
               )
               |> result.map(Http2)
               |> result.map_error(Error)
-            http.H2cUpgrade(req, settings) -> {
+            http.H2cUpgrade(_req, _settings) -> {
               let resp_101 = 
                 response.new(101)
                 |> response.set_body(bytes_tree.new())

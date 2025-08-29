@@ -5,12 +5,8 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import gleam/string
-import logging
-import mist/internal/buffer.{type Buffer}
-import mist/internal/buffer as buffer_module
+import mist/internal/buffer.{type Buffer} as buffer_module
 import mist/internal/http.{type Connection, type Handler, Connection, Initial}
-import mist/internal/http as http_module
 import mist/internal/http2.{type HpackContext, type Http2Settings, Http2Settings}
 import mist/internal/http2/flow_control
 import mist/internal/http2/frame.{
@@ -118,7 +114,7 @@ pub fn call(
     False -> Ok(state)
     True -> {
       let _ = case set_active {
-        True -> http_module.set_socket_active(conn.transport, conn.socket)
+        True -> http.set_socket_active(conn.transport, conn.socket)
         False -> Ok(Nil)
       }
       
@@ -280,16 +276,15 @@ fn handle_frame(
           data_size,
         )
 
-      use update <- result.map(
-        state.streams
-        |> dict.get(identifier)
-        |> result.map(stream.receive_data(_, data_size))
-        // TODO:  this whole business should much more gracefully handle
-        // individual stream errors rather than just blowin up
-        |> result.replace_error("Stream failed to receive data")
-        // TODO:  handle end of stream?
-      )
-      let #(new_stream, increment) = update
+      state.streams
+      |> dict.get(identifier)
+      |> result.map(stream.receive_data(_, data_size))
+      // TODO:  this whole business should much more gracefully handle
+      // individual stream errors rather than just blowin up
+      |> result.replace_error("Stream failed to receive data")
+      // TODO:  handle end of stream?
+      |> result.map(fn(update) {
+        let #(new_stream, increment) = update
         let _ = case conn_window_increment > 0 {
           True -> {
             http2.send_frame(

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gleam check:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

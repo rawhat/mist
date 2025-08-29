@@ -5,7 +5,6 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import gleam/string
 import glisten/socket.{type Socket, type SocketReason}
 import glisten/transport.{type Transport}
 import mist/internal/http.{type Connection}
