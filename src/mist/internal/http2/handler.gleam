@@ -63,10 +63,7 @@ pub fn upgrade_with_settings(
   self: Subject(SendMessage),
   custom_settings: Option(http2.Http2Settings),
 ) -> Result(State, String) {
-  let initial_settings = case custom_settings {
-    Some(settings) -> settings
-    None -> http2.default_settings()
-  }
+  let initial_settings = option.unwrap(custom_settings, http2.default_settings())
   let settings_frame = frame.Settings(
     ack: False,
     settings: [
@@ -75,10 +72,10 @@ pub fn upgrade_with_settings(
       frame.MaxFrameSize(initial_settings.max_frame_size),
     ]
     |> fn(settings) {
-      case initial_settings.max_header_list_size {
-        Some(size) -> [frame.MaxHeaderListSize(size), ..settings]
-        None -> settings
-      }
+      initial_settings.max_header_list_size
+      |> option.map(frame.MaxHeaderListSize)
+      |> option.map(fn(header_setting) { [header_setting, ..settings] })
+      |> option.unwrap(settings)
     },
   )
 
@@ -110,11 +107,8 @@ pub fn call(
   conn: Connection,
   handler: Handler,
 ) -> Result(State, Result(Nil, String)) {
-  // Check for HTTP/2 connection preface first
   let #(cleaned_buffer, should_continue, set_active) = case state.frame_buffer.data {
-    // Check for HTTP/2 connection preface: "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
     <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8, rest:bits>> -> {
-      logging.log(logging.Debug, "Received HTTP/2 connection preface")
       #(buffer_module.new(rest), True, True)
     }
     _ -> #(state.frame_buffer, True, False)
@@ -123,12 +117,8 @@ pub fn call(
   case should_continue {
     False -> Ok(state)
     True -> {
-      // Set socket to active true after processing preface
       let _ = case set_active {
-        True -> {
-          logging.log(logging.Debug, "Setting socket to active:true after preface")
-          http_module.set_socket_active(conn.transport, conn.socket)
-        }
+        True -> http_module.set_socket_active(conn.transport, conn.socket)
         False -> Ok(Nil)
       }
       
@@ -218,26 +208,26 @@ fn handle_frame(
           )
         }
         _stream_id -> {
-          state.streams
-          |> dict.get(identifier)
-          |> result.replace_error("Window update for non-existent stream")
-          |> result.try(fn(stream) {
-            case
-              flow_control.update_send_window(stream.send_window_size, amount)
-            {
-              Ok(update) -> {
-                let new_stream =
-                  stream.State(..stream, send_window_size: update)
-                Ok(
-                  State(
-                    ..state,
-                    streams: dict.insert(state.streams, identifier, new_stream),
-                  ),
-                )
-              }
-              _err -> Error("Failed to update send window")
+          use stream <- result.try(
+            state.streams
+            |> dict.get(identifier)
+            |> result.replace_error("Window update for non-existent stream")
+          )
+          case
+            flow_control.update_send_window(stream.send_window_size, amount)
+          {
+            Ok(update) -> {
+              let new_stream =
+                stream.State(..stream, send_window_size: update)
+              Ok(
+                State(
+                  ..state,
+                  streams: dict.insert(state.streams, identifier, new_stream),
+                ),
+              )
             }
-          })
+            _err -> Error("Failed to update send window")
+          }
         }
       }
     }
@@ -290,15 +280,16 @@ fn handle_frame(
           data_size,
         )
 
-      state.streams
-      |> dict.get(identifier)
-      |> result.map(stream.receive_data(_, data_size))
-      // TODO:  this whole business should much more gracefully handle
-      // individual stream errors rather than just blowin up
-      |> result.replace_error("Stream failed to receive data")
-      // TODO:  handle end of stream?
-      |> result.map(fn(update) {
-        let #(new_stream, increment) = update
+      use update <- result.map(
+        state.streams
+        |> dict.get(identifier)
+        |> result.map(stream.receive_data(_, data_size))
+        // TODO:  this whole business should much more gracefully handle
+        // individual stream errors rather than just blowin up
+        |> result.replace_error("Stream failed to receive data")
+        // TODO:  handle end of stream?
+      )
+      let #(new_stream, increment) = update
         let _ = case conn_window_increment > 0 {
           True -> {
             http2.send_frame(
@@ -346,13 +337,11 @@ fn handle_frame(
       |> result.replace_error("Failed to respond to settings ACK")
     }
     None, frame.GoAway(..) -> {
-      logging.log(logging.Debug, "byteeee~~")
       // TODO:  Normal exit
       Error("Going away...")
     }
     // TODO:  obviously fill these out
-    _, frame -> {
-      logging.log(logging.Debug, "Ignoring frame: " <> string.inspect(frame))
+    _, _frame -> {
       Ok(state)
     }
   }

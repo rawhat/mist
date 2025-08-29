@@ -8,7 +8,6 @@ import gleam/result
 import gleam/string
 import glisten/socket.{type Socket, type SocketReason}
 import glisten/transport.{type Transport}
-import logging
 import mist/internal/http.{type Connection}
 import mist/internal/http2/frame.{
   type Frame, type PushState, type Setting, type StreamIdentifier, Complete,
@@ -65,28 +64,25 @@ fn send_headers(
   end_stream: Bool,
   stream_identifier: StreamIdentifier(Frame),
 ) -> Result(HpackContext, String) {
-  hpack_encode(context, headers)
-  |> result.try(fn(pair) {
-    let #(headers, new_context) = pair
-    let header_frame =
-      Header(
-        data: Complete(headers),
-        end_stream: end_stream,
-        identifier: stream_identifier,
-        priority: None,
-      )
-    let encoded = frame.encode(header_frame)
-    case
-      transport.send(
-        conn.transport,
-        conn.socket,
-        bytes_tree.from_bit_array(encoded),
-      )
-    {
-      Ok(_nil) -> Ok(new_context)
-      Error(_reason) -> Error("Failed to send HTTP/2 headers")
-    }
-  })
+  use #(headers, new_context) <- result.try(hpack_encode(context, headers))
+  let header_frame =
+    Header(
+      data: Complete(headers),
+      end_stream: end_stream,
+      identifier: stream_identifier,
+      priority: None,
+    )
+  let encoded = frame.encode(header_frame)
+  case
+    transport.send(
+      conn.transport,
+      conn.socket,
+      bytes_tree.from_bit_array(encoded),
+    )
+  {
+    Ok(_nil) -> Ok(new_context)
+    Error(_reason) -> Error("Failed to send HTTP/2 headers")
+  }
 }
 
 fn send_data(
@@ -104,8 +100,7 @@ fn send_data(
     conn.socket,
     bytes_tree.from_bit_array(encoded),
   )
-  |> result.map_error(fn(err) {
-    logging.log(logging.Debug, "failed to send :(  " <> string.inspect(err))
+  |> result.map_error(fn(_err) {
     "Failed to send HTTP/2 data"
   })
 }
@@ -136,13 +131,11 @@ pub fn send_bytes_tree(
   case bytes_tree.byte_size(resp.body) {
     0 -> send_headers(context, conn, headers, True, id)
     _ -> {
-      send_headers(context, conn, headers, False, id)
-      |> result.try(fn(context) {
-        // TODO:  this should be broken up by window size
-        // TODO:  fix end_stream
-        send_data(conn, bytes_tree.to_bit_array(resp.body), id, True)
-        |> result.replace(context)
-      })
+      use context <- result.try(send_headers(context, conn, headers, False, id))
+      // TODO:  this should be broken up by window size
+      // TODO:  fix end_stream
+      send_data(conn, bytes_tree.to_bit_array(resp.body), id, True)
+      |> result.replace(context)
     }
   }
 }

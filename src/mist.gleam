@@ -532,10 +532,10 @@ pub fn http2_max_concurrent_streams(
   builder: Builder(in, out),
   max: Int,
 ) -> Builder(in, out) {
-  let config = case builder.http2_config {
-    Some(c) -> Http2Config(..c, max_concurrent_streams: max)
-    None -> Http2Config(..default_http2_config(), max_concurrent_streams: max)
-  }
+  let config = 
+    builder.http2_config
+    |> option.unwrap(default_http2_config())
+    |> fn(c) { Http2Config(..c, max_concurrent_streams: max) }
   Builder(..builder, http2_config: Some(config))
 }
 
@@ -544,10 +544,10 @@ pub fn http2_initial_window_size(
   builder: Builder(in, out),
   size: Int,
 ) -> Builder(in, out) {
-  let config = case builder.http2_config {
-    Some(c) -> Http2Config(..c, initial_window_size: size)
-    None -> Http2Config(..default_http2_config(), initial_window_size: size)
-  }
+  let config = 
+    builder.http2_config
+    |> option.unwrap(default_http2_config())
+    |> fn(c) { Http2Config(..c, initial_window_size: size) }
   Builder(..builder, http2_config: Some(config))
 }
 
@@ -556,10 +556,10 @@ pub fn http2_max_frame_size(
   builder: Builder(in, out),
   size: Int,
 ) -> Builder(in, out) {
-  let config = case builder.http2_config {
-    Some(c) -> Http2Config(..c, max_frame_size: size)
-    None -> Http2Config(..default_http2_config(), max_frame_size: size)
-  }
+  let config = 
+    builder.http2_config
+    |> option.unwrap(default_http2_config())
+    |> fn(c) { Http2Config(..c, max_frame_size: size) }
   Builder(..builder, http2_config: Some(config))
 }
 
@@ -568,11 +568,10 @@ pub fn http2_max_header_list_size(
   builder: Builder(in, out),
   size: Int,
 ) -> Builder(in, out) {
-  let config = case builder.http2_config {
-    Some(c) -> Http2Config(..c, max_header_list_size: Some(size))
-    None ->
-      Http2Config(..default_http2_config(), max_header_list_size: Some(size))
-  }
+  let config = 
+    builder.http2_config
+    |> option.unwrap(default_http2_config())
+    |> fn(c) { Http2Config(..c, max_header_list_size: Some(size)) }
   Builder(..builder, http2_config: Some(config))
 }
 
@@ -610,10 +609,7 @@ pub fn start(
   builder: Builder(Connection, ResponseData),
 ) -> Result(actor.Started(Supervisor), actor.StartError) {
   let listener_name = process.new_name("glisten_listener")
-  let http2_settings = case builder.http2_config {
-    Some(config) -> Some(convert_http2_config(config))
-    None -> None
-  }
+  let http2_settings = option.map(builder.http2_config, convert_http2_config)
   fn(req) { convert_body_types(builder.handler(req)) }
   |> handler.with_func_and_config(http2_settings, _)
   |> glisten.new(handler.init_with_config(http2_settings), _)
