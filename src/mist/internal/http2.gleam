@@ -5,8 +5,10 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import glisten/socket.{type Socket, type SocketReason}
 import glisten/transport.{type Transport}
+import logging
 import mist/internal/http.{type Connection}
 import mist/internal/http2/frame.{
   type Frame, type PushState, type Setting, type StreamIdentifier, Complete,
@@ -100,7 +102,8 @@ fn send_data(
     conn.socket,
     bytes_tree.from_bit_array(encoded),
   )
-  |> result.map_error(fn(_err) {
+  |> result.map_error(fn(err) {
+    logging.log(logging.Debug, "failed to send :(  " <> string.inspect(err))
     "Failed to send HTTP/2 data"
   })
 }

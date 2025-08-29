@@ -2,6 +2,7 @@ import gleam/bit_array
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import logging
 
 pub opaque type StreamIdentifier(phantom) {
   StreamIdentifier(Int)
@@ -235,7 +236,10 @@ fn parse_header(
             ),
           )
         }
-        _ -> Error(ProtocolError)
+        _ -> {
+          logging.log(logging.Debug, "oh noes!")
+          Error(ProtocolError)
+        }
       }
     }
     _ -> {

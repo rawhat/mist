@@ -340,6 +340,7 @@ pub fn parse_request(
       case version {
         #(1, 0) -> Ok(Http1Request(request: req, version: Http1))
         #(1, 1) -> {
+          // Debug: log all headers
           let connection_header = dict.get(headers, "connection")
           let upgrade_header = dict.get(headers, "upgrade")
           let settings_header = dict.get(headers, "http2-settings")
