@@ -104,7 +104,9 @@ pub fn call(
   conn: Connection,
   handler: Handler,
 ) -> Result(State, Result(Nil, String)) {
+  // Check for HTTP/2 connection preface first
   let #(cleaned_buffer, should_continue, set_active) = case state.frame_buffer.data {
+    // Check for HTTP/2 connection preface: "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
     <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8, rest:bits>> -> {
       #(buffer.new(rest), True, True)
     }
@@ -114,6 +116,7 @@ pub fn call(
   case should_continue {
     False -> Ok(state)
     True -> {
+      // Set socket to active true after processing preface
       let _ = case set_active {
         True -> http.set_socket_active(conn.transport, conn.socket)
         False -> Ok(Nil)
