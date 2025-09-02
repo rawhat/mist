@@ -491,7 +491,7 @@ fn handle_frame(
       Error(error_msg)
     }
     // TODO:  obviously fill these out
-    _, _frame -> {
+    _, frame -> {
       logging.log(logging.Debug, "Ignoring frame: " <> string.inspect(frame))
       Ok(state)
     }
