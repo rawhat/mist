@@ -75,9 +75,13 @@ pub type DecodeError {
 }
 
 pub fn from_header(value: BitArray) -> String {
-  let assert Ok(value) = bit_array.to_string(value)
-
-  string.lowercase(value)
+  case bit_array.to_string(value) {
+    Ok(value) -> string.lowercase(value)
+    Error(_) -> {
+      // Invalid UTF-8 in header, replace with safe placeholder
+      "invalid-utf8-header"
+    }
+  }
 }
 
 pub fn parse_headers(
@@ -89,7 +93,13 @@ pub fn parse_headers(
   case decode_packet(HttphBin, bs, []) {
     Ok(BinaryData(HttpHeader(_, _field, field, value), rest)) -> {
       let field = from_header(field)
-      let assert Ok(value) = bit_array.to_string(value)
+      let value = case bit_array.to_string(value) {
+        Ok(v) -> v
+        Error(_) -> {
+          // Invalid UTF-8 in header value, replace with safe placeholder
+          "invalid-utf8-value"
+        }
+      }
       headers
       |> dict.insert(field, value)
       |> parse_headers(rest, socket, transport, _)
@@ -146,20 +156,27 @@ pub fn parse_chunk(string: BitArray) -> Chunk {
   case binary_split(string, <<"\r\n":utf8>>) {
     [<<"0":utf8>>, _] -> Complete
     [chunk_size, rest] -> {
-      let assert Ok(chunk_size) = bit_array.to_string(chunk_size)
-      case int.base_parse(chunk_size, 16) {
-        Ok(size) -> {
-          let size = size * 8
-          case rest {
-            <<next_chunk:bits-size(size), 13:int, 10:int, rest:bits>> -> {
-              Chunk(data: next_chunk, buffer: buffer.new(rest))
+      case bit_array.to_string(chunk_size) {
+        Ok(chunk_size_str) -> {
+          case int.base_parse(chunk_size_str, 16) {
+            Ok(size) -> {
+              let size = size * 8
+              case rest {
+                <<next_chunk:bits-size(size), 13:int, 10:int, rest:bits>> -> {
+                  Chunk(data: next_chunk, buffer: buffer.new(rest))
+                }
+                _ -> {
+                  Chunk(data: <<>>, buffer: buffer.new(string))
+                }
+              }
             }
-            _ -> {
+            Error(_) -> {
               Chunk(data: <<>>, buffer: buffer.new(string))
             }
           }
         }
         Error(_) -> {
+          // Invalid UTF-8 in chunk size
           Chunk(data: <<>>, buffer: buffer.new(string))
         }
       }

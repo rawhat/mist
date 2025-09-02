@@ -532,7 +532,7 @@ pub fn http2_max_concurrent_streams(
   builder: Builder(in, out),
   max: Int,
 ) -> Builder(in, out) {
-  let config = 
+  let config =
     builder.http2_config
     |> option.unwrap(default_http2_config())
     |> fn(c) { Http2Config(..c, max_concurrent_streams: max) }
@@ -544,7 +544,7 @@ pub fn http2_initial_window_size(
   builder: Builder(in, out),
   size: Int,
 ) -> Builder(in, out) {
-  let config = 
+  let config =
     builder.http2_config
     |> option.unwrap(default_http2_config())
     |> fn(c) { Http2Config(..c, initial_window_size: size) }
@@ -556,7 +556,7 @@ pub fn http2_max_frame_size(
   builder: Builder(in, out),
   size: Int,
 ) -> Builder(in, out) {
-  let config = 
+  let config =
     builder.http2_config
     |> option.unwrap(default_http2_config())
     |> fn(c) { Http2Config(..c, max_frame_size: size) }
@@ -568,7 +568,7 @@ pub fn http2_max_header_list_size(
   builder: Builder(in, out),
   size: Int,
 ) -> Builder(in, out) {
-  let config = 
+  let config =
     builder.http2_config
     |> option.unwrap(default_http2_config())
     |> fn(c) { Http2Config(..c, max_header_list_size: Some(size)) }

@@ -85,8 +85,10 @@ pub fn new(
             ..connection,
             body: Stream(
               selector: process.map_selector(state.data_selector, fn(val) {
-                let assert Data(bits, ..) = val
-                bits
+                case val {
+                  Data(bits, ..) -> bits
+                  _ -> <<>>
+                }
               }),
               attempts: 0,
               data: <<>>,
@@ -110,9 +112,15 @@ pub fn new(
         |> result.unwrap_both
       }
       Done, True -> {
-        let assert Some(resp) = state.pending_response
-        process.send(sender, Send(identifier, resp))
-        actor.continue(state)
+        case state.pending_response {
+          Some(resp) -> {
+            process.send(sender, Send(identifier, resp))
+            actor.continue(state)
+          }
+          None -> {
+            actor.stop_abnormal("Received Done but no pending response")
+          }
+        }
       }
       Data(bits: bits, end: True), _ -> {
         process.send(state.data_subject, Done)

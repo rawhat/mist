@@ -70,14 +70,37 @@ file_close(File) ->
       {error, unknown_file_error}
   end.
 
+% BOUNDS CHECKING: Prevent HPACK library crashes from malformed input
+% The external HPACK library crashes on certain malformed inputs:
+% - hpack_integer:decode(<<>>, 28, 268435455) causes function_clause error
+% - Occurs when HTTP/2 frames contain invalid HPACK data with empty bitarrays
+% - Added bounds checking to prevent crashes during adversarial testing
 hpack_decode(Context, Bin) ->
-  case hpack:decode(Bin, Context) of
-    {ok, {Headers, NewContext}} ->
-      {ok, {Headers, NewContext}};
-    {error, compression_error} ->
-      {error, {hpack_error, compression}};
-    {error, {compression_error, {bad_header_packet, Binary}}} ->
-      {error, {hpack_error, {bad_header_packet, Binary}}}
+  % Bounds checking to prevent crashes from malformed HPACK data
+  case byte_size(Bin) of
+    0 ->
+      % Empty binary would cause hpack_integer:decode to crash
+      {error, {hpack_error, {bad_header_packet, Bin}}};
+    Size when Size > 16777215 ->
+      % Reject excessively large HPACK data (16MB max per HTTP/2 spec)
+      {error, {hpack_error, {bad_header_packet, Bin}}};
+    _ ->
+      % Additional safety: catch any remaining crashes from malformed data
+      try hpack:decode(Bin, Context) of
+        {ok, {Headers, NewContext}} ->
+          {ok, {Headers, NewContext}};
+        {error, compression_error} ->
+          {error, {hpack_error, compression}};
+        {error, {compression_error, {bad_header_packet, Binary}}} ->
+          {error, {hpack_error, {bad_header_packet, Binary}}}
+      catch
+        error:function_clause ->
+          {error, {hpack_error, {bad_header_packet, Bin}}};
+        error:_ ->
+          {error, {hpack_error, {bad_header_packet, Bin}}};
+        throw:_ ->
+          {error, {hpack_error, {bad_header_packet, Bin}}}
+      end
   end.
 
 hpack_encode(Context, Headers) ->
