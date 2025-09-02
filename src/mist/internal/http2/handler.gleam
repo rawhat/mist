@@ -1,10 +1,13 @@
 import gleam/bit_array
+import gleam/bool
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
+import logging
 import mist/internal/buffer.{type Buffer}
 import mist/internal/http.{type Connection, type Handler, Connection, Initial}
 import mist/internal/http2.{type HpackContext, type Http2Settings, Http2Settings}
@@ -124,67 +127,62 @@ pub fn call(
     _ -> #(state.frame_buffer, True, False)
   }
 
-  case should_continue {
-    False -> Ok(state)
-    True -> {
-      let _ = case set_active {
-        True -> http.set_socket_active(conn.transport, conn.socket)
-        False -> Ok(Nil)
-      }
+  use <- bool.guard(!should_continue, Ok(state))
 
-      let state = State(..state, frame_buffer: cleaned_buffer)
-      // Only decode if we have at least 9 bytes (minimum frame header size)
-      case bit_array.byte_size(state.frame_buffer.data) {
-        size if size < 9 -> Ok(state)
-        // Not enough data for a frame header
-        _ ->
-          case frame.decode(state.frame_buffer.data) {
-            Ok(#(frame, rest)) -> {
-              let new_state = State(..state, frame_buffer: buffer.new(rest))
-              case handle_frame(frame, new_state, conn, handler) {
-                Ok(updated) -> call(updated, conn, handler)
-                Error(reason) -> Error(Error(reason))
-              }
-            }
-            Error(frame.NoError) -> Ok(state)
-            Error(connection_error) -> {
-              // Send GOAWAY frame with last good stream ID
-              let last_stream_id = get_last_stream_id(state)
-              let _ =
-                http2.send_frame(
-                  frame.GoAway(
-                    data: <<>>,
-                    error: connection_error,
-                    last_stream_id: frame.stream_identifier(last_stream_id),
-                  ),
-                  conn.socket,
-                  conn.transport,
-                )
+  let _ = case set_active {
+    True -> http.set_socket_active(conn.transport, conn.socket)
+    False -> Ok(Nil)
+  }
 
-              // Return error to terminate connection
-              let error_msg = case connection_error {
-                frame.ProtocolError -> "Protocol error"
-                frame.InternalError -> "Internal error"
-                frame.FlowControlError -> "Flow control error"
-                frame.SettingsTimeout -> "Settings timeout"
-                frame.StreamClosed -> "Stream closed error"
-                frame.FrameSizeError -> "Frame size error"
-                frame.RefusedStream -> "Refused stream"
-                frame.Cancel -> "Cancelled"
-                frame.CompressionError -> "Compression error"
-                frame.ConnectError -> "Connect error"
-                frame.EnhanceYourCalm -> "Enhance your calm"
-                frame.InadequateSecurity -> "Inadequate security"
-                frame.Http11Required -> "HTTP/1.1 required"
-                frame.Unsupported(code) ->
-                  "Unsupported error code: " <> int.to_string(code)
-                frame.NoError -> "No error"
-              }
-              Error(Error(error_msg))
-            }
+  let state = State(..state, frame_buffer: cleaned_buffer)
+  case bit_array.byte_size(state.frame_buffer.data) {
+    size if size < 9 -> Ok(state)
+    _ ->
+      case frame.decode(state.frame_buffer.data) {
+        Ok(#(frame, rest)) -> {
+          let new_state = State(..state, frame_buffer: buffer.new(rest))
+          case handle_frame(frame, new_state, conn, handler) {
+            Ok(updated) -> call(updated, conn, handler)
+            Error(reason) -> Error(Error(reason))
           }
+        }
+        Error(frame.NoError) -> Ok(state)
+        Error(connection_error) -> {
+          // Send GOAWAY frame with last good stream ID
+          let last_stream_id = get_last_stream_id(state)
+          let _ =
+            http2.send_frame(
+              frame.GoAway(
+                data: <<>>,
+                error: connection_error,
+                last_stream_id: frame.stream_identifier(last_stream_id),
+              ),
+              conn.socket,
+              conn.transport,
+            )
+
+          // Return error to terminate connection
+          let error_msg = case connection_error {
+            frame.ProtocolError -> "Protocol error"
+            frame.InternalError -> "Internal error"
+            frame.FlowControlError -> "Flow control error"
+            frame.SettingsTimeout -> "Settings timeout"
+            frame.StreamClosed -> "Stream closed error"
+            frame.FrameSizeError -> "Frame size error"
+            frame.RefusedStream -> "Refused stream"
+            frame.Cancel -> "Cancelled"
+            frame.CompressionError -> "Compression error"
+            frame.ConnectError -> "Connect error"
+            frame.EnhanceYourCalm -> "Enhance your calm"
+            frame.InadequateSecurity -> "Inadequate security"
+            frame.Http11Required -> "HTTP/1.1 required"
+            frame.Unsupported(code) ->
+              "Unsupported error code: " <> int.to_string(code)
+            frame.NoError -> "No error"
+          }
+          Error(Error(error_msg))
+        }
       }
-    }
   }
 }
 
@@ -277,7 +275,6 @@ fn handle_frame(
       }
     }
     None, frame.Header(Continued(data), end_stream, identifier, priority) -> {
-      // Incomplete header frame - store as fragment
       Ok(
         State(
           ..state,
@@ -299,7 +296,7 @@ fn handle_frame(
         )
       use #(headers, context) <- result.try(
         http2.hpack_decode(state.receive_hpack_context, data)
-        |> result.map_error(fn(_) { "Failed to decode HPACK headers" })
+        |> result.map_error(fn(_) { "Failed to decode HPACK headers" }),
       )
 
       let pending_content_length =
@@ -310,7 +307,7 @@ fn handle_frame(
 
       use new_stream <- result.try(
         stream.new(identifier, handler, headers, conn, state.self, end_stream)
-        |> result.map_error(fn(_) { "Failed to create new stream" })
+        |> result.map_error(fn(_) { "Failed to create new stream" }),
       )
       process.send(new_stream.data, Ready)
 
@@ -495,6 +492,7 @@ fn handle_frame(
     }
     // TODO:  obviously fill these out
     _, _frame -> {
+      logging.log(logging.Debug, "Ignoring frame: " <> string.inspect(frame))
       Ok(state)
     }
   }
