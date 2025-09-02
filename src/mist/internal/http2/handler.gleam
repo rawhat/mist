@@ -41,6 +41,16 @@ pub fn receive_hpack_context(state: State, context: HpackContext) -> State {
   State(..state, receive_hpack_context: context)
 }
 
+fn get_last_stream_id(state: State) -> Int {
+  dict.fold(state.streams, 0, fn(max_id, id, _stream) {
+    let stream_id = frame.get_stream_identifier(id)
+    case stream_id > max_id {
+      True -> stream_id
+      False -> max_id
+    }
+  })
+}
+
 pub fn append_data(state: State, data: BitArray) -> State {
   State(..state, frame_buffer: buffer.append(state.frame_buffer, data))
 }
@@ -123,21 +133,56 @@ pub fn call(
       }
 
       let state = State(..state, frame_buffer: cleaned_buffer)
-      case frame.decode(state.frame_buffer.data) {
-        Ok(#(frame, rest)) -> {
-          let new_state = State(..state, frame_buffer: buffer.new(rest))
-          case handle_frame(frame, new_state, conn, handler) {
-            Ok(updated) -> call(updated, conn, handler)
-            Error(reason) -> Error(Error(reason))
+      // Only decode if we have at least 9 bytes (minimum frame header size)
+      case bit_array.byte_size(state.frame_buffer.data) {
+        size if size < 9 -> Ok(state)
+        // Not enough data for a frame header
+        _ ->
+          case frame.decode(state.frame_buffer.data) {
+            Ok(#(frame, rest)) -> {
+              let new_state = State(..state, frame_buffer: buffer.new(rest))
+              case handle_frame(frame, new_state, conn, handler) {
+                Ok(updated) -> call(updated, conn, handler)
+                Error(reason) -> Error(Error(reason))
+              }
+            }
+            Error(frame.NoError) -> Ok(state)
+            Error(connection_error) -> {
+              // Send GOAWAY frame with last good stream ID
+              let last_stream_id = get_last_stream_id(state)
+              let _ =
+                http2.send_frame(
+                  frame.GoAway(
+                    data: <<>>,
+                    error: connection_error,
+                    last_stream_id: frame.stream_identifier(last_stream_id),
+                  ),
+                  conn.socket,
+                  conn.transport,
+                )
+
+              // Return error to terminate connection
+              let error_msg = case connection_error {
+                frame.ProtocolError -> "Protocol error"
+                frame.InternalError -> "Internal error"
+                frame.FlowControlError -> "Flow control error"
+                frame.SettingsTimeout -> "Settings timeout"
+                frame.StreamClosed -> "Stream closed error"
+                frame.FrameSizeError -> "Frame size error"
+                frame.RefusedStream -> "Refused stream"
+                frame.Cancel -> "Cancelled"
+                frame.CompressionError -> "Compression error"
+                frame.ConnectError -> "Connect error"
+                frame.EnhanceYourCalm -> "Enhance your calm"
+                frame.InadequateSecurity -> "Inadequate security"
+                frame.Http11Required -> "HTTP/1.1 required"
+                frame.Unsupported(code) ->
+                  "Unsupported error code: " <> int.to_string(code)
+                frame.NoError -> "No error"
+              }
+              Error(Error(error_msg))
+            }
           }
-        }
-        Error(frame.NoError) -> Ok(state)
-        Error(_connection_error) -> {
-          // TODO:
-          //  - send GOAWAY with last good stream ID
-          //  - close the connection
-          Ok(state)
-        }
       }
     }
   }
@@ -152,6 +197,7 @@ fn handle_frame(
   handler: Handler,
 ) -> Result(State, String) {
   case state.fragment, frame {
+    // Handle existing continuation frame logic (simplified)
     Some(frame.Header(
       identifier: id1,
       data: Continued(existing),
@@ -230,6 +276,20 @@ fn handle_frame(
         }
       }
     }
+    None, frame.Header(Continued(data), end_stream, identifier, priority) -> {
+      // Incomplete header frame - store as fragment
+      Ok(
+        State(
+          ..state,
+          fragment: Some(frame.Header(
+            data: Continued(data),
+            end_stream: end_stream,
+            identifier: identifier,
+            priority: priority,
+          )),
+        ),
+      )
+    }
     None, frame.Header(Complete(data), end_stream, identifier, _priority) -> {
       let conn =
         Connection(
@@ -237,8 +297,10 @@ fn handle_frame(
           socket: conn.socket,
           transport: conn.transport,
         )
-      let assert Ok(#(headers, context)) =
+      use #(headers, context) <- result.try(
         http2.hpack_decode(state.receive_hpack_context, data)
+        |> result.map_error(fn(_) { "Failed to decode HPACK headers" })
+      )
 
       let pending_content_length =
         headers
@@ -246,16 +308,10 @@ fn handle_frame(
         |> result.try(int.parse)
         |> option.from_result
 
-      let assert Ok(new_stream) =
-        stream.new(
-          identifier,
-          handler,
-          headers,
-          conn,
-          state.self,
-          // fn(resp) { process.send(state.self, Send(identifier, resp)) },
-          end_stream,
-        )
+      use new_stream <- result.try(
+        stream.new(identifier, handler, headers, conn, state.self, end_stream)
+        |> result.map_error(fn(_) { "Failed to create new stream" })
+      )
       process.send(new_stream.data, Ready)
 
       let stream_state =
@@ -279,48 +335,85 @@ fn handle_frame(
           data_size,
         )
 
-      state.streams
-      |> dict.get(identifier)
-      |> result.map(stream.receive_data(_, data_size))
-      // TODO:  this whole business should much more gracefully handle
-      // individual stream errors rather than just blowin up
-      |> result.replace_error("Stream failed to receive data")
-      // TODO:  handle end of stream?
-      |> result.map(fn(update) {
-        let #(new_stream, increment) = update
-        let _ = case conn_window_increment > 0 {
-          True -> {
+      case dict.get(state.streams, identifier) {
+        Error(_) -> {
+          // Stream doesn't exist - send RST_STREAM
+          let _ =
             http2.send_frame(
-              frame.WindowUpdate(
-                identifier: frame.stream_identifier(0),
-                amount: conn_window_increment,
+              frame.Termination(
+                error: frame.StreamClosed,
+                identifier: identifier,
               ),
               conn.socket,
               conn.transport,
             )
-          }
-          False -> Ok(Nil)
+          Ok(state)
         }
-        let _ = case increment > 0 {
-          True -> {
-            http2.send_frame(
-              frame.WindowUpdate(identifier: identifier, amount: increment),
-              conn.socket,
-              conn.transport,
-            )
+        Ok(stream_state) -> {
+          let #(updated_stream, increment) =
+            stream.receive_data(stream_state, data_size)
+
+          // Update stream state based on end_stream flag
+          let final_stream = case end_stream {
+            True ->
+              case updated_stream.state {
+                stream.Open ->
+                  stream.State(..updated_stream, state: stream.RemoteClosed)
+                stream.LocalClosed ->
+                  stream.State(..updated_stream, state: stream.Closed)
+                _ -> updated_stream
+              }
+            False -> updated_stream
           }
-          False -> Ok(Nil)
+
+          let updated_streams = case final_stream.state {
+            stream.Closed -> dict.delete(state.streams, identifier)
+            _ -> dict.insert(state.streams, identifier, final_stream)
+          }
+
+          let _ =
+            case conn_window_increment > 0 {
+              True -> {
+                http2.send_frame(
+                  frame.WindowUpdate(
+                    identifier: frame.stream_identifier(0),
+                    amount: conn_window_increment,
+                  ),
+                  conn.socket,
+                  conn.transport,
+                )
+              }
+              False -> Ok(Nil)
+            }
+            |> result.replace_error("Failed to send connection window update")
+
+          let _ =
+            case increment > 0 {
+              True -> {
+                http2.send_frame(
+                  frame.WindowUpdate(identifier: identifier, amount: increment),
+                  conn.socket,
+                  conn.transport,
+                )
+              }
+              False -> Ok(Nil)
+            }
+            |> result.replace_error("Failed to send stream window update")
+
+          process.send(
+            final_stream.subject,
+            stream.Data(bits: data, end: end_stream),
+          )
+
+          Ok(
+            State(
+              ..state,
+              streams: updated_streams,
+              receive_window_size: conn_receive_window_size,
+            ),
+          )
         }
-        process.send(
-          new_stream.subject,
-          stream.Data(bits: data, end: end_stream),
-        )
-        State(
-          ..state,
-          streams: dict.insert(state.streams, identifier, new_stream),
-          receive_window_size: conn_receive_window_size,
-        )
-      })
+      }
     }
     None, frame.Priority(..) -> {
       Ok(state)
@@ -328,15 +421,77 @@ fn handle_frame(
     None, frame.Settings(ack: True, ..) -> {
       Ok(state)
     }
-    // TODO:  update any settings from this
-    _, frame.Settings(..) -> {
+    _, frame.Settings(ack: False, settings: new_settings) -> {
+      // Update settings and HPACK context
+      use updated_settings <- result.try(
+        http2.update_settings(state.settings, new_settings)
+        |> result.map_error(fn(err) {
+          // Send GOAWAY for invalid settings
+          let _ =
+            http2.send_frame(
+              frame.GoAway(
+                data: <<>>,
+                error: frame.ProtocolError,
+                last_stream_id: frame.stream_identifier(get_last_stream_id(
+                  state,
+                )),
+              ),
+              conn.socket,
+              conn.transport,
+            )
+          err
+        }),
+      )
+
+      // Update HPACK context table size if changed
+      let updated_receive_context = case
+        updated_settings.header_table_size != state.settings.header_table_size
+      {
+        True ->
+          http2.hpack_max_table_size(
+            state.receive_hpack_context,
+            updated_settings.header_table_size,
+          )
+        False -> state.receive_hpack_context
+      }
+
+      let updated_send_context = case
+        updated_settings.header_table_size != state.settings.header_table_size
+      {
+        True ->
+          http2.hpack_max_table_size(
+            state.send_hpack_context,
+            updated_settings.header_table_size,
+          )
+        False -> state.send_hpack_context
+      }
+
+      let updated_state =
+        State(
+          ..state,
+          settings: updated_settings,
+          receive_hpack_context: updated_receive_context,
+          send_hpack_context: updated_send_context,
+        )
+
       http2.send_frame(frame.settings_ack(), conn.socket, conn.transport)
-      |> result.replace(state)
+      |> result.replace(updated_state)
       |> result.replace_error("Failed to respond to settings ACK")
     }
-    None, frame.GoAway(..) -> {
-      // TODO:  Normal exit
-      Error("Going away...")
+    None, frame.GoAway(data, error, last_stream_id) -> {
+      // Gracefully close streams above last_stream_id
+      let last_id = frame.get_stream_identifier(last_stream_id)
+      let _cleaned_streams =
+        dict.filter(state.streams, fn(stream_id, _stream) {
+          frame.get_stream_identifier(stream_id) <= last_id
+        })
+
+      let error_msg = case error {
+        frame.NoError -> "Connection closed gracefully"
+        _ -> "Connection closed with error: " <> bit_array.inspect(data)
+      }
+
+      Error(error_msg)
     }
     // TODO:  obviously fill these out
     _, _frame -> {

@@ -38,22 +38,25 @@ pub fn default_settings() -> Http2Settings {
 pub fn update_settings(
   current: Http2Settings,
   settings: List(Setting),
-) -> Http2Settings {
-  list.fold(settings, current, fn(settings, setting) {
-    case setting {
-      frame.HeaderTableSize(size) ->
-        Http2Settings(..settings, header_table_size: size)
-      frame.ServerPush(push) -> Http2Settings(..settings, server_push: push)
-      frame.MaxConcurrentStreams(max) ->
-        Http2Settings(..settings, max_concurrent_streams: max)
-      frame.InitialWindowSize(size) ->
-        Http2Settings(..settings, initial_window_size: size)
-      frame.MaxFrameSize(size) ->
-        Http2Settings(..settings, max_frame_size: size)
-      frame.MaxHeaderListSize(size) ->
-        Http2Settings(..settings, max_header_list_size: Some(size))
-    }
-  })
+) -> Result(Http2Settings, String) {
+  // Temporarily simplified - just apply settings without validation
+  let updated =
+    list.fold(settings, current, fn(settings, setting) {
+      case setting {
+        frame.HeaderTableSize(size) ->
+          Http2Settings(..settings, header_table_size: size)
+        frame.ServerPush(push) -> Http2Settings(..settings, server_push: push)
+        frame.MaxConcurrentStreams(max) ->
+          Http2Settings(..settings, max_concurrent_streams: max)
+        frame.InitialWindowSize(size) ->
+          Http2Settings(..settings, initial_window_size: size)
+        frame.MaxFrameSize(size) ->
+          Http2Settings(..settings, max_frame_size: size)
+        frame.MaxHeaderListSize(size) ->
+          Http2Settings(..settings, max_header_list_size: Some(size))
+      }
+    })
+  Ok(updated)
 }
 
 fn send_headers(
@@ -99,9 +102,7 @@ fn send_data(
     conn.socket,
     bytes_tree.from_bit_array(encoded),
   )
-  |> result.map_error(fn(_err) {
-    "Failed to send HTTP/2 data"
-  })
+  |> result.map_error(fn(_err) { "Failed to send HTTP/2 data" })
 }
 
 // TODO:  handle max frame size
@@ -131,8 +132,7 @@ pub fn send_bytes_tree(
     0 -> send_headers(context, conn, headers, True, id)
     _ -> {
       use context <- result.try(send_headers(context, conn, headers, False, id))
-      // TODO:  this should be broken up by window size
-      // TODO:  fix end_stream
+      // TODO: Apply flow control improvements later
       send_data(conn, bytes_tree.to_bit_array(resp.body), id, True)
       |> result.replace(context)
     }

@@ -344,7 +344,7 @@ pub fn parse_request(
           let connection_header = dict.get(headers, "connection")
           let upgrade_header = dict.get(headers, "upgrade")
           let settings_header = dict.get(headers, "http2-settings")
-          
+
           // Check for h2c upgrade
           case connection_header, upgrade_header, settings_header {
             Ok(connection), Ok("h2c"), Ok(settings) -> {
@@ -694,10 +694,16 @@ pub fn set_socket_packet_mode(
 }
 
 @external(erlang, "mist_ffi", "set_socket_active")
-fn ffi_set_socket_active(transport: atom.Atom, socket: Socket) -> Result(Nil, Nil)
+fn ffi_set_socket_active(
+  transport: atom.Atom,
+  socket: Socket,
+) -> Result(Nil, Nil)
 
 @external(erlang, "mist_ffi", "set_socket_active_continuous")
-fn ffi_set_socket_active_continuous(transport: atom.Atom, socket: Socket) -> Result(Nil, Nil)
+fn ffi_set_socket_active_continuous(
+  transport: atom.Atom,
+  socket: Socket,
+) -> Result(Nil, Nil)
 
 pub fn set_socket_active(
   transport: Transport,

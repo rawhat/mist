@@ -1,6 +1,7 @@
 import gleam/bit_array
 import gleam/bytes_tree
 import gleam/erlang/process.{type Selector, type Subject}
+import gleam/http/request.{type Request}
 import gleam/http/response
 import gleam/option.{type Option, None, Some}
 import gleam/order
@@ -11,11 +12,12 @@ import glisten/transport
 import logging
 import mist/internal/encoder
 import mist/internal/http.{
-  type DecodeError, type Handler, Bytes, Chunked, Connection, DiscardPacket,
-  File, Initial, ServerSentEvents, Websocket,
+  type Connection, type DecodeError, type Handler, Bytes, Chunked, Connection,
+  DiscardPacket, File, Initial, ServerSentEvents, Websocket,
 }
 import mist/internal/http/handler as http_handler
 import mist/internal/http2
+import mist/internal/http2/frame
 import mist/internal/http2/handler as http2_handler
 import mist/internal/http2/stream.{type SendMessage, Send}
 
@@ -27,7 +29,12 @@ pub type HandlerError {
 pub type State {
   Http1(state: http_handler.State, self: Subject(SendMessage))
   Http2(state: http2_handler.State)
-  AwaitingH2cPreface(self: Subject(SendMessage), settings: Option(http2.Http2Settings), buffer: BitArray)
+  AwaitingH2cPreface(
+    self: Subject(SendMessage),
+    settings: Option(http2.Http2Settings),
+    buffer: BitArray,
+    original_request: Option(Request(Connection)),
+  )
 }
 
 pub type Config {
@@ -141,26 +148,27 @@ pub fn with_func_and_config(
               )
               |> result.map(Http2)
               |> result.map_error(Error)
-            http.H2cUpgrade(_req, _settings) -> {
-              let resp_101 = 
+            http.H2cUpgrade(req, _settings) -> {
+              let resp_101 =
                 response.new(101)
                 |> response.set_body(bytes_tree.new())
                 |> response.set_header("connection", "Upgrade")
                 |> response.set_header("upgrade", "h2c")
-              
-              let _ = 
+
+              let _ =
                 resp_101
                 |> encoder.to_bytes_tree("1.1")
                 |> transport.send(conn.transport, conn.socket, _)
-              let _ = http.set_socket_packet_mode(
-                conn.transport,
-                conn.socket,
-                http.RawPacket
-              )
-              
+              let _ =
+                http.set_socket_packet_mode(
+                  conn.transport,
+                  conn.socket,
+                  http.RawPacket,
+                )
+
               let _ = http.set_socket_active(conn.transport, conn.socket)
-              
-              Ok(AwaitingH2cPreface(self, http2_settings, <<>>))
+
+              Ok(AwaitingH2cPreface(self, http2_settings, <<>>, Some(req)))
             }
           }
         })
@@ -171,29 +179,81 @@ pub fn with_func_and_config(
         |> http2_handler.call(conn, handler)
         |> result.map(Http2)
       }
-      Packet(msg), AwaitingH2cPreface(self, http2_settings, buffer) -> {
+      Packet(msg),
+        AwaitingH2cPreface(self, http2_settings, buffer, original_request)
+      -> {
         let accumulated = bit_array.append(buffer, msg)
-        
+
         case accumulated {
           <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8, rest:bits>> -> {
-            let _ = http.set_socket_active_continuous(conn.transport, conn.socket)
-            http2_handler.upgrade_with_settings(
-              rest,
-              conn,
-              self,
-              http2_settings,
-            )
-            |> result.map(Http2)
-            |> result.map_error(Error)
+            let _ =
+              http.set_socket_active_continuous(conn.transport, conn.socket)
+            case
+              http2_handler.upgrade_with_settings(
+                rest,
+                conn,
+                self,
+                http2_settings,
+              )
+            {
+              Ok(state) -> {
+                // Process the original HTTP/1.1 request as HTTP/2 stream 1
+                case original_request {
+                  Some(req) -> {
+                    let resp = handler(req)
+                    case resp.body {
+                      Bytes(bytes_tree) -> {
+                        let http2_resp =
+                          response.Response(..resp, body: bytes_tree)
+                        case
+                          http2.send_bytes_tree(
+                            http2_resp,
+                            conn,
+                            state.send_hpack_context,
+                            frame.stream_identifier(1),
+                          )
+                        {
+                          Ok(new_context) -> {
+                            let updated_state =
+                              http2_handler.send_hpack_context(
+                                state,
+                                new_context,
+                              )
+                            Ok(Http2(updated_state))
+                          }
+                          Error(_err) -> {
+                            Ok(Http2(state))
+                            // Continue even if response fails
+                          }
+                        }
+                      }
+                      _ -> {
+                        Ok(Http2(state))
+                      }
+                    }
+                  }
+                  None -> {
+                    Ok(Http2(state))
+                  }
+                }
+              }
+              Error(err) -> {
+                Error(Error(err))
+              }
+            }
           }
           _ -> {
             let preface = <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8>>
             let preface_size = bit_array.byte_size(preface)
             let accumulated_size = bit_array.byte_size(accumulated)
-            
+
             case accumulated_size >= preface_size {
               True -> {
-                logging.log(logging.Error, "Invalid HTTP/2 preface received: " <> string.inspect(accumulated))
+                logging.log(
+                  logging.Error,
+                  "Invalid HTTP/2 preface received: "
+                    <> string.inspect(accumulated),
+                )
                 Error(Error("Invalid HTTP/2 preface"))
               }
               False -> {
@@ -203,20 +263,32 @@ pub fn with_func_and_config(
                   <<"P":utf8, _:bits>> -> True
                   <<>> -> True
                   _ -> {
-                    let assert <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8>> = preface
-                    bit_array.slice(preface, 0, accumulated_size) 
-                    |> result.map(fn(prefix) { bit_array.compare(accumulated, prefix) == order.Eq })
+                    let assert <<"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n":utf8>> =
+                      preface
+                    bit_array.slice(preface, 0, accumulated_size)
+                    |> result.map(fn(prefix) {
+                      bit_array.compare(accumulated, prefix) == order.Eq
+                    })
                     |> result.unwrap(False)
                   }
                 }
-                
+
                 case matches {
                   True -> {
                     let _ = http.set_socket_active(conn.transport, conn.socket)
-                    Ok(AwaitingH2cPreface(self, http2_settings, accumulated))
+                    Ok(AwaitingH2cPreface(
+                      self,
+                      http2_settings,
+                      accumulated,
+                      original_request,
+                    ))
                   }
                   False -> {
-                    logging.log(logging.Error, "Invalid HTTP/2 preface start: " <> string.inspect(accumulated))
+                    logging.log(
+                      logging.Error,
+                      "Invalid HTTP/2 preface start: "
+                        <> string.inspect(accumulated),
+                    )
                     Error(Error("Invalid HTTP/2 preface"))
                   }
                 }

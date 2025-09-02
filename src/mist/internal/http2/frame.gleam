@@ -645,7 +645,10 @@ fn get_setting(identifier: Int, value: Int) -> Result(Setting, ConnectionError) 
     }
     5 -> {
       case value {
+        n if n < 16_384 -> Error(ProtocolError)
+        // Minimum 16KB
         n if n > 16_777_215 -> Error(ProtocolError)
+        // Maximum 2^24-1
         _ -> Ok(MaxFrameSize(value))
       }
     }
