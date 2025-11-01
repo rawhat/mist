@@ -94,20 +94,24 @@ pub fn new(
             ),
           )
 
-        request.new()
-        |> request.set_body(conn)
-        |> make_request(headers, _)
-        |> result.map(handler)
-        |> result.map(fn(resp) {
-          process.send(state.data_subject, Done)
-          actor.continue(InternalState(..state, pending_response: Some(resp)))
-        })
-        |> result.map_error(fn(err) {
-          actor.stop_abnormal(
-            "Failed to respond to request: " <> string.inspect(err),
-          )
-        })
-        |> result.unwrap_both
+        case
+          request.new()
+          |> request.set_body(conn)
+          |> make_request(headers, _)
+          |> result.map(handler)
+        {
+          Ok(resp) -> {
+            process.send(state.data_subject, Done)
+            actor.continue(InternalState(
+              ..state,
+              pending_response: Some(resp),
+            ))
+          }
+          Error(err) ->
+            actor.stop_abnormal(
+              "Failed to respond to request: " <> string.inspect(err),
+            )
+        }
       }
       Done, True -> {
         let assert Some(resp) = state.pending_response

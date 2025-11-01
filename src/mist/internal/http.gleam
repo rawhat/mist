@@ -316,15 +316,14 @@ pub fn parse_request(
         host_header
         |> string.split_once(":")
         |> result.unwrap(#(host_header, ""))
-      let port =
-        int.parse(port)
-        |> result.map_error(fn(_err) {
+      let port = case int.parse(port) {
+        Ok(p) -> p
+        Error(_err) ->
           case scheme {
             http.Https -> 443
             http.Http -> 80
           }
-        })
-        |> result.unwrap_both
+      }
       let req =
         request.Request(
           body: Connection(..conn, body: Initial(rest)),

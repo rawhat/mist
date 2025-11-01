@@ -117,12 +117,15 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
       }
     }
     |> result.map(glisten.continue)
-    |> result.map_error(fn(err) {
-      case err {
-        Ok(_nil) -> glisten.stop()
-        Error(reason) -> glisten.stop_abnormal(reason)
+    |> fn(res) {
+      case res {
+        Ok(cont) -> cont
+        Error(err) ->
+          case err {
+            Ok(_nil) -> glisten.stop()
+            Error(reason) -> glisten.stop_abnormal(reason)
+          }
       }
-    })
-    |> result.unwrap_both
+    }
   }
 }
