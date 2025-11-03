@@ -48,7 +48,7 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
         transport: conn.transport,
       )
 
-    case msg, state {
+    let result = case msg, state {
       User(Send(..)), Http1(..) -> {
         Error(Error("Attempted to send HTTP/2 response without upgrade"))
       }
@@ -116,13 +116,11 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
         |> result.map(Http2)
       }
     }
-    |> result.map(glisten.continue)
-    |> result.map_error(fn(err) {
-      case err {
-        Ok(_nil) -> glisten.stop()
-        Error(reason) -> glisten.stop_abnormal(reason)
-      }
-    })
-    |> result.unwrap_both
+
+    case result {
+      Ok(value) -> glisten.continue(value)
+      Error(Ok(_nil)) -> glisten.stop()
+      Error(Error(reason)) -> glisten.stop_abnormal(reason)
+    }
   }
 }
