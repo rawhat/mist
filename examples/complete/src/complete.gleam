@@ -31,11 +31,11 @@ pub fn main() {
 
   let assert Ok(_) =
     fn(req: Request(Connection)) -> Response(ResponseData) {
-      logging.log(
-        logging.Info,
-        "Got a request from: "
-          <> string.inspect(mist.get_connection_info(req.body)),
-      )
+      // logging.log(
+      //   logging.Info,
+      //   "Got a request from: "
+      //     <> string.inspect(mist.get_connection_info(req.body)),
+      // )
       case request.path_segments(req) {
         [] ->
           response.new(200)

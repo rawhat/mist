@@ -81,27 +81,36 @@ fn message_selector() -> Selector(WebsocketMessage(user_message)) {
   })
 }
 
+pub type WebsocketInitializer(state, user_message) {
+  WebsocketInitializer(
+    on_init: fn(WebsocketConnection) -> #(state, Option(Selector(user_message))),
+    on_close: fn(state) -> Nil,
+    handler: Handler(state, user_message),
+    socket: Socket,
+    transport: Transport,
+    extensions: List(String),
+  )
+}
+
 pub fn initialize_connection(
-  on_init: fn(WebsocketConnection) -> #(state, Option(Selector(user_message))),
-  on_close: fn(state) -> Nil,
-  handler: Handler(state, user_message),
-  socket: Socket,
-  transport: Transport,
-  extensions: List(String),
-) -> Result(actor.Started(Subject(WebsocketMessage(user_message))), Nil) {
-  let takeovers = websocket.get_context_takeovers(extensions)
+  initializer: WebsocketInitializer(state, user_message),
+) -> Result(
+  actor.Started(Subject(WebsocketMessage(user_message))),
+  actor.StartError,
+) {
+  let takeovers = websocket.get_context_takeovers(initializer.extensions)
   actor.new_with_initialiser(500, fn(subject) {
-    let compression = case websocket.has_deflate(extensions) {
+    let compression = case websocket.has_deflate(initializer.extensions) {
       True -> Some(compression.init(takeovers))
       False -> None
     }
     let connection =
       WebsocketConnection(
-        socket: socket,
-        transport: transport,
+        socket: initializer.socket,
+        transport: initializer.transport,
         deflate: option.map(compression, fn(compression) { compression.deflate }),
       )
-    let #(initial_state, user_selector) = on_init(connection)
+    let #(initial_state, user_selector) = initializer.on_init(connection)
     let selector = case user_selector {
       Some(user_selector) ->
         user_selector
@@ -123,8 +132,8 @@ pub fn initialize_connection(
   |> actor.on_message(fn(state, msg) {
     let connection =
       WebsocketConnection(
-        socket: socket,
-        transport: transport,
+        socket: initializer.socket,
+        transport: initializer.transport,
         deflate: option.map(state.permessage_deflate, fn(compression) {
           compression.deflate
         }),
@@ -145,10 +154,10 @@ pub fn initialize_connection(
           let next =
             apply_frames(
               frames,
-              handler,
+              initializer.handler,
               connection,
               Continue(state.user, None),
-              on_close,
+              initializer.on_close,
             )
           case next {
             Continue(user_state, selector) -> {
@@ -181,7 +190,7 @@ pub fn initialize_connection(
         })
         |> result.lazy_unwrap(fn() {
           logging.log(logging.Error, "Received a malformed WebSocket frame")
-          on_close(state.user)
+          initializer.on_close(state.user)
           let _ =
             option.map(state.permessage_deflate, fn(contexts) {
               compression.close(contexts.deflate)
@@ -191,7 +200,9 @@ pub fn initialize_connection(
         })
       }
       Valid(UserMessage(msg)) -> {
-        exception.rescue(fn() { handler(state.user, User(msg), connection) })
+        exception.rescue(fn() {
+          initializer.handler(state.user, User(msg), connection)
+        })
         |> result.map(fn(cont) {
           case cont {
             Continue(user_state, selector) -> {
@@ -214,7 +225,7 @@ pub fn initialize_connection(
                   compression.close(contexts.deflate)
                   compression.close(contexts.inflate)
                 })
-              on_close(state.user)
+              initializer.on_close(state.user)
               actor.stop()
             }
             AbnormalStop(reason) -> {
@@ -223,7 +234,7 @@ pub fn initialize_connection(
                   compression.close(contexts.deflate)
                   compression.close(contexts.inflate)
                 })
-              on_close(state.user)
+              initializer.on_close(state.user)
               actor.stop_abnormal(reason)
             }
           }
@@ -240,7 +251,7 @@ pub fn initialize_connection(
               compression.close(contexts.deflate)
               compression.close(contexts.inflate)
             })
-          on_close(state.user)
+          initializer.on_close(state.user)
           actor.stop_abnormal("Crash in user websocket handler")
         })
       }
@@ -250,7 +261,7 @@ pub fn initialize_connection(
             compression.close(contexts.deflate)
             compression.close(contexts.inflate)
           })
-        on_close(state.user)
+        initializer.on_close(state.user)
         actor.stop()
       }
       // TODO:  do we need to send something back for this?
@@ -261,21 +272,23 @@ pub fn initialize_connection(
             compression.close(contexts.deflate)
             compression.close(contexts.inflate)
           })
-        on_close(state.user)
+        initializer.on_close(state.user)
         actor.stop_abnormal("WebSocket received a malformed message")
       }
     }
   })
   |> actor.start
-  |> result.replace_error(Nil)
   |> result.map(fn(subj) {
     let assert Ok(websocket_pid) = process.subject_owner(subj.data)
     let assert Ok(_) =
-      transport.controlling_process(transport, socket, websocket_pid)
-    set_active(transport, socket)
+      transport.controlling_process(
+        initializer.transport,
+        initializer.socket,
+        websocket_pid,
+      )
+    set_active(initializer.transport, initializer.socket)
     subj
   })
-  |> result.replace_error(Nil)
 }
 
 fn apply_frames(

@@ -11,7 +11,8 @@ import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
-import gleam/otp/static_supervisor.{type Supervisor}
+import gleam/otp/factory_supervisor as factory
+import gleam/otp/static_supervisor.{type Supervisor} as supervisor
 import gleam/otp/supervision.{type ChildSpecification}
 import gleam/result
 import gleam/string
@@ -135,7 +136,7 @@ pub fn get_connection_info(conn: Connection) -> Result(ConnectionInfo, Nil) {
 /// `Transfer-Encoding: chunked` to send an iterator in chunks. `File` will use
 /// Erlang's `sendfile` to more efficiently return a file to the client.
 pub type ResponseData {
-  Websocket(Selector(Down))
+  Websocket(fn() -> websocket.WebsocketInitializer(state, user_message))
   Bytes(BytesTree)
   Chunked(Yielder(BytesTree))
   /// See `mist.send_file` to use this response type.
@@ -512,35 +513,51 @@ pub fn start(
   builder: Builder(Connection, ResponseData),
 ) -> Result(actor.Started(Supervisor), actor.StartError) {
   let listener_name = process.new_name("glisten_listener")
-  fn(req) { convert_body_types(builder.handler(req)) }
-  |> handler.with_func
-  |> glisten.new(handler.init, _)
-  |> glisten.bind(builder.interface)
-  |> fn(handler) {
-    case builder.ipv6_support {
-      True -> glisten.with_ipv6(handler)
-      False -> handler
-    }
-  }
-  |> fn(handler) {
-    case builder.tls_options {
-      Some(CertKeyFiles(certfile, keyfile)) ->
-        handler
-        |> glisten.with_tls(certfile, keyfile)
-      _ -> handler
-    }
-  }
-  |> glisten.start_with_listener_name(builder.port, listener_name)
-  |> result.map(fn(server) {
-    let info = glisten.get_server_info(listener_name, 5000)
-    let ip_address = to_mist_ip_address(info.ip_address)
-    let scheme = case option.is_some(builder.tls_options) {
-      True -> Https
-      False -> Http
-    }
-    builder.after_start(info.port, scheme, ip_address)
-    server
-  })
+  let websocket_supervisor = process.new_name("mist_websocket_supervisor")
+
+  supervisor.new(strategy: supervisor.OneForOne)
+  |> supervisor.add(
+    supervision.supervisor(fn() {
+      fn(req) { convert_body_types(builder.handler(req)) }
+      |> handler.with_func
+      |> glisten.new(handler.init, _)
+      |> glisten.bind(builder.interface)
+      |> fn(handler) {
+        case builder.ipv6_support {
+          True -> glisten.with_ipv6(handler)
+          False -> handler
+        }
+      }
+      |> fn(handler) {
+        case builder.tls_options {
+          Some(CertKeyFiles(certfile, keyfile)) ->
+            handler
+            |> glisten.with_tls(certfile, keyfile)
+          _ -> handler
+        }
+      }
+      |> glisten.with_listener_name(listener_name)
+      |> glisten.start(builder.port)
+      |> result.map(fn(server) {
+        let info = glisten.get_server_info(listener_name, 5000)
+        let ip_address = to_mist_ip_address(info.ip_address)
+        let scheme = case option.is_some(builder.tls_options) {
+          True -> Https
+          False -> Http
+        }
+        builder.after_start(info.port, scheme, ip_address)
+        server
+      })
+    }),
+  )
+  |> supervisor.add(
+    supervision.supervisor(fn() {
+      factory.worker_child(websocket.initialize_connection)
+      |> factory.named(websocket_supervisor)
+      |> factory.start()
+    }),
+  )
+  |> supervisor.start()
 }
 
 /// Start the `mist` supervisor as a child of a supervision tree.
