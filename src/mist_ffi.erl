@@ -2,7 +2,7 @@
 
 -export([binary_match/2, decode_packet/3, decode_atom/1,file_open/1, string_to_int/2, hpack_decode/2,
          hpack_encode/2, hpack_new_max_table_size/2, ets_lookup_element/3, get_path_and_query/1,
-         file_close/1, now/0]).
+         file_close/1, now/0, set_packet_mode/3, set_socket_active/2, set_socket_active_continuous/2]).
 
 now() ->
   Timestamp = os:system_time(microsecond),
@@ -70,14 +70,37 @@ file_close(File) ->
       {error, unknown_file_error}
   end.
 
+% BOUNDS CHECKING: Prevent HPACK library crashes from malformed input
+% The external HPACK library crashes on certain malformed inputs:
+% - hpack_integer:decode(<<>>, 28, 268435455) causes function_clause error
+% - Occurs when HTTP/2 frames contain invalid HPACK data with empty bitarrays
+% - Added bounds checking to prevent crashes during adversarial testing
 hpack_decode(Context, Bin) ->
-  case hpack:decode(Bin, Context) of
-    {ok, {Headers, NewContext}} ->
-      {ok, {Headers, NewContext}};
-    {error, compression_error} ->
-      {error, {hpack_error, compression}};
-    {error, {compression_error, {bad_header_packet, Binary}}} ->
-      {error, {hpack_error, {bad_header_packet, Binary}}}
+  % Bounds checking to prevent crashes from malformed HPACK data
+  case byte_size(Bin) of
+    0 ->
+      % Empty binary would cause hpack_integer:decode to crash
+      {error, {hpack_error, {bad_header_packet, Bin}}};
+    Size when Size > 16777215 ->
+      % Reject excessively large HPACK data (16MB max per HTTP/2 spec)
+      {error, {hpack_error, {bad_header_packet, Bin}}};
+    _ ->
+      % Additional safety: catch any remaining crashes from malformed data
+      try hpack:decode(Bin, Context) of
+        {ok, {Headers, NewContext}} ->
+          {ok, {Headers, NewContext}};
+        {error, compression_error} ->
+          {error, {hpack_error, compression}};
+        {error, {compression_error, {bad_header_packet, Binary}}} ->
+          {error, {hpack_error, {bad_header_packet, Binary}}}
+      catch
+        error:function_clause ->
+          {error, {hpack_error, {bad_header_packet, Bin}}};
+        error:_ ->
+          {error, {hpack_error, {bad_header_packet, Bin}}};
+        throw:_ ->
+          {error, {hpack_error, {bad_header_packet, Bin}}}
+      end
   end.
 
 hpack_encode(Context, Headers) ->
@@ -108,5 +131,58 @@ get_path_and_query(String) ->
       {ok, {maps:get(path, UriMap), Query}}
   end.
 
+set_packet_mode(Transport, Socket, Mode) ->
+  PacketMode = case Mode of
+    raw -> raw;
+    http_bin -> http_bin;
+    _ -> raw
+  end,
+  % For raw mode, use active once initially, will be set to true after preface
+  % For http_bin mode, use active once for request parsing
+  Options = case PacketMode of
+    raw -> [{packet, PacketMode}, {active, once}];
+    _ -> [{packet, PacketMode}, {active, once}]
+  end,
+  case Transport of
+    tcp ->
+      case inet:setopts(Socket, Options) of
+        ok -> {ok, nil};
+        {error, _} -> {error, nil}
+      end;
+    ssl ->
+      case ssl:setopts(Socket, Options) of
+        ok -> {ok, nil};
+        {error, _} -> {error, nil}
+      end
+  end.
+
 decode_atom(Value) when is_atom(Value) -> {ok, Value};
 decode_atom(_Value) -> {error, nil}.
+
+set_socket_active(Transport, Socket) ->
+  case Transport of
+    tcp ->
+      case inet:setopts(Socket, [{active, once}]) of
+        ok -> {ok, nil};
+        {error, _} -> {error, nil}
+      end;
+    ssl ->
+      case ssl:setopts(Socket, [{active, once}]) of
+        ok -> {ok, nil};
+        {error, _} -> {error, nil}
+      end
+  end.
+
+set_socket_active_continuous(Transport, Socket) ->
+  case Transport of
+    tcp ->
+      case inet:setopts(Socket, [{active, true}]) of
+        ok -> {ok, nil};
+        {error, _} -> {error, nil}
+      end;
+    ssl ->
+      case ssl:setopts(Socket, [{active, true}]) of
+        ok -> {ok, nil};
+        {error, _} -> {error, nil}
+      end
+  end.

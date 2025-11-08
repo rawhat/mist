@@ -85,8 +85,10 @@ pub fn new(
             ..connection,
             body: Stream(
               selector: process.map_selector(state.data_selector, fn(val) {
-                let assert Data(bits, ..) = val
-                bits
+                case val {
+                  Data(bits, ..) -> bits
+                  _ -> <<>>
+                }
               }),
               attempts: 0,
               data: <<>>,
@@ -112,9 +114,15 @@ pub fn new(
         }
       }
       Done, True -> {
-        let assert Some(resp) = state.pending_response
-        process.send(sender, Send(identifier, resp))
-        actor.continue(state)
+        case state.pending_response {
+          Some(resp) -> {
+            process.send(sender, Send(identifier, resp))
+            actor.continue(state)
+          }
+          None -> {
+            actor.stop_abnormal("Received Done but no pending response")
+          }
+        }
       }
       Data(bits: bits, end: True), _ -> {
         process.send(state.data_subject, Done)
@@ -145,14 +153,14 @@ pub fn make_request(
 ) -> Result(Request(Connection), Nil) {
   case headers {
     [] -> Ok(req)
-    [#("method", method), ..rest] -> {
+    [#(":method", method), ..rest] -> {
       method
       |> ghttp.parse_method
       |> result.replace_error(Nil)
       |> result.map(request.set_method(req, _))
       |> result.try(make_request(rest, _))
     }
-    [#("scheme", scheme), ..rest] -> {
+    [#(":scheme", scheme), ..rest] -> {
       scheme
       |> ghttp.scheme_from_string
       |> result.replace_error(Nil)
@@ -160,8 +168,8 @@ pub fn make_request(
       |> result.try(make_request(rest, _))
     }
     // TODO
-    [#("authority", _authority), ..rest] -> make_request(rest, req)
-    [#("path", path), ..rest] -> {
+    [#(":authority", _authority), ..rest] -> make_request(rest, req)
+    [#(":path", path), ..rest] -> {
       path
       |> string.split_once(on: "?")
       |> result.map(fn(split) {
@@ -181,8 +189,8 @@ pub fn make_request(
             |> request.set_query(query)
           _ -> request.set_path(req, tup.0)
         }
-        |> make_request(rest, _)
       }
+      |> make_request(rest, _)
     }
     [#(key, value), ..rest] ->
       req
