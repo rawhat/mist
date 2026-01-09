@@ -1,5 +1,5 @@
 name = "mist"
-version = "5.0.4"
+version = "5.0.3"
 
 licences = ["Apache-2.0"]
 description = "a misty Gleam web server"
