@@ -1,6 +1,6 @@
 # Changelog
 
-# Unreleased
+# v5.0.4
 
 - Removed usage of deprecated `result.unwrap_both`
 
