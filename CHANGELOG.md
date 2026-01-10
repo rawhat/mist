@@ -1,5 +1,9 @@
 # Changelog
 
+# Unreleased
+
+- Rename `get_client_info` to `get_connection_info`
+
 # v5.0.4
 
 - Removed usage of deprecated `result.unwrap_both`
