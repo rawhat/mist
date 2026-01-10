@@ -10,7 +10,6 @@ packages = [
   { name = "gleam_http", version = "4.3.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_http", source = "hex", outer_checksum = "82EA6A717C842456188C190AFB372665EA56CE13D8559BF3B1DD9E40F619EE0C" },
   { name = "gleam_otp", version = "1.2.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_stdlib"], otp_app = "gleam_otp", source = "hex", outer_checksum = "BA6A294E295E428EC1562DC1C11EA7530DCB981E8359134BEABC8493B7B2258E" },
   { name = "gleam_stdlib", version = "0.68.1", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "F7FAEBD8EF260664E86A46C8DBA23508D1D11BB3BCC6EE1B89B3BC3E5C83FF1E" },
-  { name = "gleam_yielder", version = "1.1.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_yielder", source = "hex", outer_checksum = "8E4E4ECFA7982859F430C57F549200C7749823C106759F4A19A78AEA6687717A" },
   { name = "gleeunit", version = "1.9.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleeunit", source = "hex", outer_checksum = "DA9553CE58B67924B3C631F96FE3370C49EB6D6DC6B384EC4862CC4AAA718F3C" },
   { name = "glisten", version = "8.0.2", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_otp", "gleam_stdlib", "logging", "telemetry"], source = "local", path = "../glisten" },
   { name = "gramps", version = "6.0.0", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_erlang", "gleam_http", "gleam_stdlib"], otp_app = "gramps", source = "hex", outer_checksum = "8B7195978FBFD30B43DF791A8A272041B81E45D245314D7A41FC57237AA882A0" },
@@ -33,7 +32,6 @@ gleam_hackney = { version = ">= 1.2.0 and < 2.0.0" }
 gleam_http = { version = ">= 4.0.0 and < 5.0.0" }
 gleam_otp = { version = ">= 1.2.0 and < 2.0.0" }
 gleam_stdlib = { version = ">= 0.50.0 and < 1.0.0" }
-gleam_yielder = { version = ">= 1.1.0 and < 2.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
 glisten = { path = "../glisten" }
 gramps = { version = ">= 6.0.0 and < 7.0.0" }

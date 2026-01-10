@@ -22,15 +22,15 @@ associated methods (demonstrated in the examples below).
 ```gleam
 import gleam/bit_array
 import gleam/bytes_tree
-import gleam/erlang/process
+import gleam/erlang/process.{type Subject}
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/io
+import gleam/list
 import gleam/option.{None}
 import gleam/result
 import gleam/string
-import gleam/yielder
 import logging
 import mist.{type Connection, type ResponseData}
 
@@ -53,10 +53,6 @@ pub fn main() {
 
   let assert Ok(_) =
     fn(req: Request(Connection)) -> Response(ResponseData) {
-      logging.log(
-        logging.Info,
-        "Got a request from: " <> string.inspect(mist.get_connection_info(req.body)),
-      )
       case request.path_segments(req) {
         [] ->
           response.new(200)
@@ -71,7 +67,20 @@ pub fn main() {
             handler: handle_ws_message,
           )
         ["echo"] -> echo_body(req)
-        ["chunk"] -> serve_chunk(req)
+        ["chunk"] ->
+          mist.chunked(
+            req,
+            response.new(200),
+            fn(subj) {
+              process.spawn(fn() { send_chunks(subj) })
+              Nil
+            },
+            fn(state, msg, connection) {
+              let assert Ok(_nil) =
+                mist.send_chunk(connection, bit_array.from_string(msg))
+              mist.chunk_continue(state)
+            },
+          )
         ["file", ..rest] -> serve_file(req, rest)
         ["form"] -> handle_form(req)
 
@@ -136,19 +145,12 @@ fn echo_body(request: Request(Connection)) -> Response(ResponseData) {
   })
 }
 
-fn serve_chunk(_request: Request(Connection)) -> Response(ResponseData) {
-  let iter =
-    ["one", "two", "three"]
-    |> yielder.from_list
-    |> yielder.map(fn(data) {
-      process.sleep(2000)
-      data
-    })
-    |> yielder.map(bytes_tree.from_string)
-
-  response.new(200)
-  |> response.set_body(mist.Chunked(iter))
-  |> response.set_header("content-type", "text/plain")
+fn send_chunks(subject: Subject(String)) {
+  ["one", "two", "three"]
+  |> list.each(fn(data) {
+    process.sleep(2000)
+    process.send(subject, data)
+  })
 }
 
 fn serve_file(
