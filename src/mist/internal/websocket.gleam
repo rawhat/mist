@@ -1,7 +1,7 @@
 import exception
 import gleam/dynamic/decode
 import gleam/erlang/atom
-import gleam/erlang/process.{type Selector, type Subject}
+import gleam/erlang/process.{type Selector}
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
@@ -81,6 +81,17 @@ fn message_selector() -> Selector(WebsocketMessage(user_message)) {
   })
 }
 
+pub type WebsocketInitializer(state, user_message) {
+  WebsocketInitializer(
+    on_init: fn(WebsocketConnection) -> #(state, Option(Selector(user_message))),
+    on_close: fn(state) -> Nil,
+    handler: Handler(state, user_message),
+    socket: Socket,
+    transport: Transport,
+    extensions: List(String),
+  )
+}
+
 pub fn initialize_connection(
   on_init: fn(WebsocketConnection) -> #(state, Option(Selector(user_message))),
   on_close: fn(state) -> Nil,
@@ -88,7 +99,7 @@ pub fn initialize_connection(
   socket: Socket,
   transport: Transport,
   extensions: List(String),
-) -> Result(actor.Started(Subject(WebsocketMessage(user_message))), Nil) {
+) -> Result(actor.Started(process.Pid), actor.StartError) {
   let takeovers = websocket.get_context_takeovers(extensions)
   actor.new_with_initialiser(500, fn(subject) {
     let compression = case websocket.has_deflate(extensions) {
@@ -97,8 +108,8 @@ pub fn initialize_connection(
     }
     let connection =
       WebsocketConnection(
-        socket: socket,
-        transport: transport,
+        socket:,
+        transport:,
         deflate: option.map(compression, fn(compression) { compression.deflate }),
       )
     let #(initial_state, user_selector) = on_init(connection)
@@ -123,8 +134,8 @@ pub fn initialize_connection(
   |> actor.on_message(fn(state, msg) {
     let connection =
       WebsocketConnection(
-        socket: socket,
-        transport: transport,
+        socket:,
+        transport:,
         deflate: option.map(state.permessage_deflate, fn(compression) {
           compression.deflate
         }),
@@ -267,15 +278,10 @@ pub fn initialize_connection(
     }
   })
   |> actor.start
-  |> result.replace_error(Nil)
   |> result.map(fn(subj) {
     let assert Ok(websocket_pid) = process.subject_owner(subj.data)
-    let assert Ok(_) =
-      transport.controlling_process(transport, socket, websocket_pid)
-    set_active(transport, socket)
-    subj
+    actor.Started(websocket_pid, websocket_pid)
   })
-  |> result.replace_error(Nil)
 }
 
 fn apply_frames(
@@ -359,7 +365,7 @@ fn apply_frames(
   }
 }
 
-fn set_active(transport: Transport, socket: Socket) -> Nil {
+pub fn set_active(transport: Transport, socket: Socket) -> Nil {
   let assert Ok(_) =
     transport.set_opts(transport, socket, [options.ActiveMode(options.Once)])
 

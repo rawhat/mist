@@ -5,17 +5,18 @@ import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist.{type Charlist}
-import gleam/erlang/process.{type Down, type Selector}
+import gleam/erlang/process.{type Selector}
 import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response, Response}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option}
+import gleam/otp/actor
+import gleam/otp/factory_supervisor as factory
 import gleam/pair
 import gleam/result
 import gleam/string
-import gleam/yielder.{type Yielder}
 import glisten.{type Socket}
 import glisten/transport.{type Transport}
 import gramps/websocket
@@ -25,15 +26,37 @@ import mist/internal/encoder
 import mist/internal/file
 
 pub type ResponseData {
-  Websocket(Selector(Down))
+  Websocket
   Bytes(BytesTree)
-  Chunked(Yielder(BytesTree))
+  Chunked
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
-  ServerSentEvents(Selector(Down))
+  ServerSentEvents
 }
 
 pub type Connection {
-  Connection(body: Body, socket: Socket, transport: Transport)
+  Connection(
+    body: Body,
+    socket: Socket,
+    transport: Transport,
+    server_sent_events_factory: process.Name(
+      factory.Message(
+        fn() -> Result(actor.Started(process.Pid), actor.StartError),
+        process.Pid,
+      ),
+    ),
+    websocket_factory: process.Name(
+      factory.Message(
+        fn() -> Result(actor.Started(process.Pid), actor.StartError),
+        process.Pid,
+      ),
+    ),
+    chunked_response_factory: process.Name(
+      factory.Message(
+        fn() -> Result(actor.Started(process.Pid), actor.StartError),
+        process.Pid,
+      ),
+    ),
+  )
 }
 
 pub type Handler =

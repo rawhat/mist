@@ -1,6 +1,8 @@
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http/response
 import gleam/option.{type Option, Some}
+import gleam/otp/actor
+import gleam/otp/factory_supervisor as factory
 import gleam/result
 import gleam/string
 import glisten.{type Loop, Packet, User}
@@ -38,7 +40,27 @@ pub fn init(_conn) -> #(State, Option(Selector(SendMessage))) {
   #(new_state(subj), Some(selector))
 }
 
-pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
+pub fn with_func(
+  handler: Handler,
+  websocket_factory: process.Name(
+    factory.Message(
+      fn() -> Result(actor.Started(process.Pid), actor.StartError),
+      process.Pid,
+    ),
+  ),
+  server_sent_events_factory: process.Name(
+    factory.Message(
+      fn() -> Result(actor.Started(process.Pid), actor.StartError),
+      process.Pid,
+    ),
+  ),
+  chunked_response_factory: process.Name(
+    factory.Message(
+      fn() -> Result(actor.Started(process.Pid), actor.StartError),
+      process.Pid,
+    ),
+  ),
+) -> Loop(State, SendMessage) {
   fn(state: State, msg, conn: glisten.Connection(SendMessage)) {
     let sender = conn.subject
     let conn =
@@ -46,6 +68,9 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
         body: Initial(<<>>),
         socket: conn.socket,
         transport: conn.transport,
+        chunked_response_factory:,
+        server_sent_events_factory:,
+        websocket_factory:,
       )
 
     let result = case msg, state {
@@ -61,11 +86,10 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
           }
           File(..) -> Error("File sending unsupported over HTTP/2")
           // TODO:  properly error in some fashion for these
-          Websocket(_selector) -> Error("WebSocket unsupported for HTTP/2")
-          Chunked(_iterator) ->
+          Websocket -> Error("WebSocket unsupported for HTTP/2")
+          Chunked ->
             Error("Chunked encoding not supported for HTTP/2")
-          ServerSentEvents(_selector) ->
-            Error("Server-Sent Events unsupported for HTTP/2")
+          ServerSentEvents -> Error("Server-Sent Events unsupported for HTTP/2")
         }
         |> result.map(fn(context) {
           Http2(http2_handler.send_hpack_context(state, context))
@@ -98,7 +122,7 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
         |> result.try(fn(req) {
           case req {
             http.Http1Request(req, version) ->
-              http_handler.call(req, handler, conn, sender, version)
+              http_handler.call(req, handler, sender, version)
               |> result.map(fn(new_state) {
                 Http1(state: new_state, self: self)
               })

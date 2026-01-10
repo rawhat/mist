@@ -1,8 +1,7 @@
 import exception
 import gleam/bit_array
 import gleam/bytes_tree.{type BytesTree}
-import gleam/erlang/process.{type Down, type Selector, type Subject}
-import gleam/function
+import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http.{type Scheme, Http, Https} as gleam_http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
@@ -11,12 +10,12 @@ import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
-import gleam/otp/static_supervisor.{type Supervisor}
+import gleam/otp/factory_supervisor as factory
+import gleam/otp/static_supervisor.{type Supervisor} as supervisor
 import gleam/otp/supervision.{type ChildSpecification}
 import gleam/result
 import gleam/string
 import gleam/string_tree.{type StringTree}
-import gleam/yielder.{type Yielder}
 import glisten
 import glisten/transport
 import gramps/websocket.{BinaryFrame, Data, TextFrame} as gramps_websocket
@@ -135,12 +134,12 @@ pub fn get_connection_info(conn: Connection) -> Result(ConnectionInfo, Nil) {
 /// `Transfer-Encoding: chunked` to send an iterator in chunks. `File` will use
 /// Erlang's `sendfile` to more efficiently return a file to the client.
 pub type ResponseData {
-  Websocket(Selector(Down))
+  Websocket
   Bytes(BytesTree)
-  Chunked(Yielder(BytesTree))
+  Chunked
   /// See `mist.send_file` to use this response type.
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
-  ServerSentEvents(Selector(Down))
+  ServerSentEvents
 }
 
 /// Potential errors when opening a file to send. This list is
@@ -493,11 +492,11 @@ fn convert_body_types(
   resp: Response(ResponseData),
 ) -> Response(InternalResponseData) {
   let new_body = case resp.body {
-    Websocket(selector) -> InternalWebsocket(selector)
+    Websocket -> InternalWebsocket
     Bytes(data) -> InternalBytes(data)
     File(descriptor, offset, length) -> InternalFile(descriptor, offset, length)
-    Chunked(iter) -> InternalChunked(iter)
-    ServerSentEvents(selector) -> InternalServerSentEvents(selector)
+    Chunked -> InternalChunked
+    ServerSentEvents -> InternalServerSentEvents
   }
   response.set_body(resp, new_body)
 }
@@ -512,35 +511,73 @@ pub fn start(
   builder: Builder(Connection, ResponseData),
 ) -> Result(actor.Started(Supervisor), actor.StartError) {
   let listener_name = process.new_name("glisten_listener")
-  fn(req) { convert_body_types(builder.handler(req)) }
-  |> handler.with_func
-  |> glisten.new(handler.init, _)
-  |> glisten.bind(builder.interface)
-  |> fn(handler) {
-    case builder.ipv6_support {
-      True -> glisten.with_ipv6(handler)
-      False -> handler
-    }
-  }
-  |> fn(handler) {
-    case builder.tls_options {
-      Some(CertKeyFiles(certfile, keyfile)) ->
-        handler
-        |> glisten.with_tls(certfile, keyfile)
-      _ -> handler
-    }
-  }
-  |> glisten.start_with_listener_name(builder.port, listener_name)
-  |> result.map(fn(server) {
-    let info = glisten.get_server_info(listener_name, 5000)
-    let ip_address = to_mist_ip_address(info.ip_address)
-    let scheme = case option.is_some(builder.tls_options) {
-      True -> Https
-      False -> Http
-    }
-    builder.after_start(info.port, scheme, ip_address)
-    server
-  })
+  let websocket_factory = process.new_name("mist_websocket_supervisor")
+  let server_sent_events_factory =
+    process.new_name("mist_server_sent_events_supervisor")
+  let chunked_response_factory =
+    process.new_name("mist_chunked_response_supervisor")
+
+  supervisor.new(strategy: supervisor.OneForOne)
+  |> supervisor.add(
+    supervision.supervisor(fn() {
+      fn(req) { convert_body_types(builder.handler(req)) }
+      |> handler.with_func(
+        websocket_factory,
+        server_sent_events_factory,
+        chunked_response_factory,
+      )
+      |> glisten.new(handler.init, _)
+      |> glisten.bind(builder.interface)
+      |> fn(handler) {
+        case builder.ipv6_support {
+          True -> glisten.with_ipv6(handler)
+          False -> handler
+        }
+      }
+      |> fn(handler) {
+        case builder.tls_options {
+          Some(CertKeyFiles(certfile, keyfile)) ->
+            handler
+            |> glisten.with_tls(certfile, keyfile)
+          _ -> handler
+        }
+      }
+      |> glisten.with_listener_name(listener_name)
+      |> glisten.start(builder.port)
+      |> result.map(fn(server) {
+        let info = glisten.get_server_info(listener_name, 5000)
+        let ip_address = to_mist_ip_address(info.ip_address)
+        let scheme = case option.is_some(builder.tls_options) {
+          True -> Https
+          False -> Http
+        }
+        builder.after_start(info.port, scheme, ip_address)
+        server
+      })
+    }),
+  )
+  |> supervisor.add(
+    supervision.supervisor(fn() {
+      factory.worker_child(fn(start) { start() })
+      |> factory.named(websocket_factory)
+      |> factory.start()
+    }),
+  )
+  |> supervisor.add(
+    supervision.supervisor(fn() {
+      factory.worker_child(fn(start) { start() })
+      |> factory.named(server_sent_events_factory)
+      |> factory.start()
+    }),
+  )
+  |> supervisor.add(
+    supervision.supervisor(fn() {
+      factory.worker_child(fn(start) { start() })
+      |> factory.named(chunked_response_factory)
+      |> factory.start()
+    }),
+  )
+  |> supervisor.start()
 }
 
 /// Start the `mist` supervisor as a child of a supervision tree.
@@ -607,31 +644,45 @@ pub fn websocket(
 
   let socket = request.body.socket
   let transport = request.body.transport
-  request
-  |> http.upgrade(socket, transport, extensions, _)
-  |> result.try(fn(_nil) {
-    websocket.initialize_connection(
-      on_init,
-      on_close,
-      handler,
-      socket,
-      transport,
-      extensions,
-    )
-  })
-  |> result.map(fn(subj) {
-    let assert Ok(ws_process) = process.subject_owner(subj.data)
-    let monitor = process.monitor(ws_process)
-    let selector =
-      process.new_selector()
-      |> process.select_specific_monitor(monitor, function.identity)
-    response.new(200)
-    |> response.set_body(Websocket(selector))
-  })
-  |> result.lazy_unwrap(fn() {
-    response.new(400)
-    |> response.set_body(Bytes(bytes_tree.new()))
-  })
+  case http.upgrade(socket, transport, extensions, request) {
+    Ok(_nil) -> {
+      let start = fn() {
+        websocket.initialize_connection(
+          on_init,
+          on_close,
+          handler,
+          socket,
+          transport,
+          extensions,
+        )
+      }
+      case
+        factory.start_child(
+          factory.get_by_name(request.body.websocket_factory),
+          start,
+        )
+      {
+        Ok(started) -> {
+          let assert Ok(_) =
+            transport.controlling_process(transport, socket, started.data)
+          websocket.set_active(transport, socket)
+          response.new(200) |> response.set_body(Websocket)
+        }
+        Error(start_error) -> {
+          logging.log(
+            logging.Error,
+            "Failed to start WebSocket process: " <> string.inspect(start_error),
+          )
+          response.new(400)
+          |> response.set_body(Bytes(bytes_tree.new()))
+        }
+      }
+    }
+    Error(_reason) -> {
+      response.new(400)
+      |> response.set_body(Bytes(bytes_tree.new()))
+    }
+  }
 }
 
 pub type WebsocketConnection =
@@ -686,7 +737,7 @@ pub fn send_text_frame(
 }
 
 // Returned by `init_server_sent_events`. This type must be passed to
-// `send_event` since we need to enforce that the correct headers / data shapw
+// `send_event` since we need to enforce that the correct headers / data shape
 // is provided.
 pub opaque type SSEConnection {
   SSEConnection(Connection)
@@ -737,8 +788,7 @@ pub fn event_retry(event: SSEEvent, retry: Int) -> SSEEvent {
 pub fn server_sent_events(
   request req: Request(Connection),
   initial_response resp: Response(discard),
-  init init: fn(Subject(message)) ->
-    Result(actor.Initialised(state, message, data), String),
+  init init: fn(Subject(message)) -> state,
   loop loop: fn(state, message, SSEConnection) -> actor.Next(state, message),
 ) -> Response(ResponseData) {
   let with_default_headers =
@@ -747,36 +797,56 @@ pub fn server_sent_events(
     |> response.set_header("cache-control", "no-cache")
     |> response.set_header("connection", "keep-alive")
 
-  transport.send(
-    req.body.transport,
-    req.body.socket,
-    encoder.response_builder(200, with_default_headers.headers, "1.1"),
-  )
-  |> result.replace_error(Nil)
-  |> result.try(fn(_nil) {
-    actor.new_with_initialiser(1000, fn(subj) {
-      init(subj)
-      |> result.map(fn(return) { actor.returning(return, subj) })
-    })
-    |> actor.on_message(fn(state, message) {
-      loop(state, message, SSEConnection(req.body))
-    })
-    |> actor.start
-    |> result.replace_error(Nil)
-  })
-  |> result.map(fn(subj) {
-    let assert Ok(sse_process) = process.subject_owner(subj.data)
-    let monitor = process.monitor(sse_process)
-    let selector =
-      process.new_selector()
-      |> process.select_specific_monitor(monitor, function.identity)
-    response.new(200)
-    |> response.set_body(ServerSentEvents(selector))
-  })
-  |> result.lazy_unwrap(fn() {
-    response.new(400)
-    |> response.set_body(Bytes(bytes_tree.new()))
-  })
+  case
+    transport.send(
+      req.body.transport,
+      req.body.socket,
+      encoder.response_builder(200, with_default_headers.headers, "1.1"),
+    )
+  {
+    Ok(_nil) -> {
+      let server_sent_events_factory =
+        factory.get_by_name(req.body.server_sent_events_factory)
+      let start = fn() {
+        actor.new_with_initialiser(1000, fn(subj) {
+          init(subj)
+          |> actor.initialised
+          |> actor.returning(process.self())
+          |> actor.selecting(process.new_selector() |> process.select(subj))
+          |> Ok
+        })
+        |> actor.on_message(fn(state, message) {
+          loop(state, message, SSEConnection(req.body))
+        })
+        |> actor.start
+        |> result.map(fn(started) {
+          let pid = started.data
+          actor.Started(pid, pid)
+        })
+      }
+      case factory.start_child(server_sent_events_factory, start) {
+        Ok(started) -> {
+          let assert Ok(_nil) =
+            transport.controlling_process(
+              req.body.transport,
+              req.body.socket,
+              started.data,
+            )
+
+          response.new(200) |> response.set_body(ServerSentEvents)
+        }
+        Error(_start_error) -> {
+          logging.log(logging.Error, "Failed to start SSE process")
+          response.new(400)
+          |> response.set_body(Bytes(bytes_tree.new()))
+        }
+      }
+    }
+    Error(_nil) -> {
+      response.new(400)
+      |> response.set_body(Bytes(bytes_tree.new()))
+    }
+  }
 }
 
 // This constructs an event from the provided type.  If `id`, `event` or `retry` are
@@ -814,4 +884,99 @@ pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
   transport.send(conn.transport, conn.socket, message)
   |> result.replace(Nil)
   |> result.replace_error(Nil)
+}
+
+pub type ChunkNext(state) {
+  ChunkContinue(state: state)
+  ChunkStop
+  ChunkAbort(reason: String)
+}
+
+pub fn chunked(
+  request req: Request(Connection),
+  response response: Response(discard),
+  init init: fn(Subject(message)) -> state,
+  loop loop: fn(state, message, Connection) -> ChunkNext(state),
+) -> Response(ResponseData) {
+  let start = fn() {
+    actor.new_with_initialiser(1000, fn(subj) {
+      init(subj)
+      |> actor.initialised
+      |> actor.returning(process.self())
+      |> actor.selecting(process.new_selector() |> process.select(subj))
+      |> Ok
+    })
+    |> actor.on_message(fn(state, message) {
+      case loop(state, message, req.body) {
+        ChunkContinue(state) -> actor.continue(state)
+        ChunkStop -> actor.stop()
+        ChunkAbort(reason) -> actor.stop_abnormal(reason)
+      }
+    })
+    |> actor.start
+    |> result.map(fn(started) { actor.Started(started.data, started.data) })
+  }
+
+  let headers = [#("transfer-encoding", "chunked"), ..response.headers]
+  let initial_payload =
+    encoder.response_builder(
+      response.status,
+      headers,
+      http.version_to_string(http.Http11),
+    )
+
+  let assert Ok(_nil) =
+    transport.send(req.body.transport, req.body.socket, initial_payload)
+
+  let chunked_factory = factory.get_by_name(req.body.chunked_response_factory)
+
+  case factory.start_child(chunked_factory, start) {
+    Ok(started) -> {
+      let assert Ok(_controlled) =
+        transport.controlling_process(
+          req.body.transport,
+          req.body.socket,
+          started.data,
+        )
+      response.new(200) |> response.set_body(Chunked)
+    }
+    Error(_start_error) -> {
+      logging.log(logging.Error, "Failed to start chunked response process")
+      response.new(400) |> response.set_body(Bytes(bytes_tree.new()))
+    }
+  }
+}
+
+pub fn send_chunk(connection: Connection, data: BitArray) -> Result(Nil, Nil) {
+  let size = bit_array.byte_size(data)
+  let encoded =
+    size
+    |> int_to_hex
+    |> bytes_tree.from_string
+    |> bytes_tree.append_string("\r\n")
+    |> bytes_tree.append(data)
+    |> bytes_tree.append_string("\r\n")
+
+  transport.send(connection.transport, connection.socket, encoded)
+  |> result.replace_error(Nil)
+}
+
+pub fn chunk_continue(state: state) -> ChunkNext(state) {
+  ChunkContinue(state)
+}
+
+pub fn chunk_stop() -> ChunkNext(state) {
+  ChunkStop
+}
+
+pub fn chunk_stop_abnormal(reason: String) -> ChunkNext(state) {
+  ChunkAbort(reason)
+}
+
+/// Creates a standard HTTP handler service to pass to `mist.serve`
+@external(erlang, "erlang", "integer_to_list")
+fn integer_to_list(int int: Int, base base: Int) -> String
+
+fn int_to_hex(int: Int) -> String {
+  integer_to_list(int, 16)
 }

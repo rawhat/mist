@@ -8,7 +8,6 @@ import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import gleam/yielder.{type Yielder}
 import glisten/internal/handler.{Close, Internal}
 import glisten/socket.{type Socket, type SocketReason, Badarg}
 import glisten/transport.{type Transport}
@@ -31,34 +30,33 @@ pub fn initial_state() -> State {
 pub fn call(
   req: Request(Connection),
   handler: Handler,
-  conn: Connection,
   sender: Subject(handler.Message(user_message)),
   version: http.HttpVersion,
 ) -> Result(State, Result(Nil, String)) {
   exception.rescue(fn() { handler(req) })
   |> result.map_error(log_and_error(
     _,
-    conn.socket,
-    conn.transport,
+    req.body.socket,
+    req.body.transport,
     req,
     version,
   ))
   |> result.try(fn(resp) {
     case resp {
-      response.Response(body: Websocket(selector), ..)
-      | response.Response(body: ServerSentEvents(selector), ..) -> {
-        let _resp = process.selector_receive_forever(selector)
+      response.Response(body: Websocket, ..)
+      | response.Response(body: ServerSentEvents, ..)
+      | response.Response(body: Chunked, ..) -> {
         Error(Ok(Nil))
       }
       response.Response(body: body, ..) as resp -> {
         case body {
-          Bytes(body) -> handle_bytes_tree_body(resp, body, conn, req, version)
-          Chunked(body) -> handle_chunked_body(resp, body, conn, version)
-          File(..) -> handle_file_body(resp, body, conn, version)
+          Bytes(body) ->
+            handle_bytes_tree_body(resp, body, req.body, req, version)
+          File(..) -> handle_file_body(resp, body, req.body, version)
           _ -> panic as "This shouldn't ever happen 🤞"
         }
         |> result.replace_error(Ok(Nil))
-        |> result.try(close_or_set_timer(_, conn, sender))
+        |> result.try(close_or_set_timer(_, req.body, sender))
       }
     }
   })
@@ -112,44 +110,6 @@ fn close_or_set_timer(
       Ok(State(idle_timer: Some(timer)))
     }
   }
-}
-
-fn handle_chunked_body(
-  resp: response.Response(ResponseData),
-  body: Yielder(BytesTree),
-  conn: Connection,
-  version: http.HttpVersion,
-) -> Result(response.Response(BytesTree), SocketReason) {
-  let headers = [#("transfer-encoding", "chunked"), ..resp.headers]
-  let initial_payload =
-    encoder.response_builder(
-      resp.status,
-      headers,
-      http.version_to_string(version),
-    )
-
-  transport.send(conn.transport, conn.socket, initial_payload)
-  |> result.try(fn(_ok) {
-    body
-    |> yielder.append(yielder.from_list([bytes_tree.new()]))
-    |> yielder.try_fold(Nil, fn(_prev, chunk) {
-      let size = bytes_tree.byte_size(chunk)
-      let encoded =
-        size
-        |> int_to_hex
-        |> bytes_tree.from_string
-        |> bytes_tree.append_string("\r\n")
-        |> bytes_tree.append_tree(chunk)
-        |> bytes_tree.append_string("\r\n")
-
-      transport.send(conn.transport, conn.socket, encoded)
-    })
-  })
-  |> result.replace(
-    resp
-    |> response.set_header("tranfer-encoding", "chunked")
-    |> response.set_body(bytes_tree.new()),
-  )
 }
 
 fn handle_file_body(
@@ -233,12 +193,4 @@ fn handle_bytes_tree_body(
   |> encoder.to_bytes_tree(http.version_to_string(version))
   |> transport.send(conn.transport, conn.socket, _)
   |> result.replace(resp)
-}
-
-/// Creates a standard HTTP handler service to pass to `mist.serve`
-@external(erlang, "erlang", "integer_to_list")
-fn integer_to_list(int int: Int, base base: Int) -> String
-
-fn int_to_hex(int: Int) -> String {
-  integer_to_list(int, 16)
 }
