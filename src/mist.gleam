@@ -737,7 +737,7 @@ pub fn send_text_frame(
 }
 
 // Returned by `init_server_sent_events`. This type must be passed to
-// `send_event` since we need to enforce that the correct headers / data shapw
+// `send_event` since we need to enforce that the correct headers / data shape
 // is provided.
 pub opaque type SSEConnection {
   SSEConnection(Connection)
@@ -886,10 +886,17 @@ pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
   |> result.replace_error(Nil)
 }
 
+pub type ChunkNext(state) {
+  ChunkContinue(state: state)
+  ChunkStop
+  ChunkAbort(reason: String)
+}
+
 pub fn chunked(
   request req: Request(Connection),
+  response response: Response(discard),
   init init: fn(Subject(message)) -> state,
-  loop loop: fn(state, message, Connection) -> actor.Next(state, message),
+  loop loop: fn(state, message, Connection) -> ChunkNext(state),
 ) -> Response(ResponseData) {
   let start = fn() {
     actor.new_with_initialiser(1000, fn(subj) {
@@ -899,16 +906,33 @@ pub fn chunked(
       |> actor.selecting(process.new_selector() |> process.select(subj))
       |> Ok
     })
-    |> actor.on_message(fn(state, message) { loop(state, message, req.body) })
+    |> actor.on_message(fn(state, message) {
+      case loop(state, message, req.body) {
+        ChunkContinue(state) -> actor.continue(state)
+        ChunkStop -> actor.stop()
+        ChunkAbort(reason) -> actor.stop_abnormal(reason)
+      }
+    })
     |> actor.start
     |> result.map(fn(started) { actor.Started(started.data, started.data) })
   }
+
+  let headers = [#("transfer-encoding", "chunked"), ..response.headers]
+  let initial_payload =
+    encoder.response_builder(
+      response.status,
+      headers,
+      http.version_to_string(http.Http11),
+    )
+
+  let assert Ok(_nil) =
+    transport.send(req.body.transport, req.body.socket, initial_payload)
 
   let chunked_factory = factory.get_by_name(req.body.chunked_response_factory)
 
   case factory.start_child(chunked_factory, start) {
     Ok(started) -> {
-      let _ =
+      let assert Ok(_controlled) =
         transport.controlling_process(
           req.body.transport,
           req.body.socket,
@@ -923,7 +947,7 @@ pub fn chunked(
   }
 }
 
-pub fn send_chunk(connection: Connection, data: BitArray) -> Nil {
+pub fn send_chunk(connection: Connection, data: BitArray) -> Result(Nil, Nil) {
   let size = bit_array.byte_size(data)
   let encoded =
     size
@@ -932,8 +956,23 @@ pub fn send_chunk(connection: Connection, data: BitArray) -> Nil {
     |> bytes_tree.append_string("\r\n")
     |> bytes_tree.append(data)
     |> bytes_tree.append_string("\r\n")
-  let _ = transport.send(connection.transport, connection.socket, encoded)
-  Nil
+
+  echo encoded
+
+  transport.send(connection.transport, connection.socket, encoded)
+  |> result.replace_error(Nil)
+}
+
+pub fn chunk_continue(state: state) -> ChunkNext(state) {
+  ChunkContinue(state)
+}
+
+pub fn chunk_stop() -> ChunkNext(state) {
+  ChunkStop
+}
+
+pub fn chunk_stop_abnormal(reason: String) -> ChunkNext(state) {
+  ChunkAbort(reason)
 }
 
 /// Creates a standard HTTP handler service to pass to `mist.serve`

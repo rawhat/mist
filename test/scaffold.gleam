@@ -156,6 +156,7 @@ pub fn chunked_echo_server(chunk_size: Int) {
     let assert Ok(body) = bit_array.to_string(read_request.body)
     mist.chunked(
       req,
+      response.new(200),
       fn(subj) { process.spawn(fn() { chunk_sender(body, subj) }) },
       fn(state, msg, conn) {
         mist.send_chunk(conn, bit_array.from_string(msg))
