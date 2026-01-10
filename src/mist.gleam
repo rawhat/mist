@@ -560,6 +560,7 @@ pub fn start(
     supervision.supervisor(fn() {
       factory.worker_child(fn(start) { start() })
       |> factory.named(websocket_factory)
+      |> factory.restart_strategy(supervision.Temporary)
       |> factory.start()
     }),
   )
@@ -567,6 +568,7 @@ pub fn start(
     supervision.supervisor(fn() {
       factory.worker_child(fn(start) { start() })
       |> factory.named(server_sent_events_factory)
+      |> factory.restart_strategy(supervision.Temporary)
       |> factory.start()
     }),
   )
@@ -574,6 +576,7 @@ pub fn start(
     supervision.supervisor(fn() {
       factory.worker_child(fn(start) { start() })
       |> factory.named(chunked_response_factory)
+      |> factory.restart_strategy(supervision.Temporary)
       |> factory.start()
     }),
   )

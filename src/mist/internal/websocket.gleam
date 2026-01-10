@@ -81,17 +81,6 @@ fn message_selector() -> Selector(WebsocketMessage(user_message)) {
   })
 }
 
-pub type WebsocketInitializer(state, user_message) {
-  WebsocketInitializer(
-    on_init: fn(WebsocketConnection) -> #(state, Option(Selector(user_message))),
-    on_close: fn(state) -> Nil,
-    handler: Handler(state, user_message),
-    socket: Socket,
-    transport: Transport,
-    extensions: List(String),
-  )
-}
-
 pub fn initialize_connection(
   on_init: fn(WebsocketConnection) -> #(state, Option(Selector(user_message))),
   on_close: fn(state) -> Nil,
