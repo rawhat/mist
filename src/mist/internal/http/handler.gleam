@@ -44,11 +44,8 @@ pub fn call(
   ))
   |> result.try(fn(resp) {
     case resp {
-      response.Response(body: Websocket, ..) -> {
-        Error(Ok(Nil))
-      }
-      response.Response(body: ServerSentEvents(selector), ..) -> {
-        let _resp = process.selector_receive_forever(selector)
+      response.Response(body: Websocket, ..)
+      | response.Response(body: ServerSentEvents, ..) -> {
         Error(Ok(Nil))
       }
       response.Response(body: body, ..) as resp -> {

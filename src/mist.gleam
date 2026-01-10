@@ -1,8 +1,7 @@
 import exception
 import gleam/bit_array
 import gleam/bytes_tree.{type BytesTree}
-import gleam/erlang/process.{type Down, type Selector, type Subject}
-import gleam/function
+import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http.{type Scheme, Http, Https} as gleam_http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
@@ -141,7 +140,7 @@ pub type ResponseData {
   Chunked(Yielder(BytesTree))
   /// See `mist.send_file` to use this response type.
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
-  ServerSentEvents(Selector(Down))
+  ServerSentEvents
 }
 
 /// Potential errors when opening a file to send. This list is
@@ -498,7 +497,7 @@ fn convert_body_types(
     Bytes(data) -> InternalBytes(data)
     File(descriptor, offset, length) -> InternalFile(descriptor, offset, length)
     Chunked(iter) -> InternalChunked(iter)
-    ServerSentEvents(selector) -> InternalServerSentEvents(selector)
+    ServerSentEvents -> InternalServerSentEvents
   }
   response.set_body(resp, new_body)
 }
@@ -514,12 +513,14 @@ pub fn start(
 ) -> Result(actor.Started(Supervisor), actor.StartError) {
   let listener_name = process.new_name("glisten_listener")
   let websocket_factory = process.new_name("mist_websocket_supervisor")
+  let server_sent_events_factory =
+    process.new_name("mist_server_sent_events_supervisor")
 
   supervisor.new(strategy: supervisor.OneForOne)
   |> supervisor.add(
     supervision.supervisor(fn() {
       fn(req) { convert_body_types(builder.handler(req)) }
-      |> handler.with_func(websocket_factory)
+      |> handler.with_func(websocket_factory, server_sent_events_factory)
       |> glisten.new(handler.init, _)
       |> glisten.bind(builder.interface)
       |> fn(handler) {
@@ -554,6 +555,13 @@ pub fn start(
     supervision.supervisor(fn() {
       factory.worker_child(fn(start) { start() })
       |> factory.named(websocket_factory)
+      |> factory.start()
+    }),
+  )
+  |> supervisor.add(
+    supervision.supervisor(fn() {
+      factory.worker_child(fn(start) { start() })
+      |> factory.named(server_sent_events_factory)
       |> factory.start()
     }),
   )
@@ -778,36 +786,53 @@ pub fn server_sent_events(
     |> response.set_header("cache-control", "no-cache")
     |> response.set_header("connection", "keep-alive")
 
-  transport.send(
-    req.body.transport,
-    req.body.socket,
-    encoder.response_builder(200, with_default_headers.headers, "1.1"),
-  )
-  |> result.replace_error(Nil)
-  |> result.try(fn(_nil) {
-    actor.new_with_initialiser(1000, fn(subj) {
-      init(subj)
-      |> result.map(fn(return) { actor.returning(return, subj) })
-    })
-    |> actor.on_message(fn(state, message) {
-      loop(state, message, SSEConnection(req.body))
-    })
-    |> actor.start
-    |> result.replace_error(Nil)
-  })
-  |> result.map(fn(subj) {
-    let assert Ok(sse_process) = process.subject_owner(subj.data)
-    let monitor = process.monitor(sse_process)
-    let selector =
-      process.new_selector()
-      |> process.select_specific_monitor(monitor, function.identity)
-    response.new(200)
-    |> response.set_body(ServerSentEvents(selector))
-  })
-  |> result.lazy_unwrap(fn() {
-    response.new(400)
-    |> response.set_body(Bytes(bytes_tree.new()))
-  })
+  case
+    transport.send(
+      req.body.transport,
+      req.body.socket,
+      encoder.response_builder(200, with_default_headers.headers, "1.1"),
+    )
+  {
+    Ok(_nil) -> {
+      let server_sent_events_factory =
+        factory.get_by_name(req.body.server_sent_events_factory)
+      let start = fn() {
+        actor.new_with_initialiser(1000, fn(subj) {
+          init(subj)
+          |> result.map(fn(return) { actor.returning(return, subj) })
+        })
+        |> actor.on_message(fn(state, message) {
+          loop(state, message, SSEConnection(req.body))
+        })
+        |> actor.start
+        |> result.map(fn(started) {
+          let assert Ok(pid) = process.subject_owner(started.data)
+          actor.Started(pid, pid)
+        })
+      }
+      case factory.start_child(server_sent_events_factory, start) {
+        Ok(started) -> {
+          let assert Ok(_nil) =
+            transport.controlling_process(
+              req.body.transport,
+              req.body.socket,
+              started.data,
+            )
+
+          response.new(200) |> response.set_body(ServerSentEvents)
+        }
+        Error(_start_error) -> {
+          logging.log(logging.Error, "Failed to start SSE process")
+          response.new(400)
+          |> response.set_body(Bytes(bytes_tree.new()))
+        }
+      }
+    }
+    Error(_nil) -> {
+      response.new(400)
+      |> response.set_body(Bytes(bytes_tree.new()))
+    }
+  }
 }
 
 // This constructs an event from the provided type.  If `id`, `event` or `retry` are

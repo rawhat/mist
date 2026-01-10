@@ -48,6 +48,12 @@ pub fn with_func(
       process.Pid,
     ),
   ),
+  server_sent_events_factory: process.Name(
+    factory.Message(
+      fn() -> Result(actor.Started(process.Pid), actor.StartError),
+      process.Pid,
+    ),
+  ),
 ) -> Loop(State, SendMessage) {
   fn(state: State, msg, conn: glisten.Connection(SendMessage)) {
     let sender = conn.subject
@@ -56,6 +62,7 @@ pub fn with_func(
         body: Initial(<<>>),
         socket: conn.socket,
         transport: conn.transport,
+        server_sent_events_factory:,
         websocket_factory:,
       )
 
@@ -75,8 +82,7 @@ pub fn with_func(
           Websocket -> Error("WebSocket unsupported for HTTP/2")
           Chunked(_iterator) ->
             Error("Chunked encoding not supported for HTTP/2")
-          ServerSentEvents(_selector) ->
-            Error("Server-Sent Events unsupported for HTTP/2")
+          ServerSentEvents -> Error("Server-Sent Events unsupported for HTTP/2")
         }
         |> result.map(fn(context) {
           Http2(http2_handler.send_hpack_context(state, context))

@@ -5,7 +5,7 @@ import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/charlist.{type Charlist}
-import gleam/erlang/process.{type Down, type Selector}
+import gleam/erlang/process.{type Selector}
 import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response, Response}
@@ -13,7 +13,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option}
 import gleam/otp/actor
-import gleam/otp/factory_supervisor
+import gleam/otp/factory_supervisor as factory
 import gleam/pair
 import gleam/result
 import gleam/string
@@ -31,7 +31,7 @@ pub type ResponseData {
   Bytes(BytesTree)
   Chunked(Yielder(BytesTree))
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
-  ServerSentEvents(Selector(Down))
+  ServerSentEvents
 }
 
 pub type Connection {
@@ -39,8 +39,14 @@ pub type Connection {
     body: Body,
     socket: Socket,
     transport: Transport,
+    server_sent_events_factory: process.Name(
+      factory.Message(
+        fn() -> Result(actor.Started(process.Pid), actor.StartError),
+        process.Pid,
+      ),
+    ),
     websocket_factory: process.Name(
-      factory_supervisor.Message(
+      factory.Message(
         fn() -> Result(actor.Started(process.Pid), actor.StartError),
         process.Pid,
       ),
