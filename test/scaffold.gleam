@@ -155,7 +155,7 @@ pub fn chunked_echo_server(chunk_size: Int) {
       chars
       |> string.join("")
       |> fn(data) { process.send(subject, Data(data)) }
-      process.sleep(1)
+      process.sleep(5)
     })
     process.send(subject, Done)
   }
