@@ -45,11 +45,14 @@ pub fn open_server(
       let assert Ok(socket) = tcp.accept(listener)
 
       let loop_func =
-        handler.with_func(fn(req) {
-          req
-          |> handler
-          |> convert_body_types
-        })
+        handler.with_func(
+          fn(req) {
+            req
+            |> handler
+            |> convert_body_types
+          },
+          process.new_name("websocket_factory"),
+        )
 
       let glisten_handler =
         glisten_handler.Handler(
@@ -84,7 +87,7 @@ fn convert_body_types(
   resp: Response(mist.ResponseData),
 ) -> Response(mhttp.ResponseData) {
   let new_body = case resp.body {
-    mist.Websocket(selector) -> mhttp.Websocket(selector)
+    mist.Websocket -> mhttp.Websocket
     mist.Bytes(data) -> mhttp.Bytes(data)
     mist.File(descriptor, offset, length) ->
       mhttp.File(descriptor, offset, length)

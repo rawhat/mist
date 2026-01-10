@@ -190,12 +190,7 @@ fn handle_frame(
       }
     }
     None, frame.Header(Complete(data), end_stream, identifier, _priority) -> {
-      let conn =
-        Connection(
-          body: Initial(<<>>),
-          socket: conn.socket,
-          transport: conn.transport,
-        )
+      let conn = Connection(..conn, body: Initial(<<>>))
       let assert Ok(#(headers, context)) =
         http2.hpack_decode(state.receive_hpack_context, data)
 

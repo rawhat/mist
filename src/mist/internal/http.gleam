@@ -12,6 +12,8 @@ import gleam/http/response.{type Response, Response}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option}
+import gleam/otp/actor
+import gleam/otp/factory_supervisor
 import gleam/pair
 import gleam/result
 import gleam/string
@@ -25,7 +27,7 @@ import mist/internal/encoder
 import mist/internal/file
 
 pub type ResponseData {
-  Websocket(Selector(Down))
+  Websocket
   Bytes(BytesTree)
   Chunked(Yielder(BytesTree))
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
@@ -33,7 +35,17 @@ pub type ResponseData {
 }
 
 pub type Connection {
-  Connection(body: Body, socket: Socket, transport: Transport)
+  Connection(
+    body: Body,
+    socket: Socket,
+    transport: Transport,
+    websocket_factory: process.Name(
+      factory_supervisor.Message(
+        fn() -> Result(actor.Started(process.Pid), actor.StartError),
+        process.Pid,
+      ),
+    ),
+  )
 }
 
 pub type Handler =

@@ -1,6 +1,8 @@
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http/response
 import gleam/option.{type Option, Some}
+import gleam/otp/actor
+import gleam/otp/factory_supervisor as factory
 import gleam/result
 import gleam/string
 import glisten.{type Loop, Packet, User}
@@ -38,7 +40,15 @@ pub fn init(_conn) -> #(State, Option(Selector(SendMessage))) {
   #(new_state(subj), Some(selector))
 }
 
-pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
+pub fn with_func(
+  handler: Handler,
+  websocket_factory: process.Name(
+    factory.Message(
+      fn() -> Result(actor.Started(process.Pid), actor.StartError),
+      process.Pid,
+    ),
+  ),
+) -> Loop(State, SendMessage) {
   fn(state: State, msg, conn: glisten.Connection(SendMessage)) {
     let sender = conn.subject
     let conn =
@@ -46,6 +56,7 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
         body: Initial(<<>>),
         socket: conn.socket,
         transport: conn.transport,
+        websocket_factory:,
       )
 
     let result = case msg, state {
@@ -61,7 +72,7 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
           }
           File(..) -> Error("File sending unsupported over HTTP/2")
           // TODO:  properly error in some fashion for these
-          Websocket(_selector) -> Error("WebSocket unsupported for HTTP/2")
+          Websocket -> Error("WebSocket unsupported for HTTP/2")
           Chunked(_iterator) ->
             Error("Chunked encoding not supported for HTTP/2")
           ServerSentEvents(_selector) ->
@@ -98,7 +109,7 @@ pub fn with_func(handler: Handler) -> Loop(State, SendMessage) {
         |> result.try(fn(req) {
           case req {
             http.Http1Request(req, version) ->
-              http_handler.call(req, handler, conn, sender, version)
+              http_handler.call(req, handler, sender, version)
               |> result.map(fn(new_state) {
                 Http1(state: new_state, self: self)
               })

@@ -13,7 +13,6 @@ application_start_module = "mist@internal@clock"
 [dependencies]
 gleam_erlang = ">= 1.0.0 and < 2.0.0"
 gleam_http = ">= 4.0.0 and < 5.0.0"
-gleam_otp = { git = "https://github.com/gleam-lang/otp", ref = "factory-supervisor" }
 gleam_stdlib = ">= 0.50.0 and < 1.0.0"
 hpack_erl = ">= 0.3.0 and < 1.0.0"
 logging = ">= 1.0.0 and < 2.0.0"
@@ -21,6 +20,7 @@ gleam_yielder = ">= 1.1.0 and < 2.0.0"
 glisten = { path = "../glisten" }
 exception = ">= 2.1.0 and < 3.0.0"
 gramps = ">= 6.0.0 and < 7.0.0"
+gleam_otp = ">= 1.2.0 and < 2.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

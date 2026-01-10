@@ -136,7 +136,7 @@ pub fn get_connection_info(conn: Connection) -> Result(ConnectionInfo, Nil) {
 /// `Transfer-Encoding: chunked` to send an iterator in chunks. `File` will use
 /// Erlang's `sendfile` to more efficiently return a file to the client.
 pub type ResponseData {
-  Websocket(fn() -> websocket.WebsocketInitializer(state, user_message))
+  Websocket
   Bytes(BytesTree)
   Chunked(Yielder(BytesTree))
   /// See `mist.send_file` to use this response type.
@@ -494,7 +494,7 @@ fn convert_body_types(
   resp: Response(ResponseData),
 ) -> Response(InternalResponseData) {
   let new_body = case resp.body {
-    Websocket(selector) -> InternalWebsocket(selector)
+    Websocket -> InternalWebsocket
     Bytes(data) -> InternalBytes(data)
     File(descriptor, offset, length) -> InternalFile(descriptor, offset, length)
     Chunked(iter) -> InternalChunked(iter)
@@ -513,13 +513,13 @@ pub fn start(
   builder: Builder(Connection, ResponseData),
 ) -> Result(actor.Started(Supervisor), actor.StartError) {
   let listener_name = process.new_name("glisten_listener")
-  let websocket_supervisor = process.new_name("mist_websocket_supervisor")
+  let websocket_factory = process.new_name("mist_websocket_supervisor")
 
   supervisor.new(strategy: supervisor.OneForOne)
   |> supervisor.add(
     supervision.supervisor(fn() {
       fn(req) { convert_body_types(builder.handler(req)) }
-      |> handler.with_func
+      |> handler.with_func(websocket_factory)
       |> glisten.new(handler.init, _)
       |> glisten.bind(builder.interface)
       |> fn(handler) {
@@ -552,8 +552,8 @@ pub fn start(
   )
   |> supervisor.add(
     supervision.supervisor(fn() {
-      factory.worker_child(websocket.initialize_connection)
-      |> factory.named(websocket_supervisor)
+      factory.worker_child(fn(start) { start() })
+      |> factory.named(websocket_factory)
       |> factory.start()
     }),
   )
@@ -624,31 +624,45 @@ pub fn websocket(
 
   let socket = request.body.socket
   let transport = request.body.transport
-  request
-  |> http.upgrade(socket, transport, extensions, _)
-  |> result.try(fn(_nil) {
-    websocket.initialize_connection(
-      on_init,
-      on_close,
-      handler,
-      socket,
-      transport,
-      extensions,
-    )
-  })
-  |> result.map(fn(subj) {
-    let assert Ok(ws_process) = process.subject_owner(subj.data)
-    let monitor = process.monitor(ws_process)
-    let selector =
-      process.new_selector()
-      |> process.select_specific_monitor(monitor, function.identity)
-    response.new(200)
-    |> response.set_body(Websocket(selector))
-  })
-  |> result.lazy_unwrap(fn() {
-    response.new(400)
-    |> response.set_body(Bytes(bytes_tree.new()))
-  })
+  case http.upgrade(socket, transport, extensions, request) {
+    Ok(_nil) -> {
+      let start = fn() {
+        websocket.initialize_connection(
+          on_init,
+          on_close,
+          handler,
+          socket,
+          transport,
+          extensions,
+        )
+      }
+      case
+        factory.start_child(
+          factory.get_by_name(request.body.websocket_factory),
+          start,
+        )
+      {
+        Ok(started) -> {
+          let assert Ok(_) =
+            transport.controlling_process(transport, socket, started.data)
+          websocket.set_active(transport, socket)
+          response.new(200) |> response.set_body(Websocket)
+        }
+        Error(start_error) -> {
+          logging.log(
+            logging.Error,
+            "Failed to start WebSocket process: " <> string.inspect(start_error),
+          )
+          response.new(400)
+          |> response.set_body(Bytes(bytes_tree.new()))
+        }
+      }
+    }
+    Error(_reason) -> {
+      response.new(400)
+      |> response.set_body(Bytes(bytes_tree.new()))
+    }
+  }
 }
 
 pub type WebsocketConnection =

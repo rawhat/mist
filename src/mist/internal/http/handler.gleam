@@ -31,34 +31,36 @@ pub fn initial_state() -> State {
 pub fn call(
   req: Request(Connection),
   handler: Handler,
-  conn: Connection,
   sender: Subject(handler.Message(user_message)),
   version: http.HttpVersion,
 ) -> Result(State, Result(Nil, String)) {
   exception.rescue(fn() { handler(req) })
   |> result.map_error(log_and_error(
     _,
-    conn.socket,
-    conn.transport,
+    req.body.socket,
+    req.body.transport,
     req,
     version,
   ))
   |> result.try(fn(resp) {
     case resp {
-      response.Response(body: Websocket(selector), ..)
-      | response.Response(body: ServerSentEvents(selector), ..) -> {
+      response.Response(body: Websocket, ..) -> {
+        Error(Ok(Nil))
+      }
+      response.Response(body: ServerSentEvents(selector), ..) -> {
         let _resp = process.selector_receive_forever(selector)
         Error(Ok(Nil))
       }
       response.Response(body: body, ..) as resp -> {
         case body {
-          Bytes(body) -> handle_bytes_tree_body(resp, body, conn, req, version)
-          Chunked(body) -> handle_chunked_body(resp, body, conn, version)
-          File(..) -> handle_file_body(resp, body, conn, version)
+          Bytes(body) ->
+            handle_bytes_tree_body(resp, body, req.body, req, version)
+          Chunked(body) -> handle_chunked_body(resp, body, req.body, version)
+          File(..) -> handle_file_body(resp, body, req.body, version)
           _ -> panic as "This shouldn't ever happen 🤞"
         }
         |> result.replace_error(Ok(Nil))
-        |> result.try(close_or_set_timer(_, conn, sender))
+        |> result.try(close_or_set_timer(_, req.body, sender))
       }
     }
   })
