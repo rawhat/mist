@@ -957,8 +957,6 @@ pub fn send_chunk(connection: Connection, data: BitArray) -> Result(Nil, Nil) {
     |> bytes_tree.append(data)
     |> bytes_tree.append_string("\r\n")
 
-  echo encoded
-
   transport.send(connection.transport, connection.socket, encoded)
   |> result.replace_error(Nil)
 }

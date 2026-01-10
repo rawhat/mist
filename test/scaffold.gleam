@@ -2,6 +2,7 @@ import exception
 import gleam/bit_array
 import gleam/bool
 import gleam/bytes_tree.{type BytesTree}
+import gleam/erlang/atom
 import gleam/erlang/process
 import gleam/hackney
 import gleam/http
@@ -10,12 +11,10 @@ import gleam/http/response.{type Response, Response}
 import gleam/int
 import gleam/list
 import gleam/option
-import gleam/otp/actor
 import gleam/otp/factory_supervisor as factory
 import gleam/result
 import gleam/set
 import gleam/string
-import gleam/yielder
 import glisten
 import glisten/internal/handler as glisten_handler
 import glisten/tcp
@@ -41,17 +40,20 @@ pub fn open_server(
   with handler: fn(Request(Connection)) -> Response(mist.ResponseData),
   after perform: fn() -> return,
 ) -> return {
+  let chunked_response_factory =
+    process.new_name("mist_chunked_response_supervisor")
+  let chunked_response_supervisor =
+    process.spawn_unlinked(fn() {
+      let assert Ok(_chunked) =
+        factory.worker_child(fn(start) { start() })
+        |> factory.named(chunked_response_factory)
+        |> factory.start()
+
+      process.sleep_forever()
+    })
+
   let pid =
     process.spawn_unlinked(fn() {
-      let chunked_response_factory =
-        process.new_name("chunked_response_factory")
-      let _chunked_response_supervisor =
-        process.spawn_unlinked(fn() {
-          factory.worker_child(fn(start) { start() })
-          |> factory.named(chunked_response_factory)
-          |> factory.start()
-        })
-
       let assert Ok(listener) = tcp.listen(port, [])
       let assert Ok(socket) = tcp.accept(listener)
 
@@ -87,10 +89,12 @@ pub fn open_server(
   case exception.rescue(perform) {
     Ok(return) -> {
       process.kill(pid)
+      exit(chunked_response_supervisor, atom.create("shutdown"))
       return
     }
     Error(err) -> {
       process.kill(pid)
+      exit(chunked_response_supervisor, atom.create("shutdown"))
       panic as { "Handler failed with: " <> string.inspect(err) }
     }
   }
@@ -137,19 +141,23 @@ fn convert_loop(
   }
 }
 
+type ChunkMessage {
+  Data(data: String)
+  Done
+}
+
 pub fn chunked_echo_server(chunk_size: Int) {
-  let chunk_sender = fn(body: String, subject: process.Subject(String)) {
+  let chunk_sender = fn(body: String, subject: process.Subject(ChunkMessage)) {
     body
     |> string.to_graphemes
-    |> yielder.from_list
-    |> yielder.sized_chunk(chunk_size)
-    |> yielder.map(fn(chars) {
+    |> list.sized_chunk(chunk_size)
+    |> list.each(fn(chars) {
       chars
       |> string.join("")
-      |> process.send(subject, _)
-
-      process.sleep(500)
+      |> fn(data) { process.send(subject, Data(data)) }
+      process.sleep(1)
     })
+    process.send(subject, Done)
   }
   fn(req: request.Request(mhttp.Connection)) {
     let assert Ok(read_request) = mhttp.read_body(req)
@@ -159,8 +167,16 @@ pub fn chunked_echo_server(chunk_size: Int) {
       response.new(200),
       fn(subj) { process.spawn(fn() { chunk_sender(body, subj) }) },
       fn(state, msg, conn) {
-        mist.send_chunk(conn, bit_array.from_string(msg))
-        actor.continue(state)
+        case msg {
+          Data(data) -> {
+            let assert Ok(_sent) =
+              mist.send_chunk(conn, bit_array.from_string(data))
+            mist.chunk_continue(state)
+          }
+          Done -> {
+            mist.chunk_stop()
+          }
+        }
       },
     )
   }
@@ -268,3 +284,6 @@ fn io_fwrite(
 pub fn io_fwrite_user(data: anything) {
   io_fwrite(User, "~tp\n", [data])
 }
+
+@external(erlang, "erlang", "exit")
+fn exit(pid: process.Pid, reason: anything) -> Nil
