@@ -17,7 +17,6 @@ import gleam/otp/factory_supervisor as factory
 import gleam/pair
 import gleam/result
 import gleam/string
-import gleam/yielder.{type Yielder}
 import glisten.{type Socket}
 import glisten/transport.{type Transport}
 import gramps/websocket
@@ -29,7 +28,7 @@ import mist/internal/file
 pub type ResponseData {
   Websocket
   Bytes(BytesTree)
-  Chunked(Yielder(BytesTree))
+  Chunked
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
   ServerSentEvents
 }
@@ -46,6 +45,12 @@ pub type Connection {
       ),
     ),
     websocket_factory: process.Name(
+      factory.Message(
+        fn() -> Result(actor.Started(process.Pid), actor.StartError),
+        process.Pid,
+      ),
+    ),
+    chunked_response_factory: process.Name(
       factory.Message(
         fn() -> Result(actor.Started(process.Pid), actor.StartError),
         process.Pid,

@@ -16,7 +16,6 @@ import gleam/otp/supervision.{type ChildSpecification}
 import gleam/result
 import gleam/string
 import gleam/string_tree.{type StringTree}
-import gleam/yielder.{type Yielder}
 import glisten
 import glisten/transport
 import gramps/websocket.{BinaryFrame, Data, TextFrame} as gramps_websocket
@@ -137,7 +136,7 @@ pub fn get_connection_info(conn: Connection) -> Result(ConnectionInfo, Nil) {
 pub type ResponseData {
   Websocket
   Bytes(BytesTree)
-  Chunked(Yielder(BytesTree))
+  Chunked
   /// See `mist.send_file` to use this response type.
   File(descriptor: file.FileDescriptor, offset: Int, length: Int)
   ServerSentEvents
@@ -496,7 +495,7 @@ fn convert_body_types(
     Websocket -> InternalWebsocket
     Bytes(data) -> InternalBytes(data)
     File(descriptor, offset, length) -> InternalFile(descriptor, offset, length)
-    Chunked(iter) -> InternalChunked(iter)
+    Chunked -> InternalChunked
     ServerSentEvents -> InternalServerSentEvents
   }
   response.set_body(resp, new_body)
@@ -515,12 +514,18 @@ pub fn start(
   let websocket_factory = process.new_name("mist_websocket_supervisor")
   let server_sent_events_factory =
     process.new_name("mist_server_sent_events_supervisor")
+  let chunked_response_factory =
+    process.new_name("mist_chunked_response_supervisor")
 
   supervisor.new(strategy: supervisor.OneForOne)
   |> supervisor.add(
     supervision.supervisor(fn() {
       fn(req) { convert_body_types(builder.handler(req)) }
-      |> handler.with_func(websocket_factory, server_sent_events_factory)
+      |> handler.with_func(
+        websocket_factory,
+        server_sent_events_factory,
+        chunked_response_factory,
+      )
       |> glisten.new(handler.init, _)
       |> glisten.bind(builder.interface)
       |> fn(handler) {
@@ -562,6 +567,13 @@ pub fn start(
     supervision.supervisor(fn() {
       factory.worker_child(fn(start) { start() })
       |> factory.named(server_sent_events_factory)
+      |> factory.start()
+    }),
+  )
+  |> supervisor.add(
+    supervision.supervisor(fn() {
+      factory.worker_child(fn(start) { start() })
+      |> factory.named(chunked_response_factory)
       |> factory.start()
     }),
   )
@@ -776,8 +788,7 @@ pub fn event_retry(event: SSEEvent, retry: Int) -> SSEEvent {
 pub fn server_sent_events(
   request req: Request(Connection),
   initial_response resp: Response(discard),
-  init init: fn(Subject(message)) ->
-    Result(actor.Initialised(state, message, data), String),
+  init init: fn(Subject(message)) -> state,
   loop loop: fn(state, message, SSEConnection) -> actor.Next(state, message),
 ) -> Response(ResponseData) {
   let with_default_headers =
@@ -799,14 +810,17 @@ pub fn server_sent_events(
       let start = fn() {
         actor.new_with_initialiser(1000, fn(subj) {
           init(subj)
-          |> result.map(fn(return) { actor.returning(return, subj) })
+          |> actor.initialised
+          |> actor.returning(process.self())
+          |> actor.selecting(process.new_selector() |> process.select(subj))
+          |> Ok
         })
         |> actor.on_message(fn(state, message) {
           loop(state, message, SSEConnection(req.body))
         })
         |> actor.start
         |> result.map(fn(started) {
-          let assert Ok(pid) = process.subject_owner(started.data)
+          let pid = started.data
           actor.Started(pid, pid)
         })
       }
@@ -870,4 +884,62 @@ pub fn send_event(conn: SSEConnection, event: SSEEvent) -> Result(Nil, Nil) {
   transport.send(conn.transport, conn.socket, message)
   |> result.replace(Nil)
   |> result.replace_error(Nil)
+}
+
+pub fn chunked(
+  request req: Request(Connection),
+  init init: fn(Subject(message)) -> state,
+  loop loop: fn(state, message, Connection) -> actor.Next(state, message),
+) -> Response(ResponseData) {
+  let start = fn() {
+    actor.new_with_initialiser(1000, fn(subj) {
+      init(subj)
+      |> actor.initialised
+      |> actor.returning(process.self())
+      |> actor.selecting(process.new_selector() |> process.select(subj))
+      |> Ok
+    })
+    |> actor.on_message(fn(state, message) { loop(state, message, req.body) })
+    |> actor.start
+    |> result.map(fn(started) { actor.Started(started.data, started.data) })
+  }
+
+  let chunked_factory = factory.get_by_name(req.body.chunked_response_factory)
+
+  case factory.start_child(chunked_factory, start) {
+    Ok(started) -> {
+      let _ =
+        transport.controlling_process(
+          req.body.transport,
+          req.body.socket,
+          started.data,
+        )
+      response.new(200) |> response.set_body(Chunked)
+    }
+    Error(_start_error) -> {
+      logging.log(logging.Error, "Failed to start chunked response process")
+      response.new(400) |> response.set_body(Bytes(bytes_tree.new()))
+    }
+  }
+}
+
+pub fn send_chunk(connection: Connection, data: BitArray) -> Nil {
+  let size = bit_array.byte_size(data)
+  let encoded =
+    size
+    |> int_to_hex
+    |> bytes_tree.from_string
+    |> bytes_tree.append_string("\r\n")
+    |> bytes_tree.append(data)
+    |> bytes_tree.append_string("\r\n")
+  let _ = transport.send(connection.transport, connection.socket, encoded)
+  Nil
+}
+
+/// Creates a standard HTTP handler service to pass to `mist.serve`
+@external(erlang, "erlang", "integer_to_list")
+fn integer_to_list(int int: Int, base base: Int) -> String
+
+fn int_to_hex(int: Int) -> String {
+  integer_to_list(int, 16)
 }

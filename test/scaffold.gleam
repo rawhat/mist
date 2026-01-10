@@ -10,6 +10,8 @@ import gleam/http/response.{type Response, Response}
 import gleam/int
 import gleam/list
 import gleam/option
+import gleam/otp/actor
+import gleam/otp/factory_supervisor as factory
 import gleam/result
 import gleam/set
 import gleam/string
@@ -41,6 +43,15 @@ pub fn open_server(
 ) -> return {
   let pid =
     process.spawn_unlinked(fn() {
+      let chunked_response_factory =
+        process.new_name("chunked_response_factory")
+      let _chunked_response_supervisor =
+        process.spawn_unlinked(fn() {
+          factory.worker_child(fn(start) { start() })
+          |> factory.named(chunked_response_factory)
+          |> factory.start()
+        })
+
       let assert Ok(listener) = tcp.listen(port, [])
       let assert Ok(socket) = tcp.accept(listener)
 
@@ -52,6 +63,8 @@ pub fn open_server(
             |> convert_body_types
           },
           process.new_name("websocket_factory"),
+          process.new_name("server_sent_events_factory"),
+          chunked_response_factory,
         )
 
       let glisten_handler =
@@ -91,8 +104,8 @@ fn convert_body_types(
     mist.Bytes(data) -> mhttp.Bytes(data)
     mist.File(descriptor, offset, length) ->
       mhttp.File(descriptor, offset, length)
-    mist.Chunked(iter) -> mhttp.Chunked(iter)
-    mist.ServerSentEvents(selector) -> mhttp.ServerSentEvents(selector)
+    mist.Chunked -> mhttp.Chunked
+    mist.ServerSentEvents -> mhttp.ServerSentEvents
   }
   response.set_body(resp, new_body)
 }
@@ -125,21 +138,30 @@ fn convert_loop(
 }
 
 pub fn chunked_echo_server(chunk_size: Int) {
+  let chunk_sender = fn(body: String, subject: process.Subject(String)) {
+    body
+    |> string.to_graphemes
+    |> yielder.from_list
+    |> yielder.sized_chunk(chunk_size)
+    |> yielder.map(fn(chars) {
+      chars
+      |> string.join("")
+      |> process.send(subject, _)
+
+      process.sleep(500)
+    })
+  }
   fn(req: request.Request(mhttp.Connection)) {
-    let assert Ok(req) = mhttp.read_body(req)
-    let assert Ok(body) = bit_array.to_string(req.body)
-    let chunks =
-      body
-      |> string.to_graphemes
-      |> yielder.from_list
-      |> yielder.sized_chunk(chunk_size)
-      |> yielder.map(fn(chars) {
-        chars
-        |> string.join("")
-        |> bytes_tree.from_string
-      })
-    response.new(200)
-    |> response.set_body(mist.Chunked(chunks))
+    let assert Ok(read_request) = mhttp.read_body(req)
+    let assert Ok(body) = bit_array.to_string(read_request.body)
+    mist.chunked(
+      req,
+      fn(subj) { process.spawn(fn() { chunk_sender(body, subj) }) },
+      fn(state, msg, conn) {
+        mist.send_chunk(conn, bit_array.from_string(msg))
+        actor.continue(state)
+      },
+    )
   }
 }
 

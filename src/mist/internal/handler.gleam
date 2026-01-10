@@ -54,6 +54,12 @@ pub fn with_func(
       process.Pid,
     ),
   ),
+  chunked_response_factory: process.Name(
+    factory.Message(
+      fn() -> Result(actor.Started(process.Pid), actor.StartError),
+      process.Pid,
+    ),
+  ),
 ) -> Loop(State, SendMessage) {
   fn(state: State, msg, conn: glisten.Connection(SendMessage)) {
     let sender = conn.subject
@@ -62,6 +68,7 @@ pub fn with_func(
         body: Initial(<<>>),
         socket: conn.socket,
         transport: conn.transport,
+        chunked_response_factory:,
         server_sent_events_factory:,
         websocket_factory:,
       )
@@ -80,7 +87,7 @@ pub fn with_func(
           File(..) -> Error("File sending unsupported over HTTP/2")
           // TODO:  properly error in some fashion for these
           Websocket -> Error("WebSocket unsupported for HTTP/2")
-          Chunked(_iterator) ->
+          Chunked ->
             Error("Chunked encoding not supported for HTTP/2")
           ServerSentEvents -> Error("Server-Sent Events unsupported for HTTP/2")
         }
