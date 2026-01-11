@@ -511,21 +511,13 @@ pub fn start(
   builder: Builder(Connection, ResponseData),
 ) -> Result(actor.Started(Supervisor), actor.StartError) {
   let listener_name = process.new_name("glisten_listener")
-  let websocket_factory = process.new_name("mist_websocket_supervisor")
-  let server_sent_events_factory =
-    process.new_name("mist_server_sent_events_supervisor")
-  let chunked_response_factory =
-    process.new_name("mist_chunked_response_supervisor")
+  let factory_name = process.new_name("mist_factory_supervisor")
 
   supervisor.new(strategy: supervisor.OneForOne)
   |> supervisor.add(
     supervision.supervisor(fn() {
       fn(req) { convert_body_types(builder.handler(req)) }
-      |> handler.with_func(
-        websocket_factory,
-        server_sent_events_factory,
-        chunked_response_factory,
-      )
+      |> handler.with_func(factory_name)
       |> glisten.new(handler.init, _)
       |> glisten.bind(builder.interface)
       |> fn(handler) {
@@ -559,23 +551,7 @@ pub fn start(
   |> supervisor.add(
     supervision.supervisor(fn() {
       factory.worker_child(fn(start) { start() })
-      |> factory.named(websocket_factory)
-      |> factory.restart_strategy(supervision.Temporary)
-      |> factory.start()
-    }),
-  )
-  |> supervisor.add(
-    supervision.supervisor(fn() {
-      factory.worker_child(fn(start) { start() })
-      |> factory.named(server_sent_events_factory)
-      |> factory.restart_strategy(supervision.Temporary)
-      |> factory.start()
-    }),
-  )
-  |> supervisor.add(
-    supervision.supervisor(fn() {
-      factory.worker_child(fn(start) { start() })
-      |> factory.named(chunked_response_factory)
+      |> factory.named(factory_name)
       |> factory.restart_strategy(supervision.Temporary)
       |> factory.start()
     }),
@@ -659,12 +635,9 @@ pub fn websocket(
           extensions,
         )
       }
-      case
-        factory.start_child(
-          factory.get_by_name(request.body.websocket_factory),
-          start,
-        )
-      {
+
+      let factory_supervisor = factory.get_by_name(request.body.factory_name)
+      case factory.start_child(factory_supervisor, start) {
         Ok(started) -> {
           let assert Ok(_) =
             transport.controlling_process(transport, socket, started.data)
@@ -808,8 +781,6 @@ pub fn server_sent_events(
     )
   {
     Ok(_nil) -> {
-      let server_sent_events_factory =
-        factory.get_by_name(req.body.server_sent_events_factory)
       let start = fn() {
         actor.new_with_initialiser(1000, fn(subj) {
           init(subj)
@@ -827,7 +798,8 @@ pub fn server_sent_events(
           actor.Started(pid, pid)
         })
       }
-      case factory.start_child(server_sent_events_factory, start) {
+      let factory_supervisor = factory.get_by_name(req.body.factory_name)
+      case factory.start_child(factory_supervisor, start) {
         Ok(started) -> {
           let assert Ok(_nil) =
             transport.controlling_process(
@@ -912,7 +884,15 @@ pub fn chunked(
     |> actor.on_message(fn(state, message) {
       case loop(state, message, req.body) {
         ChunkContinue(state) -> actor.continue(state)
-        ChunkStop -> actor.stop()
+        ChunkStop -> {
+          let _ = case send_chunk(req.body, <<>>) {
+            Ok(_nil) -> Nil
+            Error(_reason) -> {
+              logging.log(logging.Debug, "Failed to send final chunk")
+            }
+          }
+          actor.stop()
+        }
         ChunkAbort(reason) -> actor.stop_abnormal(reason)
       }
     })
@@ -931,9 +911,9 @@ pub fn chunked(
   let assert Ok(_nil) =
     transport.send(req.body.transport, req.body.socket, initial_payload)
 
-  let chunked_factory = factory.get_by_name(req.body.chunked_response_factory)
+  let factory_supervisor = factory.get_by_name(req.body.factory_name)
 
-  case factory.start_child(chunked_factory, start) {
+  case factory.start_child(factory_supervisor, start) {
     Ok(started) -> {
       let assert Ok(_controlled) =
         transport.controlling_process(

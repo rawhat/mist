@@ -42,19 +42,7 @@ pub fn init(_conn) -> #(State, Option(Selector(SendMessage))) {
 
 pub fn with_func(
   handler: Handler,
-  websocket_factory: process.Name(
-    factory.Message(
-      fn() -> Result(actor.Started(process.Pid), actor.StartError),
-      process.Pid,
-    ),
-  ),
-  server_sent_events_factory: process.Name(
-    factory.Message(
-      fn() -> Result(actor.Started(process.Pid), actor.StartError),
-      process.Pid,
-    ),
-  ),
-  chunked_response_factory: process.Name(
+  factory_name: process.Name(
     factory.Message(
       fn() -> Result(actor.Started(process.Pid), actor.StartError),
       process.Pid,
@@ -68,9 +56,7 @@ pub fn with_func(
         body: Initial(<<>>),
         socket: conn.socket,
         transport: conn.transport,
-        chunked_response_factory:,
-        server_sent_events_factory:,
-        websocket_factory:,
+        factory_name:,
       )
 
     let result = case msg, state {
@@ -87,8 +73,7 @@ pub fn with_func(
           File(..) -> Error("File sending unsupported over HTTP/2")
           // TODO:  properly error in some fashion for these
           Websocket -> Error("WebSocket unsupported for HTTP/2")
-          Chunked ->
-            Error("Chunked encoding not supported for HTTP/2")
+          Chunked -> Error("Chunked encoding not supported for HTTP/2")
           ServerSentEvents -> Error("Server-Sent Events unsupported for HTTP/2")
         }
         |> result.map(fn(context) {

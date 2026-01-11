@@ -38,19 +38,7 @@ pub type Connection {
     body: Body,
     socket: Socket,
     transport: Transport,
-    server_sent_events_factory: process.Name(
-      factory.Message(
-        fn() -> Result(actor.Started(process.Pid), actor.StartError),
-        process.Pid,
-      ),
-    ),
-    websocket_factory: process.Name(
-      factory.Message(
-        fn() -> Result(actor.Started(process.Pid), actor.StartError),
-        process.Pid,
-      ),
-    ),
-    chunked_response_factory: process.Name(
+    factory_name: process.Name(
       factory.Message(
         fn() -> Result(actor.Started(process.Pid), actor.StartError),
         process.Pid,

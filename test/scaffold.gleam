@@ -40,13 +40,12 @@ pub fn open_server(
   with handler: fn(Request(Connection)) -> Response(mist.ResponseData),
   after perform: fn() -> return,
 ) -> return {
-  let chunked_response_factory =
-    process.new_name("mist_chunked_response_supervisor")
+  let factory_supervisor = process.new_name("mist_factory_supervisor")
   let chunked_response_supervisor =
     process.spawn_unlinked(fn() {
       let assert Ok(_chunked) =
         factory.worker_child(fn(start) { start() })
-        |> factory.named(chunked_response_factory)
+        |> factory.named(factory_supervisor)
         |> factory.start()
 
       process.sleep_forever()
@@ -64,9 +63,7 @@ pub fn open_server(
             |> handler
             |> convert_body_types
           },
-          process.new_name("websocket_factory"),
-          process.new_name("server_sent_events_factory"),
-          chunked_response_factory,
+          factory_supervisor,
         )
 
       let glisten_handler =

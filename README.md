@@ -76,13 +76,20 @@ pub fn main() {
               Nil
             },
             fn(state, msg, connection) {
-              let assert Ok(_nil) =
-                mist.send_chunk(connection, bit_array.from_string(msg))
-              mist.chunk_continue(state)
+              case msg {
+                Data(str) -> {
+                  let assert Ok(_nil) =
+                    mist.send_chunk(connection, bit_array.from_string(str))
+                  mist.chunk_continue(state)
+                }
+                Done -> {
+                  mist.chunk_stop()
+                }
+              }
             },
           )
         ["file", ..rest] -> serve_file(req, rest)
-        ["form"] -> handle_form(req)
+        ["stream"] -> handle_stream(req)
 
         _ -> not_found
       }
@@ -90,7 +97,7 @@ pub fn main() {
     |> mist.new
     |> mist.bind("localhost")
     |> mist.with_ipv6
-    |> mist.port(0)
+    |> mist.port(4000)
     |> mist.start
 
   process.sleep_forever()
@@ -145,12 +152,18 @@ fn echo_body(request: Request(Connection)) -> Response(ResponseData) {
   })
 }
 
-fn send_chunks(subject: Subject(String)) {
+type ChunkMessage {
+  Data(data: String)
+  Done
+}
+
+fn send_chunks(subject: Subject(ChunkMessage)) {
   ["one", "two", "three"]
   |> list.each(fn(data) {
     process.sleep(2000)
-    process.send(subject, data)
+    process.send(subject, Data(data))
   })
+  process.send(subject, Done)
 }
 
 fn serve_file(
@@ -173,72 +186,37 @@ fn serve_file(
   })
 }
 
-fn handle_form(req: Request(Connection)) -> Response(ResponseData) {
-  let _req = mist.read_body(req, 1024 * 1024 * 30)
-  response.new(200)
-  |> response.set_body(mist.Bytes(bytes_tree.new()))
+fn handle_stream(req: Request(Connection)) -> Response(ResponseData) {
+  let failed =
+    response.new(400) |> response.set_body(mist.Bytes(bytes_tree.new()))
+  case mist.stream(req) {
+    Ok(consume) -> {
+      case do_handle_stream(consume, <<>>) {
+        Ok(body) ->
+          response.new(200)
+          |> response.set_body(mist.Bytes(bytes_tree.from_bit_array(body)))
+        Error(_reason) -> failed
+      }
+    }
+    Error(_reason) -> {
+      failed
+    }
+  }
+}
+
+fn do_handle_stream(
+  consume: fn(Int) -> Result(mist.Chunk, mist.ReadError),
+  body: BitArray,
+) -> Result(BitArray, Nil) {
+  case consume(1024) {
+    Ok(mist.Chunk(data, consume)) ->
+      do_handle_stream(consume, <<body:bits, data:bits>>)
+    Ok(mist.Done) -> Ok(body)
+    Error(_reason) -> Error(Nil)
+  }
 }
 
 fn guess_content_type(_path: String) -> String {
   "application/octet-stream"
-}
-```
-
-## Streaming request body
-
-```
-NOTE:  This is a new feature, and I may have made some mistakes.  Please let me
-know if you run into anything :)
-```
-
-When handling file uploads or `multipart/form-data`, you probably don't want to
-load the whole file into memory. Previously, the only options in `mist` were to
-accept bodies up to `N` bytes, or read the entire body.
-
-Now, there is a `mist.stream` function which takes a `Request(Connection)` that
-gives you back a function to start reading chunks. This function will return:
-
-```gleam
-pub type Chunk {
-  Chunk(data: BitArray, consume: fn(Int) -> Chunk)
-  Done
-}
-```
-
-NOTE: You must only call this once on the `Request(Connection)`. Since it's
-reading data from the socket, this is a mutable action. The name `consume` was
-chosen to hopefully make that more clear.
-
-### Example
-
-```gleam
-// Replacing the named function in the application example above
-fn handle_form(req: Request(Connection)) -> Response(ResponseData) {
-  let assert Ok(consume) = mist.stream(req)
-  // NOTE:  This is a little misleading, since `Iterator`s can be replayed.
-  // However, this will only be running this once.
-  let content =
-    yielder.unfold(
-      consume,
-      fn(consume) {
-        // Reads up to 1024 bytes from the request
-        let res = consume(1024)
-        case res {
-          // The error will not be bubbled up to the iterator here. If either
-          // we've read all the body, or we see an error, the iterator finishes
-          Ok(mist.Done) | Error(_) -> yielder.Done
-          // We read some data. It may be less than the specific amount above if
-          // we have consumed all of the body. You'll still need to call it
-          // again to ensure, since with `chunked` encoding, we need to check
-          // for the last chunk.
-          Ok(mist.Chunk(data, consume)) -> {
-            yielder.Next(bytes_tree.from_bit_array(data), consume)
-          }
-        }
-      },
-    )
-  // For fun, respond with `chunked` encoding of the same iterator
-  response.new(200)
-  |> response.set_body(mist.Chunked(content))
 }
 ```
