@@ -11,7 +11,7 @@ dependencies as follows:
 ```sh
 $ gleam new <your_project>
 $ cd <your_project>
-$ gleam add mist logging gleam_erlang gleam_http gleam_otp gleam_yielder
+$ gleam add mist logging gleam_erlang gleam_http
 ```
 
 The main entrypoint for your application is `mist.start`. The argument to this
