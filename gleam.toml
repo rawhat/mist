@@ -16,7 +16,7 @@ gleam_http = ">= 4.0.0 and < 5.0.0"
 gleam_stdlib = ">= 0.50.0 and < 1.0.0"
 hpack_erl = ">= 0.3.0 and < 1.0.0"
 logging = ">= 1.0.0 and < 2.0.0"
-glisten = { path = "../glisten" }
+glisten = "9.0.0-rc1"
 exception = ">= 2.1.0 and < 3.0.0"
 gramps = ">= 6.0.0 and < 7.0.0"
 gleam_otp = ">= 1.2.0 and < 2.0.0"
