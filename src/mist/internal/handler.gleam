@@ -1,3 +1,4 @@
+import gleam/bytes_tree
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http/response
 import gleam/option.{type Option, Some}
@@ -5,7 +6,9 @@ import gleam/otp/actor
 import gleam/otp/factory_supervisor as factory
 import gleam/result
 import glisten.{type Loop, Packet, User}
+import glisten/transport
 import logging
+import mist/internal/encoder
 import mist/internal/http.{
   type DecodeError, type Handler, Bytes, Chunked, Connection, DiscardPacket,
   File, Initial, ServerSentEvents, Websocket,
@@ -125,7 +128,13 @@ pub fn with_func(
             http.NoHostHeader -> {
               let msg = "Missing HTTP `host` header"
               logging.log(logging.Warning, msg)
-              Error(msg)
+              let _ =
+                response.new(400)
+                |> response.prepend_header("connection", "close")
+                |> response.set_body(bytes_tree.new())
+                |> encoder.to_bytes_tree("1.1")
+                |> transport.send(conn.transport, conn.socket, _)
+              Ok(Nil)
             }
             http.InvalidHttpVersion -> {
               let msg = "Received invalid HTTP version"

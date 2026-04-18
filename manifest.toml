@@ -30,7 +30,7 @@ gleam_erlang = { version = ">= 1.0.0 and < 2.0.0" }
 gleam_hackney = { version = ">= 1.2.0 and < 2.0.0" }
 gleam_http = { version = ">= 4.0.0 and < 5.0.0" }
 gleam_otp = { version = ">= 1.2.0 and < 2.0.0" }
-gleam_stdlib = { version = ">= 0.50.0 and < 2.0.0" }
+gleam_stdlib = { version = ">= 1.0.0 and < 2.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
 glisten = { version = ">= 9.0.0 and < 10.0.0" }
 gramps = { version = ">= 6.0.0 and < 7.0.0" }
