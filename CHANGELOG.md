@@ -4,6 +4,7 @@
 
 - Continue handling frames after receiving `Ping`
 - Bump `stdlib` to `>=1.0.0`
+- Respond with HTTP 400 on missing `host` header instead of abnormal exit
 
 # v6.0.2
 
