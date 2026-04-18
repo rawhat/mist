@@ -3,6 +3,7 @@
 # Unreleased
 
 - Continue handling frames after receiving `Ping`
+- Bump `stdlib` to `>=1.0.0`
 
 # v6.0.2
 
