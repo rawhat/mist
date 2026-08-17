@@ -1,6 +1,5 @@
 import exception
 import gleam/bit_array
-import gleam/bool
 import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/erlang/process.{type Selector}
@@ -134,68 +133,69 @@ pub fn initialize_connection(
     case msg {
       Valid(SocketMessage(data)) -> {
         let buffered = <<state.buffer:bits, data:bits>>
-        use <- bool.guard(
-          when: !frames_within_limit(buffered, max_frame_bytes),
-          return: stop_for_oversized_frame(state, connection, on_close),
-        )
-        let #(frames, rest) =
-          websocket.decode_many_frames(
-            buffered,
-            option.map(state.permessage_deflate, fn(compression) {
-              compression.inflate
-            }),
-            [],
-          )
-        frames
-        |> websocket.aggregate_frames(None, [])
-        |> result.map(fn(frames) {
-          let next =
-            apply_frames(
-              frames,
-              handler,
-              connection,
-              Continue(state.user, None),
-              on_close,
-            )
-          case next {
-            Continue(user_state, selector) -> {
+        case frames_within_limit(buffered, max_frame_bytes) {
+          False -> stop_for_oversized_frame(state, connection, on_close)
+          True -> {
+            let #(frames, rest) =
+              websocket.decode_many_frames(
+                buffered,
+                option.map(state.permessage_deflate, fn(compression) {
+                  compression.inflate
+                }),
+                [],
+              )
+            frames
+            |> websocket.aggregate_frames(None, [])
+            |> result.map(fn(frames) {
               let next =
-                actor.continue(
-                  WebsocketState(..state, buffer: rest, user: user_state),
+                apply_frames(
+                  frames,
+                  handler,
+                  connection,
+                  Continue(state.user, None),
+                  on_close,
                 )
-              case selector {
-                Some(selector) -> actor.with_selector(next, selector)
-                _ -> next
+              case next {
+                Continue(user_state, selector) -> {
+                  let next =
+                    actor.continue(
+                      WebsocketState(..state, buffer: rest, user: user_state),
+                    )
+                  case selector {
+                    Some(selector) -> actor.with_selector(next, selector)
+                    _ -> next
+                  }
+                }
+                NormalStop -> {
+                  let _ =
+                    option.map(state.permessage_deflate, fn(contexts) {
+                      compression.close(contexts.deflate)
+                      compression.close(contexts.inflate)
+                    })
+                  actor.stop()
+                }
+                AbnormalStop(reason) -> {
+                  let _ =
+                    option.map(state.permessage_deflate, fn(contexts) {
+                      compression.close(contexts.deflate)
+                      compression.close(contexts.inflate)
+                    })
+                  actor.stop_abnormal(reason)
+                }
               }
-            }
-            NormalStop -> {
-              let _ =
-                option.map(state.permessage_deflate, fn(contexts) {
-                  compression.close(contexts.deflate)
-                  compression.close(contexts.inflate)
-                })
-              actor.stop()
-            }
-            AbnormalStop(reason) -> {
-              let _ =
-                option.map(state.permessage_deflate, fn(contexts) {
-                  compression.close(contexts.deflate)
-                  compression.close(contexts.inflate)
-                })
-              actor.stop_abnormal(reason)
-            }
-          }
-        })
-        |> result.lazy_unwrap(fn() {
-          logging.log(logging.Error, "Received a malformed WebSocket frame")
-          on_close(state.user)
-          let _ =
-            option.map(state.permessage_deflate, fn(contexts) {
-              compression.close(contexts.deflate)
-              compression.close(contexts.inflate)
             })
-          actor.stop_abnormal("WebSocket received a malformed message")
-        })
+            |> result.lazy_unwrap(fn() {
+              logging.log(logging.Error, "Received a malformed WebSocket frame")
+              on_close(state.user)
+              let _ =
+                option.map(state.permessage_deflate, fn(contexts) {
+                  compression.close(contexts.deflate)
+                  compression.close(contexts.inflate)
+                })
+              actor.stop_abnormal("WebSocket received a malformed message")
+            })
+          }
+        }
       }
 
       Valid(UserMessage(msg)) -> {

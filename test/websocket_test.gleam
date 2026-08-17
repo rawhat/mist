@@ -25,6 +25,12 @@ pub fn rejects_oversized_declared_payload_before_body_arrives_test() {
   assert mist_websocket.frames_within_limit(header_and_mask, 1024) == False
 }
 
+pub fn allows_normal_masked_compressed_frame_test() {
+  let frame = <<1:1, 1:1, 0:2, 1:4, 1:1, 33:7, 0:32, 0:size(264)>>
+
+  assert mist_websocket.frames_within_limit(frame, 1_048_576)
+}
+
 pub fn rejects_oversized_fragmented_message_test() {
   let fragments = <<
     0:1,
