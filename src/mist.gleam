@@ -630,6 +630,28 @@ pub fn websocket(
     #(state, Option(process.Selector(message))),
   on_close on_close: fn(state) -> Nil,
 ) -> Response(ResponseData) {
+  websocket_with_frame_limit(
+    request:,
+    handler:,
+    on_init:,
+    on_close:,
+    max_frame_bytes: 0,
+  )
+}
+
+/// Upgrade a request to handle websockets while rejecting frames whose
+/// declared payload or fragmented-message total exceeds `max_frame_bytes`.
+///
+/// Values less than or equal to zero disable the limit.
+pub fn websocket_with_frame_limit(
+  request request: Request(Connection),
+  handler handler: fn(state, WebsocketMessage(message), WebsocketConnection) ->
+    Next(state, message),
+  on_init on_init: fn(WebsocketConnection) ->
+    #(state, Option(process.Selector(message))),
+  on_close on_close: fn(state) -> Nil,
+  max_frame_bytes max_frame_bytes: Int,
+) -> Response(ResponseData) {
   let handler = fn(state, message, connection) {
     message
     |> internal_to_public_ws_message
@@ -655,6 +677,7 @@ pub fn websocket(
           socket,
           transport,
           extensions,
+          max_frame_bytes,
         )
       }
 

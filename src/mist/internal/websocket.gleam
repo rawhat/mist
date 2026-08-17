@@ -1,5 +1,6 @@
 import exception
 import gleam/bit_array
+import gleam/bool
 import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/erlang/process.{type Selector}
@@ -88,6 +89,7 @@ pub fn initialize_connection(
   socket: Socket,
   transport: Transport,
   extensions: List(String),
+  max_frame_bytes: Int,
 ) -> Result(actor.Started(process.Pid), actor.StartError) {
   let takeovers = websocket.get_context_takeovers(extensions)
   actor.new_with_initialiser(500, fn(subject) {
@@ -131,9 +133,14 @@ pub fn initialize_connection(
       )
     case msg {
       Valid(SocketMessage(data)) -> {
+        let buffered = <<state.buffer:bits, data:bits>>
+        use <- bool.guard(
+          when: !frames_within_limit(buffered, max_frame_bytes),
+          return: stop_for_oversized_frame(state, connection, on_close),
+        )
         let #(frames, rest) =
           websocket.decode_many_frames(
-            <<state.buffer:bits, data:bits>>,
+            buffered,
             option.map(state.permessage_deflate, fn(compression) {
               compression.inflate
             }),
@@ -190,6 +197,7 @@ pub fn initialize_connection(
           actor.stop_abnormal("WebSocket received a malformed message")
         })
       }
+
       Valid(UserMessage(msg)) -> {
         exception.rescue(fn() { handler(state.user, User(msg), connection) })
         |> result.map(fn(cont) {
@@ -286,6 +294,110 @@ pub fn initialize_connection(
     let assert Ok(websocket_pid) = process.subject_owner(subj.data)
     actor.Started(websocket_pid, websocket_pid)
   })
+}
+
+pub fn frames_within_limit(data: BitArray, max_frame_bytes: Int) -> Bool {
+  case max_frame_bytes <= 0 {
+    True -> True
+    False -> do_frames_within_limit(data, max_frame_bytes, 0)
+  }
+}
+
+fn do_frames_within_limit(
+  data: BitArray,
+  max_frame_bytes: Int,
+  fragmented_bytes: Int,
+) -> Bool {
+  case data {
+    <<
+      final:1,
+      _reserved:3,
+      opcode:int-size(4),
+      masked:1,
+      length_code:int-size(7),
+      rest:bits,
+    >> -> {
+      case payload_info(length_code, masked, rest) {
+        None -> True
+        Some(#(payload_bytes, payload)) -> {
+          let #(message_bytes, next_fragmented_bytes) =
+            fragment_sizes(final, opcode, payload_bytes, fragmented_bytes)
+          case
+            payload_bytes > max_frame_bytes || message_bytes > max_frame_bytes
+          {
+            True -> False
+            False ->
+              case payload {
+                <<_:bytes-size(payload_bytes), rest:bits>> ->
+                  do_frames_within_limit(
+                    rest,
+                    max_frame_bytes,
+                    next_fragmented_bytes,
+                  )
+                _ -> True
+              }
+          }
+        }
+      }
+    }
+    _ -> True
+  }
+}
+
+fn payload_info(
+  length_code: Int,
+  masked: Int,
+  data: BitArray,
+) -> Option(#(Int, BitArray)) {
+  let mask_bits = case masked {
+    1 -> 32
+    _ -> 0
+  }
+  case length_code, data {
+    126, <<length:int-size(16), _:bits-size(mask_bits), payload:bits>> ->
+      Some(#(length, payload))
+    127, <<length:int-size(64), _:bits-size(mask_bits), payload:bits>> ->
+      Some(#(length, payload))
+    length, <<_:bits-size(mask_bits), payload:bits>> -> Some(#(length, payload))
+    _, _ -> None
+  }
+}
+
+fn fragment_sizes(
+  final: Int,
+  opcode: Int,
+  payload_bytes: Int,
+  fragmented_bytes: Int,
+) -> #(Int, Int) {
+  case opcode, final {
+    opcode, 0 if opcode == 1 || opcode == 2 -> #(payload_bytes, payload_bytes)
+    0, 0 -> {
+      let total = fragmented_bytes + payload_bytes
+      #(total, total)
+    }
+    0, 1 -> #(fragmented_bytes + payload_bytes, 0)
+    _, _ -> #(payload_bytes, fragmented_bytes)
+  }
+}
+
+fn stop_for_oversized_frame(
+  state: WebsocketState(state),
+  connection: WebsocketConnection,
+  on_close: fn(state) -> Nil,
+) -> actor.Next(WebsocketState(state), WebsocketMessage(user_message)) {
+  let _ =
+    transport.send(
+      connection.transport,
+      connection.socket,
+      websocket.encode_close_frame(websocket.MessageTooBig(<<>>), None),
+    )
+  let _ =
+    option.map(state.permessage_deflate, fn(contexts) {
+      compression.close(contexts.deflate)
+      compression.close(contexts.inflate)
+    })
+  on_close(state.user)
+  actor.stop_abnormal("WebSocket frame exceeded configured limit")
 }
 
 fn apply_frames(
