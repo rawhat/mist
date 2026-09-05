@@ -11,6 +11,7 @@ import glisten/socket/options
 import glisten/transport.{type Transport}
 import gramps/websocket.{type Frame, CloseFrame, Control, PingFrame}
 import gramps/websocket/compression.{type Compression, type Context}
+import gramps/websocket/decoder
 import logging
 import mist/internal/next.{type Next, AbnormalStop, Continue, NormalStop}
 
@@ -43,6 +44,7 @@ pub type WebsocketState(state) {
     buffer: BitArray,
     user: state,
     permessage_deflate: Option(Compression),
+    decoder: Option(decoder.Decoder),
   )
 }
 
@@ -89,6 +91,27 @@ pub fn initialize_connection(
   transport: Transport,
   extensions: List(String),
 ) -> Result(actor.Started(process.Pid), actor.StartError) {
+  initialize_connection_with_decoder(
+    on_init,
+    on_close,
+    handler,
+    socket,
+    transport,
+    extensions,
+    None,
+  )
+}
+
+/// Starts a connection with an optional bounded, uncompressed decoder.
+pub fn initialize_connection_with_decoder(
+  on_init: fn(WebsocketConnection) -> #(state, Option(Selector(user_message))),
+  on_close: fn(state) -> Nil,
+  handler: Handler(state, user_message),
+  socket: Socket,
+  transport: Transport,
+  extensions: List(String),
+  decoder: Option(decoder.Decoder),
+) -> Result(actor.Started(process.Pid), actor.StartError) {
   let takeovers = websocket.get_context_takeovers(extensions)
   actor.new_with_initialiser(500, fn(subject) {
     let compression = case websocket.has_deflate(extensions) {
@@ -114,6 +137,7 @@ pub fn initialize_connection(
       buffer: <<>>,
       user: initial_state,
       permessage_deflate: compression,
+      decoder:,
     )
     |> actor.initialised
     |> actor.selecting(selector)
@@ -131,30 +155,59 @@ pub fn initialize_connection(
       )
     case msg {
       Valid(SocketMessage(data)) -> {
-        let #(frames, rest) =
-          websocket.decode_many_frames(
-            <<state.buffer:bits, data:bits>>,
-            option.map(state.permessage_deflate, fn(compression) {
-              compression.inflate
-            }),
-            [],
-          )
-        frames
-        |> websocket.aggregate_frames(None, [])
-        |> result.map(fn(frames) {
-          let next =
-            apply_frames(
-              frames,
-              handler,
-              connection,
-              Continue(state.user, None),
-              on_close,
-            )
+        let decoded = case state.decoder {
+          Some(bounded) -> {
+            let #(bounded, next) =
+              receive_bounded(
+                bounded,
+                data,
+                handler,
+                connection,
+                Continue(state.user, None),
+                on_close,
+              )
+            Ok(#(<<>>, Some(bounded), next))
+          }
+          None -> {
+            let #(frames, rest) =
+              websocket.decode_many_frames(
+                <<state.buffer:bits, data:bits>>,
+                option.map(state.permessage_deflate, fn(compression) {
+                  compression.inflate
+                }),
+                [],
+              )
+            frames
+            |> websocket.aggregate_frames(None, [])
+            |> result.map(fn(frames) {
+              let next =
+                apply_frames(
+                  frames,
+                  handler,
+                  connection,
+                  Continue(state.user, None),
+                  on_close,
+                )
+              #(rest, None, next)
+            })
+          }
+        }
+        decoded
+        |> result.map(fn(decoded) {
+          let #(rest, bounded, next) = decoded
           case next {
             Continue(user_state, selector) -> {
+              // Rearm once after the entire TCP chunk has been handled. Doing
+              // this per decoded frame admits extra chunks into the mailbox.
+              set_active(connection.transport, connection.socket)
               let next =
                 actor.continue(
-                  WebsocketState(..state, buffer: rest, user: user_state),
+                  WebsocketState(
+                    ..state,
+                    buffer: rest,
+                    user: user_state,
+                    decoder: bounded,
+                  ),
                 )
               case selector {
                 Some(selector) -> actor.with_selector(next, selector)
@@ -288,6 +341,51 @@ pub fn initialize_connection(
   })
 }
 
+// Deliver one message at a time, leaving later input undecoded while its user
+// callback runs. The decoder retains fragments across TCP chunks and rejects
+// an oversized declared payload before copying or unmasking its contents.
+fn receive_bounded(
+  bounded: decoder.Decoder,
+  data: BitArray,
+  handler: Handler(state, user_message),
+  connection: WebsocketConnection,
+  next: Next(state, WebsocketMessage(user_message)),
+  on_close: fn(state) -> Nil,
+) -> #(decoder.Decoder, Next(state, WebsocketMessage(user_message))) {
+  case next {
+    NormalStop | AbnormalStop(_) -> #(bounded, next)
+    Continue(user, _) ->
+      case decoder.next(bounded, data) {
+        Ok(decoder.More(bounded)) -> #(bounded, next)
+        Ok(decoder.Frame(frame, bounded, rest)) -> {
+          let next = apply_frames([frame], handler, connection, next, on_close)
+          receive_bounded(bounded, rest, handler, connection, next, on_close)
+        }
+        Error(error) -> {
+          let reason = case error {
+            decoder.FrameTooLarge | decoder.MessageTooLarge ->
+              websocket.MessageTooBig(<<>>)
+            decoder.CompressionUnsupported | decoder.InvalidFrame ->
+              websocket.ProtocolError(<<>>)
+          }
+          let _ =
+            transport.send(
+              connection.transport,
+              connection.socket,
+              websocket.encode_close_frame(reason, None),
+            )
+          on_close(user)
+          #(
+            bounded,
+            AbnormalStop(
+              "WebSocket input exceeded its limits or violated the protocol",
+            ),
+          )
+        }
+      }
+  }
+}
+
 fn apply_frames(
   frames: List(Frame),
   handler: Handler(state, user_message),
@@ -298,10 +396,7 @@ fn apply_frames(
   case frames, next {
     _, AbnormalStop(reason) -> AbnormalStop(reason)
     _, NormalStop -> NormalStop
-    [], next -> {
-      set_active(connection.transport, connection.socket)
-      next
-    }
+    [], next -> next
     [Control(CloseFrame(reason)), ..], Continue(state, _selector) -> {
       let _ =
         transport.send(
@@ -321,7 +416,6 @@ fn apply_frames(
         websocket.encode_pong_frame(payload, None),
       )
       |> result.map(fn(_nil) {
-        set_active(connection.transport, connection.socket)
         apply_frames(rest, handler, connection, continue, on_close)
       })
       |> result.lazy_unwrap(fn() {

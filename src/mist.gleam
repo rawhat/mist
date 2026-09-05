@@ -19,6 +19,7 @@ import gleam/string_tree.{type StringTree}
 import glisten
 import glisten/transport
 import gramps/websocket.{BinaryFrame, Data, TextFrame} as gramps_websocket
+import gramps/websocket/decoder as websocket_decoder
 import logging
 import mist/internal/buffer.{type Buffer, Buffer}
 import mist/internal/encoder
@@ -630,6 +631,74 @@ pub fn websocket(
     #(state, Option(process.Selector(message))),
   on_close on_close: fn(state) -> Nil,
 ) -> Response(ResponseData) {
+  let extensions =
+    request
+    |> request.get_header("sec-websocket-extensions")
+    |> result.map(fn(header) { string.split(header, ";") })
+    |> result.unwrap([])
+  websocket_upgrade(request, handler, on_init, on_close, extensions, None)
+}
+
+/// Compression policy for bounded WebSocket connections. Compression stays
+/// disabled until the decoder can bound decompressed output as well as input.
+pub type WebsocketCompression {
+  /// Do not negotiate permessage-deflate; compressed frames are refused.
+  CompressionDisabled
+}
+
+/// Per-connection payload limits, independent from application authorization
+/// and total server connection or output queue budgets.
+pub type WebsocketOptions {
+  WebsocketOptions(
+    /// Maximum payload bytes declared by one frame; must be positive.
+    max_frame_bytes: Int,
+    /// Maximum bytes across all fragments of one message; must be positive.
+    max_message_bytes: Int,
+    /// Compression cannot bypass the decoded-message limit.
+    compression: WebsocketCompression,
+  )
+}
+
+/// Upgrades with bounded, incremental decoding before application callbacks.
+/// Invalid limits return HTTP 400 before the upgrade. Oversized payloads close
+/// with code 1009; detected framing violations or compressed frames close with
+/// code 1002. Other protocol validation retains the existing decoder's behavior.
+///
+/// ## Examples
+///
+/// ```gleam
+/// let limits = WebsocketOptions(65_536, 65_536, CompressionDisabled)
+/// // websocket_with_options(request, handler, on_init, on_close, limits)
+/// ```
+pub fn websocket_with_options(
+  request request: Request(Connection),
+  handler handler: fn(state, WebsocketMessage(message), WebsocketConnection) ->
+    Next(state, message),
+  on_init on_init: fn(WebsocketConnection) ->
+    #(state, Option(process.Selector(message))),
+  on_close on_close: fn(state) -> Nil,
+  options options: WebsocketOptions,
+) -> Response(ResponseData) {
+  case
+    websocket_decoder.new(options.max_frame_bytes, options.max_message_bytes)
+  {
+    Ok(decoder) ->
+      websocket_upgrade(request, handler, on_init, on_close, [], Some(decoder))
+    Error(Nil) ->
+      response.new(400) |> response.set_body(Bytes(bytes_tree.new()))
+  }
+}
+
+fn websocket_upgrade(
+  request: Request(Connection),
+  handler: fn(state, WebsocketMessage(message), WebsocketConnection) ->
+    Next(state, message),
+  on_init: fn(WebsocketConnection) ->
+    #(state, Option(process.Selector(message))),
+  on_close: fn(state) -> Nil,
+  extensions: List(String),
+  decoder: Option(websocket_decoder.Decoder),
+) -> Response(ResponseData) {
   let handler = fn(state, message, connection) {
     message
     |> internal_to_public_ws_message
@@ -637,24 +706,19 @@ pub fn websocket(
     |> result.unwrap(continue(state))
     |> convert_next
   }
-  let extensions =
-    request
-    |> request.get_header("sec-websocket-extensions")
-    |> result.map(fn(header) { string.split(header, ";") })
-    |> result.unwrap([])
-
   let socket = request.body.socket
   let transport = request.body.transport
   case http.upgrade(socket, transport, extensions, request) {
     Ok(_nil) -> {
       let start = fn() {
-        websocket.initialize_connection(
+        websocket.initialize_connection_with_decoder(
           on_init,
           on_close,
           handler,
           socket,
           transport,
           extensions,
+          decoder,
         )
       }
 

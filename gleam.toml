@@ -18,7 +18,7 @@ hpack_erl = ">= 0.3.0 and < 1.0.0"
 logging = ">= 1.0.0 and < 2.0.0"
 glisten = ">= 9.0.0 and < 10.0.0"
 exception = ">= 2.1.0 and < 3.0.0"
-gramps = ">= 6.0.0 and < 7.0.0"
+gramps = { git = "https://github.com/Roasbeef/gramps.git", ref = "a37a8ae3fe2531375b49b865c155eb2987d4d22a" }
 gleam_otp = ">= 1.2.0 and < 2.0.0"
 
 [dev-dependencies]
