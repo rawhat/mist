@@ -5,6 +5,39 @@
 
 ## A glistening Gleam web server.
 
+### Bounded WebSocket connections
+
+Use `mist.websocket_with_options` when clients must not control how much
+message data a connection retains. Its callbacks match `mist.websocket`:
+
+```gleam
+mist.websocket_with_options(
+  request: req,
+  on_init: fn(_connection) { #(Nil, None) },
+  on_close: fn(_state) { Nil },
+  handler: handle_ws_message,
+  options: mist.WebsocketOptions(
+    max_frame_bytes: 65_536,
+    max_message_bytes: 262_144,
+    compression: mist.CompressionDisabled,
+  ),
+)
+```
+
+Both limits must be positive. The frame limit applies to its declared payload;
+the message limit includes all continuation fragments, even across TCP reads.
+Oversized input closes with code 1009 before the application receives it.
+Detected framing violations or compressed frames close with code 1002. Bounded
+connections do not negotiate compression and reject compressed frames before
+decompression. Other protocol validation retains the existing decoder's behavior.
+
+These are per-connection input limits. Applications must separately bound
+connection count, queued output, and data retained by their callbacks. A socket
+send timeout does not mean that a remote application consumed the output.
+The existing `mist.websocket` API retains its previous behavior.
+
+### Example application
+
 To follow along with the example below, you can create a new project and add the
 dependencies as follows:
 
