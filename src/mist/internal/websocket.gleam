@@ -3,6 +3,7 @@ import gleam/bit_array
 import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/erlang/process.{type Selector}
+import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
@@ -45,6 +46,12 @@ pub type WebsocketState(state) {
     permessage_deflate: Option(Compression),
   )
 }
+
+/// The most a connection may have waiting for the rest of a frame. A frame says how long it is in
+/// its header and its payload arrives behind it; without a limit, a peer that announces a huge frame
+/// and keeps sending makes the buffer grow until the node runs out of memory. Past this, the
+/// connection is closed.
+const max_buffered_bytes = 1_048_576
 
 pub type Handler(state, message) =
   fn(state, HandlerMessage(message), WebsocketConnection) ->
@@ -139,6 +146,7 @@ pub fn initialize_connection(
             }),
             [],
           )
+        use <- over_the_limit(rest, state, on_close)
         frames
         |> websocket.aggregate_frames(None, [])
         |> result.map(fn(frames) {
@@ -397,4 +405,33 @@ fn map_user_selector(
     selector,
     process.map_selector(_, fn(msg) { Valid(UserMessage(msg)) }),
   )
+}
+
+/// A connection whose unfinished frame is past `max_buffered_bytes` is closed (its handler told, as
+/// on any close); otherwise the frames go on to the handler.
+fn over_the_limit(
+  rest: BitArray,
+  state: WebsocketState(state),
+  on_close: fn(state) -> Nil,
+  next: fn() ->
+    actor.Next(WebsocketState(state), WebsocketMessage(user_message)),
+) -> actor.Next(WebsocketState(state), WebsocketMessage(user_message)) {
+  case bit_array.byte_size(rest) > max_buffered_bytes {
+    False -> next()
+    True -> {
+      logging.log(
+        logging.Warning,
+        "A WebSocket frame went past "
+          <> int.to_string(max_buffered_bytes)
+          <> " bytes; the connection is closed",
+      )
+      on_close(state.user)
+      let _ =
+        option.map(state.permessage_deflate, fn(contexts) {
+          compression.close(contexts.deflate)
+          compression.close(contexts.inflate)
+        })
+      actor.stop()
+    }
+  }
 }
