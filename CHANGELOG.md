@@ -1,5 +1,11 @@
 # Changelog
 
+# Unreleased
+
+- Add `new_websocket`, `websocket_on_close`, `websocket_header` and
+  `start_websocket` to build a WebSocket upgrade, including custom headers on
+  the upgrade response
+
 # v6.0.3
 
 - Continue handling frames after receiving `Ping`

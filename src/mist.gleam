@@ -151,7 +151,7 @@ pub fn get_connection_info(conn: Connection) -> Result(ConnectionInfo, Nil) {
 /// The response body type. This allows `mist` to handle these different cases
 /// for you. `Bytes` is the regular data return. `Websocket` will upgrade the
 /// socket to websockets, but should not be used directly. See the
-/// `mist.upgrade` function for usage. `Chunked` will use
+/// `mist.new_websocket` function for usage. `Chunked` will use
 /// `Transfer-Encoding: chunked` to send an iterator in chunks. `File` will use
 /// Erlang's `sendfile` to more efficiently return a file to the client.
 pub type ResponseData {
@@ -630,10 +630,88 @@ pub fn websocket(
     #(state, Option(process.Selector(message))),
   on_close on_close: fn(state) -> Nil,
 ) -> Response(ResponseData) {
+  new_websocket(request:, handler:, on_init:)
+  |> websocket_on_close(on_close)
+  |> start_websocket
+}
+
+pub opaque type WebsocketBuilder(state, message) {
+  WebsocketBuilder(
+    request: Request(Connection),
+    handler: fn(state, WebsocketMessage(message), WebsocketConnection) ->
+      Next(state, message),
+    on_init: fn(WebsocketConnection) ->
+      #(state, Option(process.Selector(message))),
+    on_close: fn(state) -> Nil,
+    headers: List(gleam_http.Header),
+  )
+}
+
+/// Create a builder for upgrading a request to a WebSocket. Nothing is sent to
+/// the client until the builder is passed to `mist.start_websocket`.
+///
+/// The `on_init` method will be called when the actual WebSocket process
+/// is started, and the return value is the initial state and an optional
+/// selector for receiving user messages.
+pub fn new_websocket(
+  request request: Request(Connection),
+  handler handler: fn(state, WebsocketMessage(message), WebsocketConnection) ->
+    Next(state, message),
+  on_init on_init: fn(WebsocketConnection) ->
+    #(state, Option(process.Selector(message))),
+) -> WebsocketBuilder(state, message) {
+  WebsocketBuilder(
+    request:,
+    handler:,
+    on_init:,
+    on_close: fn(_state) { Nil },
+    headers: [],
+  )
+}
+
+/// Set a function to be called when the WebSocket process shuts down for any
+/// reason, valid or otherwise.
+pub fn websocket_on_close(
+  builder: WebsocketBuilder(state, message),
+  on_close: fn(state) -> Nil,
+) -> WebsocketBuilder(state, message) {
+  WebsocketBuilder(..builder, on_close:)
+}
+
+/// Add a header to the response that accepts the upgrade, such as
+/// `sec-websocket-protocol`. Adding the same name again sends it again rather
+/// than replacing it.
+///
+/// `mist` writes the `upgrade`, `connection`, `sec-websocket-accept` and
+/// `sec-websocket-extensions` headers itself, so those names are ignored.
+pub fn websocket_header(
+  builder: WebsocketBuilder(state, message),
+  name: String,
+  value: String,
+) -> WebsocketBuilder(state, message) {
+  WebsocketBuilder(..builder, headers: [#(name, value), ..builder.headers])
+}
+
+/// Upgrade the request to the WebSocket described by the builder. The upgrade
+/// has already happened when this returns, so return the response from your
+/// handler as it is.
+///
+/// If the request is malformed, or the websocket process fails to initialize,
+/// an empty 400 response will be sent to the client.
+pub fn start_websocket(
+  builder: WebsocketBuilder(state, message),
+) -> Response(ResponseData) {
+  let WebsocketBuilder(
+    request:,
+    handler: user_handler,
+    on_init:,
+    on_close:,
+    headers:,
+  ) = builder
   let handler = fn(state, message, connection) {
     message
     |> internal_to_public_ws_message
-    |> result.map(handler(state, _, connection))
+    |> result.map(user_handler(state, _, connection))
     |> result.unwrap(continue(state))
     |> convert_next
   }
@@ -645,7 +723,8 @@ pub fn websocket(
 
   let socket = request.body.socket
   let transport = request.body.transport
-  case http.upgrade(socket, transport, extensions, request) {
+  let headers = list.reverse(headers)
+  case http.upgrade(socket, transport, extensions, headers, request) {
     Ok(_nil) -> {
       let start = fn() {
         websocket.initialize_connection(
