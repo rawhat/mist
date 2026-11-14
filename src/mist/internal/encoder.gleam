@@ -1,5 +1,4 @@
 import gleam/bytes_tree.{type BytesTree}
-import gleam/http.{type Header}
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/list
@@ -13,7 +12,7 @@ pub fn to_bytes_tree(resp: Response(BytesTree), version: String) -> BytesTree {
 
 pub fn response_builder(
   status: Int,
-  headers: List(Header),
+  headers: List(#(String, String)),
   version: String,
 ) -> BytesTree {
   let status_string =
@@ -92,7 +91,7 @@ pub fn status_to_bit_array(status: Int) -> BitArray {
   }
 }
 
-pub fn encode_headers(headers: List(Header)) -> BytesTree {
+pub fn encode_headers(headers: List(#(String, String))) -> BytesTree {
   list.fold(headers, bytes_tree.new(), fn(builder, tup) {
     let #(header, value) = tup
 

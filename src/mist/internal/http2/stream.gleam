@@ -1,5 +1,5 @@
 import gleam/erlang/process.{type Selector, type Subject}
-import gleam/http.{type Header} as ghttp
+import gleam/http as ghttp
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/int
@@ -57,7 +57,7 @@ pub type InternalState {
 pub fn new(
   identifier: StreamIdentifier(Frame),
   handler: Handler,
-  headers: List(Header),
+  headers: List(#(String, String)),
   connection: Connection,
   sender: Subject(SendMessage),
   end: Bool,
@@ -140,7 +140,7 @@ pub fn new(
 }
 
 pub fn make_request(
-  headers: List(Header),
+  headers: List(#(String, String)),
   req: Request(Connection),
 ) -> Result(Request(Connection), Nil) {
   case headers {
