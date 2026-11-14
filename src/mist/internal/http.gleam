@@ -484,9 +484,13 @@ fn parse_websocket_key(key: String) -> String {
   |> base64_encode
 }
 
+/// Builds the response accepting a WebSocket upgrade. `headers` are sent in the
+/// order given, except the handshake's own (`upgrade`, `connection`,
+/// `sec-websocket-accept`, `sec-websocket-extensions`), which are dropped.
 pub fn upgrade_socket(
   req: Request(Connection),
   extensions: List(String),
+  headers: List(http.Header),
 ) -> Result(Response(BytesTree), Request(Connection)) {
   use _upgrade <- result.try(
     request.get_header(req, "upgrade")
@@ -505,9 +509,23 @@ pub fn upgrade_socket(
 
   let accept_key = parse_websocket_key(key)
 
+  let supplied_headers =
+    headers
+    |> list.map(fn(header) { #(string.lowercase(header.0), header.1) })
+    |> list.filter(fn(header) {
+      case header.0 {
+        // Drop the headers we set ourselves below, so the caller can't
+        // override them.
+        "upgrade"
+        | "connection"
+        | "sec-websocket-accept"
+        | "sec-websocket-extensions" -> False
+        _ -> True
+      }
+    })
+
   let resp =
-    response.new(101)
-    |> response.set_body(bytes_tree.new())
+    Response(status: 101, headers: supplied_headers, body: bytes_tree.new())
     |> response.prepend_header("upgrade", "websocket")
     |> response.prepend_header("connection", "Upgrade")
     |> response.prepend_header("sec-websocket-accept", accept_key)
@@ -528,10 +546,11 @@ pub fn upgrade(
   socket: Socket,
   transport: Transport,
   extensions: List(String),
+  headers: List(http.Header),
   req: Request(Connection),
 ) -> Result(Nil, Nil) {
   use resp <- result.try(
-    upgrade_socket(req, extensions)
+    upgrade_socket(req, extensions, headers)
     |> result.replace_error(Nil),
   )
 

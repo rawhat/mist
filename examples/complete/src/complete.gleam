@@ -49,12 +49,13 @@ pub fn main() {
           |> response.prepend_header("my-value", "123")
           |> response.set_body(mist.Bytes(bytes_tree.from_string(index)))
         ["ws"] ->
-          mist.websocket(
+          mist.new_websocket(
             request: req,
             on_init: fn(_conn) { #(Nil, None) },
-            on_close: fn(_state) { io.println("goodbye!") },
             handler: handle_ws_message,
           )
+          |> mist.websocket_on_close(fn(_state) { io.println("goodbye!") })
+          |> mist.start_websocket
         ["echo"] -> echo_body(req)
         ["chunk"] ->
           mist.chunked(
