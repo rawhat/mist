@@ -34,7 +34,7 @@ import mist/internal/next
 import mist/internal/websocket.{
   type HandlerMessage, type WebsocketConnection as InternalWebsocketConnection,
   Internal, User,
-}
+} as internal_websocket
 
 /// Re-exported type that represents the default `Request` body type. See
 /// `mist.read_body` to convert this type into a `BitString`. The `Connection`
@@ -622,6 +622,7 @@ fn internal_to_public_ws_message(
 ///
 /// The `on_close` method is called when the WebSocket process shuts down
 /// for any reason, valid or otherwise.
+@deprecated("Use `mist.new_websocket` and `mist.start_websocket` instead")
 pub fn websocket(
   request request: Request(Connection),
   handler handler: fn(state, WebsocketMessage(message), WebsocketConnection) ->
@@ -727,7 +728,7 @@ pub fn start_websocket(
   case http.upgrade(socket, transport, extensions, headers, request) {
     Ok(_nil) -> {
       let start = fn() {
-        websocket.initialize_connection(
+        internal_websocket.initialize_connection(
           on_init,
           on_close,
           handler,
@@ -742,7 +743,7 @@ pub fn start_websocket(
         Ok(started) -> {
           let assert Ok(_) =
             transport.controlling_process(transport, socket, started.data)
-          websocket.set_active(transport, socket)
+          internal_websocket.set_active(transport, socket)
           response.new(200) |> response.set_body(Websocket)
         }
         Error(start_error) -> {

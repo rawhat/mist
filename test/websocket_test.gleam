@@ -206,22 +206,6 @@ pub fn it_calls_on_close_when_the_client_disconnects_test() {
   assert process.receive(closed, 1000) == Ok(Nil)
 }
 
-pub fn it_upgrades_without_supplied_headers_test() {
-  use headers, _socket <- with_upgrade(
-    fn(request) {
-      mist.websocket(
-        request:,
-        handler: fn(state, _message, _connection) { mist.continue(state) },
-        on_init: fn(_connection) { #(Nil, None) },
-        on_close: fn(_state) { Nil },
-      )
-    },
-    [],
-  )
-
-  assert list.key_find(headers, "sec-websocket-accept") == Ok(accept_key)
-}
-
 pub fn it_should_combine_continuation_frames_test() {
   let one = <<"Hello":utf8>>
   let two = <<", ":utf8>>
