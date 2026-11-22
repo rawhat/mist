@@ -1,6 +1,6 @@
 -module(mist_ffi).
 
--export([binary_match/2, decode_packet/3, decode_atom/1,file_open/1, string_to_int/2, hpack_decode/2,
+-export([decode_packet/3, decode_atom/1,file_open/1, hpack_decode/2,
          hpack_encode/2, hpack_new_max_table_size/2, ets_lookup_element/3, get_path_and_query/1,
          file_close/1, now/0]).
 
@@ -24,22 +24,6 @@ decode_packet(Type, Packet, Opts) ->
       {ok, {more_data, {some, Length}}};
     {error, Reason} ->
       {error, Reason}
-  end.
-
-binary_match(Source, Pattern) ->
-  case binary:match(Source, Pattern) of
-    {Before, After} ->
-      {ok, {Before, After}};
-    nomatch ->
-      {error, nil}
-  end.
-
-string_to_int(String, Base) ->
-  try
-    {ok, erlang:list_to_integer(String, Base)}
-  catch
-    error:badarg ->
-      {error, nil}
   end.
 
 file_open(Path) ->
