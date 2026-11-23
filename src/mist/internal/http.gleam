@@ -147,9 +147,6 @@ pub fn read_data(
 
 const crnl = <<13:int, 10:int>>
 
-// Erlang's 64-bit binary limit fits in 16 hexadecimal digits.
-const max_chunk_size_bytes = 16
-
 /// Reads one chunk size line and returns the bytes after it.
 pub fn read_chunk_size(
   socket: Socket,
@@ -158,34 +155,19 @@ pub fn read_chunk_size(
 ) -> Result(#(Int, BitArray), DecodeError) {
   case binary_split(data, crnl) {
     [chunk_size, rest] -> {
-      case bit_array.byte_size(chunk_size) <= max_chunk_size_bytes {
-        True -> {
-          use size <- result.try(
-            chunk_size
-            |> bit_array.to_string
-            |> result.try(int.base_parse(_, 16))
-            |> result.replace_error(InvalidBody),
-          )
-          case size {
-            size if size >= 0 -> Ok(#(size, rest))
-            _size -> Error(InvalidBody)
+      case bit_array.to_string(chunk_size) {
+        Ok(chunk_size) ->
+          case int.base_parse(chunk_size, 16) {
+            Ok(size) if size >= 0 -> Ok(#(size, rest))
+            Ok(_size) | Error(Nil) -> Error(InvalidBody)
           }
-        }
-        False -> Error(InvalidBody)
+        Error(Nil) -> Error(InvalidBody)
       }
     }
     _ -> {
-      case data, bit_array.byte_size(data) <= max_chunk_size_bytes {
-        _, True | <<_:bytes-size(max_chunk_size_bytes), 13>>, False -> {
-          use data <- result.try(read_data(
-            socket,
-            transport,
-            Buffer(remaining: 1, data:),
-            InvalidBody,
-          ))
-          read_chunk_size(socket, transport, data)
-        }
-        _, False -> Error(InvalidBody)
+      case read_data(socket, transport, buffer.new(data), InvalidBody) {
+        Ok(data) -> read_chunk_size(socket, transport, data)
+        Error(reason) -> Error(reason)
       }
     }
   }

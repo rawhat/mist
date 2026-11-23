@@ -259,12 +259,12 @@ fn do_stream(
       0, 0 -> Ok(Done)
 
       0, _buffer_size -> {
-        let #(data, rest) = buffer.slice(buffer, size)
+        let #(data, rest) = buffer.slice(buffer.data, size)
         Ok(Chunk(data, do_stream(req, buffer.new(rest))))
       }
 
       _, buffer_size if buffer_size >= size -> {
-        let #(data, rest) = buffer.slice(buffer, size)
+        let #(data, rest) = buffer.slice(buffer.data, size)
         let new_buffer = Buffer(..buffer, data: rest)
         Ok(Chunk(data, do_stream(req, new_buffer)))
       }
@@ -279,7 +279,7 @@ fn do_stream(
               data: bit_array.append(buffer.data, data),
               remaining: int.max(0, buffer.remaining - fetched_data),
             )
-          let #(new_data, rest) = buffer.slice(new_buffer, size)
+          let #(new_data, rest) = buffer.slice(new_buffer.data, size)
           Chunk(new_data, do_stream(req, Buffer(..new_buffer, data: rest)))
         })
       }
@@ -295,21 +295,22 @@ type ChunkState {
 }
 
 fn do_stream_chunked(
-  req: Request(Connection),
+  socket: glisten.Socket,
+  transport: transport.Transport,
   state: ChunkState,
 ) -> fn(Int) -> Result(Chunk, ReadError) {
   case state {
     ChunkComplete -> fn(_size) { Ok(Done) }
     ChunkSize(..) | ChunkPayload(..) | ChunkDelimiter(..) -> {
       fn(size) {
-        use #(data, state) <- result.try(fetch_chunks_until(
-          req.body.socket,
-          req.body.transport,
-          state,
-          size,
-          bytes_tree.new(),
-        ))
-        Ok(Chunk(data:, consume: do_stream_chunked(req, state)))
+        case fetch_chunks_until(socket, transport, state, size, <<>>) {
+          Ok(#(data, state)) ->
+            Ok(Chunk(
+              data:,
+              consume: do_stream_chunked(socket, transport, state),
+            ))
+          Error(reason) -> Error(reason)
+        }
       }
     }
   }
@@ -320,59 +321,63 @@ fn fetch_chunks_until(
   transport: transport.Transport,
   state: ChunkState,
   byte_size: Int,
-  body: BytesTree,
+  body: BitArray,
 ) -> Result(#(BitArray, ChunkState), ReadError) {
   case state, byte_size {
     _, size if size <= 0 -> {
-      Ok(#(bytes_tree.to_bit_array(body), state))
+      Ok(#(body, state))
     }
     ChunkComplete, _ -> {
-      Ok(#(bytes_tree.to_bit_array(body), ChunkComplete))
+      Ok(#(body, ChunkComplete))
     }
     ChunkSize(buffer: data), _ -> {
-      use #(size, data) <- result.try(
-        http.read_chunk_size(socket, transport, data)
-        |> result.replace_error(MalformedBody),
-      )
-      let state = case size {
-        0 -> ChunkComplete
-        remaining -> ChunkPayload(remaining:, buffer: data)
+      case http.read_chunk_size(socket, transport, data) {
+        Ok(#(0, _data)) -> Ok(#(body, ChunkComplete))
+        Ok(#(remaining, data)) ->
+          fetch_chunks_until(
+            socket,
+            transport,
+            ChunkPayload(remaining:, buffer: data),
+            byte_size,
+            body,
+          )
+        Error(_reason) -> Error(MalformedBody)
       }
-      fetch_chunks_until(socket, transport, state, byte_size, body)
     }
     ChunkPayload(remaining:, buffer: <<>>), _ -> {
-      use data <- result.try(
+      case
         http.read_data(
           socket,
           transport,
           Buffer(remaining: int.min(remaining, byte_size), data: <<>>),
           http.InvalidBody,
         )
-        |> result.replace_error(MalformedBody),
-      )
-      fetch_chunks_until(
-        socket,
-        transport,
-        ChunkPayload(remaining:, buffer: data),
-        byte_size,
-        body,
-      )
+      {
+        Ok(data) ->
+          fetch_chunks_until(
+            socket,
+            transport,
+            ChunkPayload(remaining:, buffer: data),
+            byte_size,
+            body,
+          )
+        Error(_reason) -> Error(MalformedBody)
+      }
     }
     ChunkPayload(remaining:, buffer: data), _ -> {
       let size =
         int.min(byte_size, int.min(remaining, bit_array.byte_size(data)))
-      let #(data, rest) = data |> buffer.new |> buffer.slice(size)
+      let #(data, rest) = buffer.slice(data, size)
       let state = case remaining - size {
         0 -> ChunkDelimiter(buffer: rest)
         remaining -> ChunkPayload(remaining:, buffer: rest)
       }
-      fetch_chunks_until(
-        socket,
-        transport,
-        state,
-        byte_size - size,
-        bytes_tree.append(body, data),
-      )
+      let body = <<body:bits, data:bits>>
+      case byte_size - size {
+        0 -> Ok(#(body, state))
+        byte_size ->
+          fetch_chunks_until(socket, transport, state, byte_size, body)
+      }
     }
     ChunkDelimiter(buffer: <<13, 10, rest:bits>>), _ -> {
       fetch_chunks_until(
@@ -386,22 +391,24 @@ fn fetch_chunks_until(
     ChunkDelimiter(buffer: <<>> as data), _
     | ChunkDelimiter(buffer: <<13>> as data), _
     -> {
-      use data <- result.try(
+      case
         http.read_data(
           socket,
           transport,
           Buffer(remaining: 2 - bit_array.byte_size(data), data:),
           http.InvalidBody,
         )
-        |> result.replace_error(MalformedBody),
-      )
-      fetch_chunks_until(
-        socket,
-        transport,
-        ChunkDelimiter(buffer: data),
-        byte_size,
-        body,
-      )
+      {
+        Ok(data) ->
+          fetch_chunks_until(
+            socket,
+            transport,
+            ChunkDelimiter(buffer: data),
+            byte_size,
+            body,
+          )
+        Error(_reason) -> Error(MalformedBody)
+      }
     }
     ChunkDelimiter(..), _ -> Error(MalformedBody)
   }
@@ -431,7 +438,11 @@ pub fn stream(
 
   case is_chunked {
     True -> {
-      do_stream_chunked(req, ChunkSize(buffer: data))
+      do_stream_chunked(
+        req.body.socket,
+        req.body.transport,
+        ChunkSize(buffer: data),
+      )
     }
     False -> {
       let content_length =

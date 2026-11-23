@@ -18,20 +18,26 @@ const request_headers =
 
 pub fn it_reads_a_byte_before_the_rest_of_its_chunk_arrives_test() {
   let fragments = [
-    #("4\r\n", "a"),
-    #("1\r\n", "a"),
-    #("0000000000000001\r", "\na"),
+    #("4\r\n", "a", "bcd\r\n0\r\n\r\n", "abcd"),
+    #("1\r\n", "a", "\r\n0\r\n\r\n", "a"),
+    #("0000000000000001\r", "\na", "\r\n0\r\n\r\n", "a"),
   ]
   list.each(fragments, fn(fragment) {
-    let #(chunk_size_line, payload) = fragment
+    let #(chunk_size_line, payload, remainder, expected) = fragment
     let reading = process.new_subject()
+    let first_byte = process.new_subject()
     let handler = fn(req) {
       let assert Ok(consume) = mist.stream(req)
       process.send(reading, Nil)
-      let assert Ok(mist.Chunk(data, _consume)) = consume(1)
+      let assert Ok(mist.Chunk(data, consume)) = consume(1)
+      process.send(first_byte, data)
+      let assert Ok(mist.Chunk(rest, consume)) = consume(10)
+      let assert Ok(mist.Done) = consume(1)
       response.new(200)
       |> response.set_header("connection", "close")
-      |> response.set_body(mist.Bytes(bytes_tree.from_bit_array(data)))
+      |> response.set_body(
+        mist.Bytes(bytes_tree.from_bit_array(<<data:bits, rest:bits>>)),
+      )
     }
 
     use socket <- with_server(handler)
@@ -42,36 +48,51 @@ pub fn it_reads_a_byte_before_the_rest_of_its_chunk_arrives_test() {
       )
     let assert Ok(Nil) = process.receive(reading, within: 1000)
     let assert Ok(Nil) = tcp.send(socket, bytes_tree.from_string(payload))
+    let assert Ok(<<"a":utf8>>) = process.receive(first_byte, within: 1000)
+    let assert Ok(Nil) = tcp.send(socket, bytes_tree.from_string(remainder))
     let assert Ok(reply) = receive_response(socket, <<>>)
     let assert Ok(reply) = bit_array.to_string(reply)
     assert string.starts_with(reply, "HTTP/1.1 200 ")
     let assert Ok(#(_headers, body)) = string.split_once(reply, "\r\n\r\n")
-    assert body == "a"
+    assert body == expected
   })
 }
 
-pub fn it_refuses_an_overlong_size_before_the_client_closes_test() {
-  let over_limit = string.repeat("0", 17)
-  list.each([over_limit, over_limit <> "\r\n"], fn(chunk_size_line) {
-    let handler = fn(req) {
+pub fn it_accepts_zero_padded_sizes_in_whole_and_streamed_bodies_test() {
+  let readers = [
+    fn(req) {
       let assert Ok(consume) = mist.stream(req)
-      let assert Error(mist.MalformedBody) = consume(1)
-      response.new(400)
+      let assert Ok(mist.Chunk(data, consume)) = consume(10)
+      let assert Ok(mist.Done) = consume(1)
+      data
+    },
+    fn(req) {
+      let assert Ok(req) = mist.read_body(req, max_body_limit: 1)
+      req.body
+    },
+  ]
+  list.each(readers, fn(read_body) {
+    let handler = fn(req) {
+      response.new(200)
       |> response.set_header("connection", "close")
-      |> response.set_body(mist.Bytes(bytes_tree.new()))
+      |> response.set_body(
+        mist.Bytes(bytes_tree.from_bit_array(read_body(req))),
+      )
     }
 
     use socket <- with_server(handler)
     let assert Ok(Nil) =
       tcp.send(
         socket,
-        bytes_tree.from_string(request_headers <> chunk_size_line),
+        bytes_tree.from_string(
+          request_headers <> "00000000000000001\r\na\r\n0\r\n\r\n",
+        ),
       )
     let assert Ok(reply) = receive_response(socket, <<>>)
     let assert Ok(reply) = bit_array.to_string(reply)
-    assert string.starts_with(reply, "HTTP/1.1 400 ")
+    assert string.starts_with(reply, "HTTP/1.1 200 ")
     let assert Ok(#(_headers, body)) = string.split_once(reply, "\r\n\r\n")
-    assert body == ""
+    assert body == "a"
   })
 }
 
