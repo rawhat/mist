@@ -13,8 +13,7 @@ import glisten/socket/options
 import glisten/tcp
 import mist
 
-const request_headers =
-  "POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+const request_headers = "POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
 
 pub fn it_reads_a_byte_before_the_rest_of_its_chunk_arrives_test() {
   let fragments = [
