@@ -1,5 +1,4 @@
 import gleam/bytes_tree.{type BytesTree}
-import gleam/http.{type Header} as _ghttp
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/list
@@ -60,7 +59,7 @@ pub fn update_settings(
 fn send_headers(
   context: HpackContext,
   conn: Connection,
-  headers: List(Header),
+  headers: List(#(String, String)),
   end_stream: Bool,
   stream_identifier: StreamIdentifier(Frame),
 ) -> Result(HpackContext, String) {
@@ -166,10 +165,10 @@ pub type HpackError {
 pub fn hpack_decode(
   context: HpackContext,
   bin: BitArray,
-) -> Result(#(List(Header), HpackContext), HpackError)
+) -> Result(#(List(#(String, String)), HpackContext), HpackError)
 
 @external(erlang, "mist_ffi", "hpack_encode")
 pub fn hpack_encode(
   context: HpackContext,
-  headers: List(Header),
+  headers: List(#(String, String)),
 ) -> Result(#(BitArray, HpackContext), error)
