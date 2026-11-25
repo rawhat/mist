@@ -4,7 +4,6 @@ import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/erlang/atom.{type Atom}
-import gleam/erlang/charlist.{type Charlist}
 import gleam/erlang/process.{type Selector}
 import gleam/http
 import gleam/http/request.{type Request}
@@ -148,97 +147,71 @@ pub fn read_data(
 
 const crnl = <<13:int, 10:int>>
 
-pub type Chunk {
-  Chunk(data: BitArray, buffer: Buffer)
-  Complete
-}
-
-pub fn parse_chunk(string: BitArray) -> Chunk {
-  case binary_split(string, <<"\r\n":utf8>>) {
-    [<<"0":utf8>>, _] -> Complete
+/// Reads one chunk size line and returns the bytes after it.
+pub fn read_chunk_size(
+  socket: Socket,
+  transport: Transport,
+  data: BitArray,
+) -> Result(#(Int, BitArray), DecodeError) {
+  case binary_split(data, crnl) {
     [chunk_size, rest] -> {
-      let assert Ok(chunk_size) = bit_array.to_string(chunk_size)
-      case int.base_parse(chunk_size, 16) {
-        Ok(size) -> {
-          let size = size * 8
-          case rest {
-            <<next_chunk:bits-size(size), 13:int, 10:int, rest:bits>> -> {
-              Chunk(data: next_chunk, buffer: buffer.new(rest))
-            }
-            _ -> {
-              Chunk(data: <<>>, buffer: buffer.new(string))
-            }
+      case bit_array.to_string(chunk_size) {
+        Ok(chunk_size) ->
+          case int.base_parse(chunk_size, 16) {
+            Ok(size) if size >= 0 -> Ok(#(size, rest))
+            Ok(_size) | Error(Nil) -> Error(InvalidBody)
           }
-        }
-        Error(_) -> {
-          Chunk(data: <<>>, buffer: buffer.new(string))
-        }
+        Error(Nil) -> Error(InvalidBody)
       }
     }
-
     _ -> {
-      Chunk(data: <<>>, buffer: buffer.new(string))
+      case read_data(socket, transport, buffer.new(data), InvalidBody) {
+        Ok(data) -> read_chunk_size(socket, transport, data)
+        Error(reason) -> Error(reason)
+      }
     }
   }
 }
 
-// TODO:  use `parse_chunk` for this
 fn read_chunk(
   socket: Socket,
   transport: Transport,
-  buffer: Buffer,
+  data: BitArray,
   body: BytesTree,
 ) -> Result(BytesTree, DecodeError) {
-  case buffer.data, binary_match(buffer.data, crnl) {
-    _, Ok(#(offset, _)) -> {
-      let assert <<
-        chunk:bytes-size(offset),
-        _return:int,
-        _newline:int,
-        rest:bytes,
-      >> = buffer.data
-      use chunk_size <- result.try(
-        chunk
-        |> bit_array.to_string
-        |> result.map(charlist.from_string)
-        |> result.replace_error(InvalidBody),
-      )
-      use size <- result.try(
-        string_to_int(chunk_size, 16)
-        |> result.replace_error(InvalidBody),
-      )
-      case size {
-        0 -> Ok(body)
-        size ->
-          case rest {
-            <<next_chunk:bytes-size(size), 13:int, 10:int, rest:bytes>> ->
-              read_chunk(
-                socket,
-                transport,
-                Buffer(0, rest),
-                bytes_tree.append(body, next_chunk),
-              )
-            _ -> {
-              use next <- result.try(read_data(
-                socket,
-                transport,
-                Buffer(0, buffer.data),
-                InvalidBody,
-              ))
-              read_chunk(socket, transport, Buffer(0, next), body)
-            }
-          }
-      }
-    }
-    <<>> as data, _ | data, Error(Nil) -> {
-      use next <- result.try(read_data(
+  use #(size, data) <- result.try(read_chunk_size(socket, transport, data))
+  case size {
+    0 -> Ok(body)
+    size -> {
+      use #(chunk, rest) <- result.try(read_chunk_data(
         socket,
         transport,
-        Buffer(0, data),
+        size,
+        data,
+      ))
+      read_chunk(socket, transport, rest, bytes_tree.append(body, chunk))
+    }
+  }
+}
+
+fn read_chunk_data(
+  socket: Socket,
+  transport: Transport,
+  size: Int,
+  data: BitArray,
+) -> Result(#(BitArray, BitArray), DecodeError) {
+  case data, bit_array.byte_size(data) {
+    <<chunk:bytes-size(size), 13, 10, rest:bytes>>, _ -> Ok(#(chunk, rest))
+    _, available if available < size + 2 -> {
+      use data <- result.try(read_data(
+        socket,
+        transport,
+        Buffer(remaining: size + 2 - available, data:),
         InvalidBody,
       ))
-      read_chunk(socket, transport, Buffer(0, next), body)
+      read_chunk_data(socket, transport, size, data)
     }
+    _, _ -> Error(InvalidBody)
   }
 }
 
@@ -406,7 +379,7 @@ pub fn read_body(
       use chunk <- result.try(read_chunk(
         req.body.socket,
         transport,
-        Buffer(remaining: 0, data: rest),
+        rest,
         bytes_tree.new(),
       ))
       Ok(request.set_body(req, bytes_tree.to_bit_array(chunk)))
@@ -661,15 +634,6 @@ pub fn crypto_hash(hash hash: ShaHash, data data: String) -> String
 
 @external(erlang, "base64", "encode")
 pub fn base64_encode(data data: String) -> String
-
-@external(erlang, "mist_ffi", "binary_match")
-fn binary_match(
-  source source: BitArray,
-  pattern pattern: BitArray,
-) -> Result(#(Int, Int), Nil)
-
-@external(erlang, "mist_ffi", "string_to_int")
-fn string_to_int(string string: Charlist, base base: Int) -> Result(Int, Nil)
 
 @external(erlang, "binary", "split")
 fn binary_split(source: BitArray, pattern: BitArray) -> List(BitArray)

@@ -19,11 +19,11 @@ pub fn append(buffer: Buffer, data: BitArray) -> Buffer {
   Buffer(data: <<buffer.data:bits, data:bits>>, remaining: remaining)
 }
 
-pub fn slice(buffer: Buffer, bits: Int) -> #(BitArray, BitArray) {
-  let bytes = bits * 8
-  case buffer.data {
-    <<value:bits-size(bytes), rest:bits>> -> #(value, rest)
-    _ -> #(buffer.data, <<>>)
+/// Splits data at the byte count, returning all data when it is shorter.
+pub fn slice(data: BitArray, byte_size: Int) -> #(BitArray, BitArray) {
+  case data {
+    <<value:bytes-size(byte_size), rest:bits>> -> #(value, rest)
+    _ -> #(data, <<>>)
   }
 }
 
